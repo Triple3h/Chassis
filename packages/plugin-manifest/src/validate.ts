@@ -1,0 +1,246 @@
+import { CAPABILITIES, isKnownCapability } from './capabilities'
+import type { ManifestErrorCode } from './errors'
+import {
+  API_VERSIONS_SUPPORTED,
+  COMMAND_NAME_RE,
+  PLUGIN_ID_RE,
+  scriptEntryCandidates,
+  type CommandDecl,
+  type CommandMode,
+  type PluginManifest,
+} from './types'
+
+export type ManifestValidation =
+  | { ok: true; manifest: PluginManifest; warnings: string[] }
+  | { ok: false; code: ManifestErrorCode; message: string }
+
+export interface ValidateOptions {
+  /**
+   * 兼容模式（requirements §8.10）：`apiVersion` 缺省视为 "1"，`capabilities` 缺省 = 全给。
+   * 只允许对 `sof-*` 前缀（如快插件）或开发模式开启。
+   */
+  allowLegacy?: boolean
+}
+
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+const MAX_COMMANDS = 32
+
+function fail(code: ManifestErrorCode, message: string): ManifestValidation {
+  return { ok: false, code, message }
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function validateCommand(
+  raw: unknown,
+  index: number,
+): { ok: true; cmd: CommandDecl } | { ok: false; message: string; code?: ManifestErrorCode } {
+  if (!isPlainObject(raw)) return { ok: false, message: `commands[${index}] 必须是对象` }
+
+  const name = raw.name
+  if (typeof name !== 'string' || !COMMAND_NAME_RE.test(name)) {
+    return { ok: false, message: `commands[${index}].name 不符合 /^[a-z0-9][a-z0-9-]{0,38}$/（收到 ${JSON.stringify(name)}）` }
+  }
+  const title = raw.title
+  if (typeof title !== 'string' || title.length < 1 || title.length > 40) {
+    return { ok: false, message: `commands[${index}].title 必须是 1–40 字符` }
+  }
+  const mode = raw.mode
+  if (mode !== 'view' && mode !== 'no-view' && mode !== 'script') {
+    return { ok: false, message: `commands[${index}].mode 必须是 view | no-view | script` }
+  }
+
+  const cmd: CommandDecl = { name, title, mode: mode as CommandMode }
+
+  if (raw.subtitle !== undefined) {
+    if (typeof raw.subtitle !== 'string' || raw.subtitle.length > 60) {
+      return { ok: false, message: `commands[${index}].subtitle 必须是 ≤60 字符的字符串` }
+    }
+    cmd.subtitle = raw.subtitle
+  }
+  if (raw.icon !== undefined) {
+    if (typeof raw.icon !== 'string') return { ok: false, message: `commands[${index}].icon 必须是字符串` }
+    cmd.icon = raw.icon
+  }
+  for (const boolField of ['searchable', 'contributes', 'hidden'] as const) {
+    if (raw[boolField] !== undefined) {
+      if (typeof raw[boolField] !== 'boolean') {
+        return { ok: false, message: `commands[${index}].${boolField} 必须是布尔` }
+      }
+      cmd[boolField] = raw[boolField] as boolean
+    }
+  }
+  if (raw.placeholder !== undefined) {
+    if (typeof raw.placeholder !== 'string') return { ok: false, message: `commands[${index}].placeholder 必须是字符串` }
+    cmd.placeholder = raw.placeholder
+  }
+  if (raw.keywords !== undefined) {
+    if (!Array.isArray(raw.keywords) || raw.keywords.length > 10 || raw.keywords.some((k) => typeof k !== 'string')) {
+      return { ok: false, message: `commands[${index}].keywords 必须是 ≤10 个字符串` }
+    }
+    cmd.keywords = raw.keywords as string[]
+  }
+  if (raw.capabilities !== undefined) {
+    if (!Array.isArray(raw.capabilities) || raw.capabilities.some((c) => typeof c !== 'string')) {
+      return { ok: false, message: `commands[${index}].capabilities 必须是字符串数组` }
+    }
+    for (const cap of raw.capabilities as string[]) {
+      if (!isKnownCapability(cap)) {
+        return {
+          ok: false,
+          code: 'CAPABILITY_UNKNOWN',
+          message: `commands[${index}] 使用了未知能力：${cap}（已知：${CAPABILITIES.join(', ')}）`,
+        }
+      }
+    }
+    cmd.capabilities = raw.capabilities as string[]
+  }
+  return { ok: true, cmd }
+}
+
+/**
+ * 清单校验（plugin-spec §3.3）。
+ * 纯函数：不触碰文件系统；产物存在性校验用 `checkEntries`。
+ */
+export function validateManifest(raw: unknown, opts: ValidateOptions = {}): ManifestValidation {
+  if (!isPlainObject(raw)) return fail('MANIFEST_INVALID', 'package.json 顶层必须是对象')
+
+  const warnings: string[] = []
+
+  const name = raw.name
+  if (typeof name !== 'string' || !PLUGIN_ID_RE.test(name)) {
+    return fail(
+      'MANIFEST_INVALID',
+      `name 不符合 /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/（收到 ${JSON.stringify(name)}）`,
+    )
+  }
+  const title = raw.title
+  if (typeof title !== 'string' || title.length < 1 || title.length > 40) {
+    return fail('MANIFEST_INVALID', 'title 必须是 1–40 字符')
+  }
+  const version = raw.version
+  if (typeof version !== 'string' || !SEMVER_RE.test(version)) {
+    return fail('MANIFEST_INVALID', `version 必须是 semver（收到 ${JSON.stringify(version)}）`)
+  }
+
+  if (raw.type !== undefined && raw.type !== 'module') {
+    return fail('MANIFEST_INVALID', 'type 必须是 "module"')
+  }
+
+  // apiVersion：缺省视为 "1"（兼容模式）
+  let apiVersion: string
+  if (raw.apiVersion === undefined) {
+    if (!opts.allowLegacy) return fail('MANIFEST_INVALID', 'apiVersion 必填（当前只接受 "1"）')
+    apiVersion = '1'
+    warnings.push('apiVersion 缺省，按 "1" 处理（兼容模式）')
+  } else if (typeof raw.apiVersion !== 'string') {
+    return fail('MANIFEST_INVALID', 'apiVersion 必须是字符串')
+  } else {
+    apiVersion = raw.apiVersion
+  }
+  if (!API_VERSIONS_SUPPORTED.includes(apiVersion)) {
+    return fail(
+      'API_VERSION_UNSUPPORTED',
+      `插件声明需要 apiVersion ${apiVersion}，当前底座支持 ${API_VERSIONS_SUPPORTED.join(' / ')}`,
+    )
+  }
+
+  // capabilities：缺省 = 全给（仅兼容模式）
+  let capabilities: string[]
+  if (raw.capabilities === undefined) {
+    if (!opts.allowLegacy) return fail('MANIFEST_INVALID', 'capabilities 必填（可以是空数组）')
+    capabilities = [...CAPABILITIES]
+    warnings.push('capabilities 缺省，按「全给」处理（兼容模式，P5 边界被放宽）')
+  } else {
+    if (!Array.isArray(raw.capabilities) || raw.capabilities.some((c) => typeof c !== 'string')) {
+      return fail('MANIFEST_INVALID', 'capabilities 必须是字符串数组')
+    }
+    capabilities = raw.capabilities as string[]
+    for (const cap of capabilities) {
+      if (!isKnownCapability(cap)) {
+        return fail('CAPABILITY_UNKNOWN', `使用了未知能力：${cap}（已知：${CAPABILITIES.join(', ')}）`)
+      }
+    }
+  }
+
+  const commandsRaw = raw.commands
+  if (!Array.isArray(commandsRaw) || commandsRaw.length === 0) {
+    return fail('MANIFEST_INVALID', 'commands 必须是非空数组')
+  }
+  if (commandsRaw.length > MAX_COMMANDS) {
+    return fail('MANIFEST_INVALID', `commands 不得超过 ${MAX_COMMANDS} 条`)
+  }
+
+  const commands: CommandDecl[] = []
+  const seen = new Set<string>()
+  for (const [index, item] of commandsRaw.entries()) {
+    const result = validateCommand(item, index)
+    if (!result.ok) return fail(result.code ?? 'MANIFEST_INVALID', result.message)
+    if (seen.has(result.cmd.name)) {
+      return fail('MANIFEST_INVALID', `命令名重复：${result.cmd.name}`)
+    }
+    seen.add(result.cmd.name)
+    commands.push(result.cmd)
+  }
+
+  const manifest: PluginManifest = { name, title, version, apiVersion, capabilities, commands, type: 'module' }
+
+  if (raw.description !== undefined) {
+    if (typeof raw.description !== 'string' || raw.description.length > 200) {
+      return fail('MANIFEST_INVALID', 'description 必须是 ≤200 字符的字符串')
+    }
+    manifest.description = raw.description
+  }
+  if (raw.author !== undefined) {
+    if (typeof raw.author !== 'string') return fail('MANIFEST_INVALID', 'author 必须是字符串')
+    manifest.author = raw.author
+  }
+  if (raw.icon !== undefined) {
+    if (typeof raw.icon !== 'string') return fail('MANIFEST_INVALID', 'icon 必须是字符串')
+    manifest.icon = raw.icon
+  }
+  if (raw.keywords !== undefined) {
+    if (!Array.isArray(raw.keywords) || raw.keywords.length > 10 || raw.keywords.some((k) => typeof k !== 'string')) {
+      return fail('MANIFEST_INVALID', 'keywords 必须是 ≤10 个字符串')
+    }
+    manifest.keywords = raw.keywords as string[]
+  }
+  if (raw.categories !== undefined) {
+    if (!Array.isArray(raw.categories) || raw.categories.some((c) => typeof c !== 'string')) {
+      return fail('MANIFEST_INVALID', 'categories 必须是字符串数组')
+    }
+    manifest.categories = raw.categories as string[]
+  }
+
+  return { ok: true, manifest, warnings }
+}
+
+export interface EntryCheckResult {
+  /** 命令名 → 缺失原因 */
+  missing: Record<string, string>
+}
+
+/**
+ * 产物存在性校验（plugin-spec N1 / §3.3 `ENTRY_MISSING`）。
+ * `files` 是插件目录下的相对路径列表（由调用方读盘后传入，保持本函数可单测）。
+ */
+export function checkEntries(manifest: PluginManifest, files: Iterable<string>): EntryCheckResult {
+  const set = new Set<string>()
+  for (const f of files) set.add(f.replace(/\\/g, '/').replace(/^\.\//, ''))
+
+  const missing: Record<string, string> = {}
+  const hasView = manifest.commands.some((c) => c.mode === 'view')
+  if (hasView && !set.has('index.html')) {
+    for (const decl of manifest.commands) {
+      if (decl.mode === 'view') missing[decl.name] = '缺少 index.html'
+    }
+  }
+  for (const decl of manifest.commands) {
+    if (decl.mode === 'view') continue
+    const found = scriptEntryCandidates(decl.name).some((c) => set.has(c))
+    if (!found) missing[decl.name] = `缺少 ${decl.name}.mjs`
+  }
+  return { missing }
+}

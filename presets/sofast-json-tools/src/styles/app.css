@@ -1,0 +1,49 @@
+@import "tailwindcss";
+@import "../../../shared/styles/theme.css";
+
+/* 显式声明扫描范围：插件自身 src 与 shared 组件（Tailwind v4 不会自动跨界扫描） */
+@source "../";
+@source "../../../shared";
+
+/* JSON 语法高亮配色（跟随主题变量） */
+.sof-hl-key {
+  color: var(--sof-key);
+}
+.sof-hl-str {
+  color: var(--sof-string);
+}
+.sof-hl-num {
+  color: var(--sof-number);
+}
+.sof-hl-kw {
+  color: var(--sof-code);
+}
+.sof-hl-punc {
+  color: var(--sof-muted);
+}
+
+.sof-code-row {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 20px;
+  height: 20px;
+  white-space: pre;
+  position: absolute;
+  left: 0;
+  padding-left: 12px;
+  padding-right: 24px;
+}
+
+.sof-gutter {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 20px;
+  height: 20px;
+  position: absolute;
+  left: 0;
+  width: 46px;
+  text-align: right;
+  padding-right: 10px;
+  color: var(--sof-faint);
+  user-select: none;
+}

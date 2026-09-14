@@ -1,0 +1,43 @@
+{
+  "name": "app-launcher",
+  "title": "应用启动器",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "1",
+  "description": "扫描本机应用并直接启动（macOS）",
+  "author": "launcher",
+  "icon": "app-window",
+  "keywords": ["app", "应用", "启动", "launch"],
+  "capabilities": ["storage", "exec.spawn", "shell.open"],
+  "commands": [
+    {
+      "name": "search",
+      "title": "应用",
+      "mode": "script",
+      "contributes": true,
+      "keywords": ["app", "app-launcher", "yingyong", "应用", "启动"],
+      "placeholder": "输入应用名"
+    },
+    {
+      "name": "refresh",
+      "title": "重建应用索引",
+      "mode": "no-view",
+      "searchable": true,
+      "subtitle": "重新扫描 /Applications 并刷新图标缓存",
+      "keywords": ["刷新", "扫描", "refresh", "rebuild"],
+      "icon": "refresh"
+    }
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-plugin.mjs app-launcher",
+    "build:scripts": "node ../../scripts/build-plugin.mjs app-launcher",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@launcher/api-node": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

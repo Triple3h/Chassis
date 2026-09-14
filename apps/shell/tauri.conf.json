@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Launcher",
+  "version": "0.1.0",
+  "identifier": "app.launcher.desktop",
+  "build": {
+    "frontendDist": "ui-stub",
+    "devUrl": "http://127.0.0.1:3333"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "macOSPrivateApi": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src http://127.0.0.1:*; connect-src ipc: http://ipc.localhost http://127.0.0.1:*",
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": ["icons/icon.png", "icons/icon.icns"],
+    "resources": {
+      "resources/kernel": "kernel/",
+      "resources/builtin-plugins": "builtin-plugins/",
+      "resources/ui": "ui/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}

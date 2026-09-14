@@ -1,0 +1,34 @@
+{
+  "name": "web-open",
+  "title": "网址直达",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "1",
+  "description": "输入网址直接打开，或把关键词交给搜索引擎",
+  "author": "launcher",
+  "icon": "globe",
+  "keywords": ["url", "web", "网址", "搜索"],
+  "capabilities": ["storage", "shell.open"],
+  "commands": [
+    {
+      "name": "web",
+      "title": "网址 / 搜索",
+      "mode": "script",
+      "contributes": true,
+      "keywords": ["url", "www", "搜索", "search", "baidu", "google"],
+      "placeholder": "输入网址或关键词"
+    }
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-plugin.mjs web-open",
+    "build:scripts": "node ../../scripts/build-plugin.mjs web-open",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@launcher/api-node": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

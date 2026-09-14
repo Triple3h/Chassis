@@ -1,0 +1,41 @@
+{
+  "name": "internal-settings",
+  "title": "设置与插件管理",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "1",
+  "description": "启动台设置、插件管理、数据与审计（管理面，不可卸载）",
+  "author": "launcher",
+  "icon": "settings",
+  "keywords": ["settings", "设置", "插件", "plugins", "偏好"],
+  "capabilities": ["hostUi"],
+  "commands": [
+    {
+      "name": "settings",
+      "title": "设置",
+      "mode": "view",
+      "searchable": true,
+      "subtitle": "热键 / 外观 / 数据 / 关于",
+      "keywords": ["settings", "设置", "偏好", "preferences"],
+      "icon": "settings"
+    },
+    {
+      "name": "manage",
+      "title": "插件管理",
+      "mode": "view",
+      "searchable": true,
+      "subtitle": "启用 / 禁用 / 卸载 / 安装",
+      "keywords": ["plugins", "插件", "管理", "install"],
+      "icon": "puzzle"
+    }
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-plugin.mjs internal-settings",
+    "build:view": "node ../../scripts/build-plugin.mjs internal-settings",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@launcher/api": "workspace:*"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "launcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "node scripts/run-tsc.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "test:unit": "node scripts/run-tests.mjs unit",
+    "test:contract": "node scripts/run-tests.mjs contract",
+    "build": "node scripts/build-all.mjs",
+    "build:kernel": "node scripts/build-all.mjs kernel",
+    "build:ui": "node scripts/build-all.mjs ui",
+    "build:plugins": "node scripts/build-all.mjs plugins",
+    "build:presets": "node scripts/build-all.mjs presets",
+    "presets:check": "node presets/scripts/spec-check.mjs",
+    "presets:pack": "node presets/scripts/build-all.mjs --pack",
+    "dev": "node scripts/dev.mjs",
+    "dev:kernel": "node scripts/dev.mjs kernel",
+    "dev:ui": "node scripts/dev.mjs ui",
+    "smoke": "node scripts/run-tests.mjs smoke",
+    "smoke:real": "node scripts/smoke-real.mjs",
+    "smoke:first-batch": "node scripts/smoke-first-batch.mjs",
+    "icon": "node scripts/make-icon.mjs",
+    "app:local": "node scripts/pack-local-app.mjs",
+    "shell:dev": "cargo run --manifest-path apps/shell/Cargo.toml"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "壳层只暴露自身原语；插件能力一律经内核桥接，WebView 不给任何插件权限。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-is-visible",
+    "core:window:allow-start-dragging",
+    "core:event:default"
+  ]
+}

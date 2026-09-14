@@ -1,0 +1,76 @@
+//! 原语清单（requirements §6.1，全部，不再多）。
+//! 壳不做的事：不做搜索、不读插件目录、不认识「命令」、不做排序、不存历史。
+
+pub mod clipboard;
+pub mod hotkey;
+pub mod notify;
+pub mod opener;
+pub mod tray;
+pub mod window;
+
+use serde_json::{json, Value};
+use tauri::AppHandle;
+
+/// JSON-RPC 方法分发：内核请求 → 壳执行
+pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value, String> {
+    match method {
+        "window.show" => window::show(app, params),
+        "window.hide" => window::hide(app),
+        "window.isVisible" => window::is_visible(app),
+        "window.setHeight" => window::set_height(app, params),
+
+        "hotkey.register" => hotkey::register(app, params),
+        "hotkey.unregister" => hotkey::unregister(app),
+
+        "tray.setMenu" => tray::set_menu(app, params),
+
+        "notify.show" => notify::show(app, params),
+
+        "clipboard.readText" => clipboard::read_text(app),
+        "clipboard.writeText" => clipboard::write_text(app, params),
+
+        "open.url" => opener::open_url(app, params),
+        "open.path" => opener::open_path(app, params),
+        "open.reveal" => opener::reveal(app, params),
+
+        "app.setAutostart" => set_autostart(app, params),
+        "app.info" => app_info(app),
+        "app.quit" => {
+            crate::shutdown(app);
+            Ok(json!(null))
+        }
+
+        other => Err(format!("壳未实现该方法：{other}")),
+    }
+}
+
+fn set_autostart(app: &AppHandle, params: &Value) -> Result<Value, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let enabled = params.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    let manager = app.autolaunch();
+    let result = if enabled { manager.enable() } else { manager.disable() };
+    match result {
+        Ok(()) => Ok(json!({ "ok": true, "enabled": enabled })),
+        Err(err) => Ok(json!({ "ok": false, "reason": err.to_string() })),
+    }
+}
+
+fn app_info(app: &AppHandle) -> Result<Value, String> {
+    let version = app.package_info().version.to_string();
+    let data_root = if let Ok(home) = std::env::var("HOME") {
+        std::path::PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("Launcher")
+            .to_string_lossy()
+            .to_string()
+    } else {
+        String::new()
+    };
+    Ok(json!({
+        "version": version,
+        "platform": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "dataRoot": data_root,
+    }))
+}

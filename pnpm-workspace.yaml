@@ -1,0 +1,7 @@
+packages:
+  - apps/*
+  - packages/*
+  - plugins/*
+  # 预置插件（第三方来源、出厂预装，与 plugins/ 下的内置插件分开管理）
+  - presets/sofast-*
+  - tests/fixtures/*

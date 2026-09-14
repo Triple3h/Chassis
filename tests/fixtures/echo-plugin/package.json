@@ -1,0 +1,42 @@
+{
+  "name": "echo-plugin",
+  "title": "契约测试插件",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "1",
+  "description": "覆盖宿主 API 全表的契约测试插件（requirements §11 / plugin-spec §14）",
+  "author": "launcher",
+  "icon": "terminal",
+  "keywords": ["echo", "contract", "test"],
+  "capabilities": [
+    "hostUi",
+    "storage",
+    "clipboard.read",
+    "clipboard.write",
+    "shell.open",
+    "exec.spawn",
+    "notify.show",
+    "screenshot",
+    "quicklink"
+  ],
+  "commands": [
+    { "name": "echo", "title": "契约自检", "mode": "view", "searchable": true, "placeholder": "随便输入" },
+    { "name": "job", "title": "契约任务（后台）", "mode": "no-view", "searchable": true },
+    { "name": "compute", "title": "契约计算（脚本）", "mode": "script" },
+    { "name": "feed", "title": "契约搜索源", "mode": "script", "contributes": true }
+  ],
+  "scripts": {
+    "build": "node ../../../scripts/build-plugin.mjs tests/fixtures/echo-plugin",
+    "build:view": "node ../../../scripts/build-plugin.mjs tests/fixtures/echo-plugin",
+    "build:scripts": "node ../../../scripts/build-plugin.mjs tests/fixtures/echo-plugin",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@launcher/api": "workspace:*",
+    "@launcher/api-node": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

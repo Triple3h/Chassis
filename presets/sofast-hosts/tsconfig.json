@@ -1,0 +1,13 @@
+{
+  "extends": "../shared/tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["../shared/*"],
+      "vue": ["./node_modules/vue"],
+      "@sofastapp/api": ["./node_modules/@sofastapp/api"],
+      "@launcher/api": ["./node_modules/@launcher/api"],
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "../shared/**/*.ts", "../shared/**/*.vue"]
+}

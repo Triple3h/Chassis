@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>设置</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #151a24;
+        --muted: #6b7488;
+        --border: rgba(15, 23, 42, 0.1);
+        --hover: rgba(15, 23, 42, 0.05);
+        --accent: #4f8cff;
+      }
+      [data-theme='dark'] {
+        --bg: #151a24;
+        --fg: #f7f8fa;
+        --muted: #8c95a8;
+        --border: rgba(255, 255, 255, 0.1);
+        --hover: rgba(255, 255, 255, 0.06);
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.5 -apple-system, 'SF Pro Text', 'PingFang SC', sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap { display: flex; height: 100%; }
+      .tabs {
+        width: 140px;
+        padding: 10px 8px;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .tab {
+        text-align: left; padding: 6px 10px; border-radius: 8px; border: 0;
+        background: transparent; color: var(--fg); font: inherit; cursor: pointer;
+      }
+      .tab:hover { background: var(--hover); }
+      .tab.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
+      .panel { flex: 1; overflow: auto; padding: 16px 20px 32px; }
+      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; }
+      .row {
+        display: flex; align-items: center; gap: 12px;
+        padding: 9px 0; border-bottom: 1px solid var(--border);
+      }
+      .row .label { flex: 1; min-width: 0; }
+      .row .hint { color: var(--muted); font-size: 11.5px; }
+      input[type='text'], input[type='number'], select {
+        background: var(--hover); border: 1px solid var(--border); color: var(--fg);
+        border-radius: 7px; padding: 4px 8px; font: inherit; min-width: 160px;
+      }
+      input[type='color'] { width: 40px; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: transparent; }
+      input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--accent); }
+      button.btn {
+        border: 1px solid var(--border); background: transparent; color: var(--fg);
+        border-radius: 7px; padding: 4px 10px; font: inherit; cursor: pointer;
+      }
+      button.btn:hover { background: var(--hover); }
+      button.btn.danger { color: #ef4444; }
+      button.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+      .card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+      .badge {
+        display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: 10.5px;
+        background: var(--hover); color: var(--muted);
+      }
+      .badge.ok { color: #10b981; }
+      .badge.err { color: #ef4444; }
+      .badge.warn { color: #f59e0b; }
+      pre { white-space: pre-wrap; word-break: break-all; font-size: 11.5px; color: var(--muted); margin: 4px 0 0; }
+      .toast {
+        position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+        background: var(--fg); color: var(--bg); padding: 5px 12px; border-radius: 8px; font-size: 12px;
+      }
+      .muted { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <nav class="tabs" id="tabs"></nav>
+      <main class="panel" id="panel"></main>
+    </div>
+  </body>
+</html>

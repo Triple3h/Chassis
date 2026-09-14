@@ -1,0 +1,73 @@
+@import "tailwindcss";
+@import "../../../shared/styles/theme.css";
+
+@source "../";
+@source "../../../shared";
+
+.sof-diff-row {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+.sof-diff-line {
+  white-space: pre;
+  overflow: hidden;
+  padding: 0 10px 0 6px;
+}
+
+.sof-diff-no {
+  width: 44px;
+  flex: none;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--sof-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  user-select: none;
+}
+
+.sof-seg-del {
+  background: var(--sof-del-bg);
+  border-radius: 2px;
+}
+
+.sof-seg-add {
+  background: var(--sof-add-bg);
+  border-radius: 2px;
+}
+
+.sof-row-del {
+  background: var(--sof-del-bg);
+}
+
+.sof-row-add {
+  background: var(--sof-add-bg);
+}
+
+/* 修改行：整行淡底 + 行内片段强高亮，和 VS Code 的观感一致 */
+.sof-mod-del {
+  background: color-mix(in oklab, var(--sof-del-bg) 45%, transparent);
+}
+
+.sof-mod-add {
+  background: color-mix(in oklab, var(--sof-add-bg) 45%, transparent);
+}
+
+.sof-row-skip {
+  background: var(--sof-panel-2);
+  color: var(--sof-faint);
+}
+
+textarea.sof-textarea {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 20px;
+  padding: 8px 10px;
+}

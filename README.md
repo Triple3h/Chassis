@@ -1,0 +1,141 @@
+# Launcher（启动台底座）
+
+一个 **ZTools 形态的启动台**：全局热键唤出、输入即搜、结果列表支持「最近使用」与「已固定」。
+
+**底座零能力** —— 内核里不出现任何具体能力（扫描应用、读文件、连网…）。所有能力（包括"启动应用"本身）都以插件形式集成，**出厂插件与第三方插件走同一套机制**。
+
+- 架构：Tauri 2（壳，只提供系统原语） + Node 22 sidecar（内核，TypeScript） + Vue 3（启动台 UI）
+- 验收口径（贯穿全程）：
+
+  > **清空所有插件目录后，应用仍能启动、能唤出、能搜索（结果为空）、能显示空的「最近使用／已固定」、能安装插件。**
+
+---
+
+## 当前状态
+
+| 里程碑 | 内容 | 状态 |
+|---|---|---|
+| M0 | 壳（窗口/热键/托盘）+ 启动台 UI + 历史落盘 | ✅ 代码完成，`cargo check` 通过；真机手动清单待跑 |
+| M1 | 内核 + 插件运行时（context/registry/pipeline/plugin/audit + 每插件 HTTP + 桥） | ✅ 完成，契约测试全绿（`echo-plugin` 覆盖 API 全表） |
+| M2 | 脚本运行时（worker_threads）+ `app-launcher` | ✅ 完成（含 ZTools 扫描逻辑移植） |
+| M3 | `file-search` / `web-open` / `internal-settings` + 拼音索引 | ✅ 完成 |
+| M4 | 打包 / 签名 / 公证 / 自动更新 / CI | 🔸 **自用版已就绪**：`npm run app:local` 产出可双击的 `Launcher.app`（cargo release + ad-hoc 签名，不需要 Apple Developer）；分发链路（公证 / updater / minisign / CI / dmg）**按需再补** |
+
+测试现状：`typecheck` 10 个包通过，**测试 40 项全绿**（单元 22 + 契约 11 + 验收 7）。
+
+---
+
+## 快速开始
+
+```bash
+# 1) 依赖
+pnpm install
+
+# 2) 构建（内核 + UI + 出厂插件）
+pnpm run build
+
+# 3) 开发：内核独立跑（不需要壳，浏览器里就能用）
+pnpm run dev:kernel          # 打印内核地址（http://127.0.0.1:<port>）
+pnpm run dev:ui              # 另开一个终端：vite dev server（3333）
+#   浏览器打开 http://127.0.0.1:3333/?kernel=http://127.0.0.1:<内核端口>
+
+# 4) 跑真壳（需要 Rust 工具链）
+npm run shell:dev                    # cargo run，终端里跑
+
+# 5) 自己日常用：打成可双击的 .app（不公证、不依赖 tauri-cli）
+npm run app:local                    # → dist-app/Launcher.app，拖进 /Applications
+```
+
+### 为什么要 ad-hoc 签名
+
+Apple Silicon 上**未签名的可执行文件会被内核直接杀掉**（`Killed: 9`），这不是"公证不公证"的问题。
+`npm run app:local` 会自动执行 `codesign --force --deep --sign -`（ad-hoc，免费、仅本机有效）。
+
+自用场景下**不需要**：Apple Developer（$99/年）、公证（notarization）、自动更新（minisign）、CI 双架构、dmg 分发。
+本地构建的 `.app` 不带 quarantine 属性，双击即可运行，不会触发"来自身份不明的开发者"拦截。
+
+数据目录：`~/Library/Application Support/Launcher`（可用 `LAUNCHER_DATA_ROOT` 覆盖，测试就是这么做的）。
+
+---
+
+## 脚本命令
+
+| 命令 | 作用 |
+|---|---|
+| `npm run typecheck` | 全部工作区包 `tsc --noEmit`（含插件与测试） |
+| `npm run test` | 全部测试；也可 `test:unit` / `test:contract` / `smoke` |
+| `npm run build` | `build:kernel` + `build:ui` + `build:plugins` |
+| `npm run build:kernel` | esbuild 打包内核为自包含 `apps/kernel/dist/kernel.mjs` |
+| `npm run build:ui` | vite 构建启动台 UI |
+| `npm run build:plugins` | 逐个构建插件为 `dist/`（每个脚本入口单独打包，保证自包含） |
+| `npm run app:local` | **自用打包**：release 编译 + 组装 `.app` + ad-hoc 签名 → `dist-app/Launcher.app` |
+| `npm run smoke:real` | 真内核 + 出厂插件冒烟（不起壳） |
+| `npm run build:shell` | 完整分发链路（组装 resources 并 `tauri build`，需 tauri-cli；公证/updater 未接） |
+| `npm run dev:kernel` / `dev:ui` | 开发模式 |
+| `npm run shell:dev` | `cargo run`（tauri dev） |
+
+---
+
+## 目录结构
+
+```
+apps/
+  shell/            Rust / Tauri 2：窗口、热键、托盘、单实例、通知、剪贴板、open
+    src/{main,lib,ipc,sidecar}.rs + src/primitives/{window,hotkey,tray,notify,clipboard,opener}.rs
+    ui-stub/        冷启动骨架页（内核就绪前显示，崩溃时变错误面板）
+  kernel/           TypeScript 内核：插件运行时 + 服务总线 + 注册表 + 搜索 + 审计
+    src/{main,kernel,api,config,context,registry,pipeline,plugin,audit,history,search,jsonrpc,session}.ts
+    src/services/{storage,bridge,hostUi,shell,exec,quicklink,settings,kernel}.ts
+    src/http/{server,pluginServers}.ts
+  launcher-ui/      Vue 3 + Vite + Tailwind v4：搜索框、结果列表、分组、键盘、动作菜单、二级面板
+packages/
+  plugin-manifest/  清单类型 + 校验 + 契约类型（内核/UI/CLI 共用）
+  plugin-api/       @launcher/api —— 插件页 SDK（postMessage 客户端）
+  plugin-api-node/  @launcher/api-node —— 脚本 SDK（ctx/log/progress/done/fail/storage/onQuery）
+plugins/            内置插件（官方，出厂预装、机制与第三方完全相同）
+  app-launcher/     应用扫描 + 启动（macOS）
+  file-search/      Spotlight 文件搜索 + Finder 显示
+  web-open/         网址直达 / 搜索引擎
+  internal-settings/ 设置 + 插件管理（internal：不可卸载）
+presets/            预置插件（第三方来源移植，同样出厂预装；源码与工具链独立管理）
+  shared/           四个插件共用的适配层与 UI（构建期打进各自产物）
+  scripts/          预置插件脚手架：build-all / spec-check / vite-shared / manifest-plugin
+  tests/            适配层单测（宿主映射等价性、超时与兜底）
+  sofast-totp/      双重验证器（TOTP/HOTP + 扫码导入）
+  sofast-hosts/     Hosts 管家（读写系统 hosts，含提权）
+  sofast-text-diff/ 文本比对（Myers 差分，Worker 内计算）
+  sofast-json-tools/ JSON 工具箱（无损格式化 / 树视图）
+tests/
+  fixtures/echo-plugin/  契约测试插件（覆盖宿主 API 全表）
+  unit/ contract/ smoke/ 单元 / 契约 / 验收
+scripts/            build-all / build-plugin / build-shell / run-ts / run-tests / run-tsc / make-icons
+docs/               需求、规范、架构、ADR、第三方许可
+```
+
+---
+
+## 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/launcher-requirements.md`](docs/launcher-requirements.md) | **唯一需求源**（产品定义、行为规格、架构、里程碑） |
+| [`docs/plugin-spec.md`](docs/plugin-spec.md) | 插件接入规范 v1（对外契约） |
+| [`docs/architecture.md`](docs/architecture.md) | 内核实现细节 + **与需求的差异清单** + 已知边界 |
+| [`docs/first-batch-plugins.md`](docs/first-batch-plugins.md) | 首批（如快）插件接入计划 + 实施记录 |
+| [`presets/README.md`](presets/README.md) | 预置插件：定位、目录约定、构建 / 自检 / 发布 |
+| [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) | 第三方代码与许可证（含 ZTools MIT 原文） |
+| `docs/decisions/ADR-0001~0003` | UI 托管方式 / 贡献型搜索载体 / 管理面特权边界 |
+
+---
+
+## 开发约定
+
+1. **底座零能力**：提交前自查 `apps/kernel` 的 diff 里有没有出现能力词（应用、文件、网址…）。出现即说明有东西该做成插件。
+2. **规范先行**：遇到需求/规范没写的行为，先改 `docs/`（或提 ADR）再写代码。
+3. **注册即可逆**：任何注册都要能回滚，插件停用后不留残渣（`tests/contract` 有覆盖）。
+4. **每个里程碑收尾**：`npm run typecheck && npm run test && npm run build`，然后起真实 `.app` 手动点一遍（生产资源路径与 dev 不同，只测 dev 会漏白屏）。
+5. 新增槽位/字段/章节必须同步更新本文档与 `docs/plugin-spec.md`。
+
+## 许可证
+
+MIT（见 `docs/THIRD-PARTY.md`；发布前补 `LICENSE` 文件）。

@@ -1,0 +1,16 @@
+{
+  "extends": "../shared/tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["../shared/*"],
+      "vue": ["./node_modules/vue"],
+      "@sofastapp/api": ["./node_modules/@sofastapp/api"],
+      "@launcher/api": ["./node_modules/@launcher/api"],
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "../shared/**/*.ts", "../shared/**/*.vue"],
+  // 本插件只有 view 命令、不跑 Node 脚本：host-node.ts 要 @types/node，这里不引入
+  //（哪天新增 src/no-view/ 脚本，先给本插件加 @types/node 再把这条 exclude 删掉）
+  "exclude": ["../shared/lib/host-node.ts"]
+}

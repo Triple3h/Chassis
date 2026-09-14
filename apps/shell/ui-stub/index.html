@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Launcher</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+      .skeleton {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 100%;
+        padding: 0 18px;
+        border-radius: 16px;
+        background: rgba(21, 26, 36, 0.9);
+        color: #8c95a8;
+        font: 13px -apple-system, 'PingFang SC', sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #4f8cff;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.35;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="skeleton"><span class="dot"></span><span id="text">正在启动内核…</span></div>
+  </body>
+</html>

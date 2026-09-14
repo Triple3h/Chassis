@@ -1,0 +1,40 @@
+{
+  "name": "file-search",
+  "title": "文件搜索",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "1",
+  "description": "用 Spotlight 索引搜索本机文件，可打开或在 Finder 中显示",
+  "author": "launcher",
+  "icon": "file-text",
+  "keywords": ["file", "文件", "搜索", "mdfind", "spotlight"],
+  "capabilities": ["storage", "shell.open"],
+  "commands": [
+    {
+      "name": "files",
+      "title": "文件",
+      "mode": "script",
+      "contributes": true,
+      "keywords": ["file", "文件", "查找", "find"],
+      "placeholder": "输入文件名"
+    },
+    {
+      "name": "reveal",
+      "title": "在 Finder 中显示",
+      "mode": "script",
+      "hidden": true
+    }
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-plugin.mjs file-search",
+    "build:scripts": "node ../../scripts/build-plugin.mjs file-search",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@launcher/api-node": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

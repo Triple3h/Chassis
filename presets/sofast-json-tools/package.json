@@ -1,0 +1,46 @@
+{
+  "name": "sofast-json-tools",
+  "title": "JSON 工具箱",
+  "author": "triple3h",
+  "description": "无损格式化 / 压缩 / 键排序 / 错误定位 / 虚拟滚动树视图，10MB 级 JSON 也不卡",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "1",
+  "categories": [
+    "developer",
+    "tool"
+  ],
+  "capabilities": [
+    "hostUi"
+  ],
+  "commands": [
+    {
+      "name": "json",
+      "title": "JSON 格式化",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "粘贴 JSON，回车即格式化"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@sofastapp/api": "^0.0.3",
+    "vue": "^3.5.42",
+    "@launcher/api": "workspace:*"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}
