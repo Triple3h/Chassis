@@ -3,8 +3,12 @@ dist/
 *.tsbuildinfo
 .DS_Store
 tmp-*
-.codegraph/
 presets/release/
+
+# CodeBuddy 的本地目录（记忆 / 规则 / 技能）：只放本地，不入库
+.codebuddy/
+# 代码图谱缓存
+.codegraph/
 
 # 本地运行数据（内核 dataRoot 的默认位置在 appData，这里是开发兜底）
 .dev-data/
