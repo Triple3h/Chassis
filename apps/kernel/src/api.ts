@@ -157,7 +157,16 @@ export function registerApi(kernel: Kernel): void {
   server.get('/api/plugins', () => ({ ok: true, plugins: kernel.plugins.info() }))
 
   server.post('/api/plugins/action', async (ctx) => {
-    const payload = body<{ action?: string; id?: string; path?: string; overwrite?: boolean }>(ctx)
+    const payload = body<{
+      action?: string
+      id?: string
+      path?: string
+      command?: string
+      keywords?: string[]
+      capability?: string
+      denied?: boolean
+      overwrite?: boolean
+    }>(ctx)
     return kernel.pluginAction(required(payload.action, 'action'), payload as Record<string, unknown>)
   })
 

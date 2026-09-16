@@ -22,6 +22,13 @@
       "mode": "view",
       "searchable": true,
       "placeholder": "粘贴两段文本做差异比对（可在插件内用 | 分隔）",
+      "keywords": [
+        "diff",
+        "compare",
+        "difference",
+        "对比",
+        "差异"
+      ],
       "icon": "git-compare"
     }
   ],

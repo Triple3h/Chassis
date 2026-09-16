@@ -146,6 +146,10 @@ export interface PluginRuntimeInfo {
   capabilities: string[]
   /** 用户可拒绝高风险能力 */
   deniedCapabilities: string[]
+  /** 插件级别名：兜底给该插件全部入口命令（用户覆盖层优先于清单） */
+  keywords: string[]
+  /** 是否被用户改过（界面据此显示「恢复默认」） */
+  keywordsCustomized: boolean
   commands: Array<{
     name: string
     title: string
@@ -154,6 +158,9 @@ export interface PluginRuntimeInfo {
     contributes: boolean
     hidden: boolean
     placeholder?: string
+    /** 命令**自己**的别名（不含插件级；实际参与搜索 = 插件级 ∪ 命令级） */
+    keywords: string[]
+    keywordsCustomized: boolean
     error?: string
   }>
   state: 'discovered' | 'validating' | 'loading' | 'active' | 'disabled' | 'error' | 'crashed' | 'degraded'

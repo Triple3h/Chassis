@@ -11,6 +11,10 @@
         --border: rgba(15, 23, 42, 0.1);
         --hover: rgba(15, 23, 42, 0.05);
         --accent: #4f8cff;
+        /* 滚动条滑块：只由前景色调出来，深浅主题各自动取值 */
+        --scroll-thumb: color-mix(in srgb, var(--fg) 16%, transparent);
+        --scroll-thumb-hover: color-mix(in srgb, var(--fg) 34%, transparent);
+        --scroll-thumb-active: color-mix(in srgb, var(--fg) 50%, transparent);
       }
       [data-theme='dark'] {
         --bg: #151a24;
@@ -20,6 +24,22 @@
         --hover: rgba(255, 255, 255, 0.06);
       }
       * { box-sizing: border-box; }
+      /* 滚动条：与宿主 apps/launcher-ui 和 @launcher/ui 同一套设计，改参数请三处一起改。
+         系统开着「始终显示滚动条」时，默认画的是带边框轨道 + 两端箭头的经典样式，
+         和本套扁平界面放在一起很扎眼；WebKit 的自定义滚动条会整体盖掉系统样式 ⇒
+         轨道隐形、滑块收成 6px 药丸，平时极淡、悬停与拖动才加深。 */
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-button { display: none; }
+      ::-webkit-scrollbar-track,
+      ::-webkit-scrollbar-corner { background: transparent; }
+      ::-webkit-scrollbar-thumb {
+        background-color: var(--scroll-thumb);
+        border: 2px solid transparent; /* 10px 轨道里只露出 6px 滑块 */
+        background-clip: content-box;
+        border-radius: 999px;
+      }
+      ::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+      ::-webkit-scrollbar-thumb:active { background-color: var(--scroll-thumb-active); }
       html, body { margin: 0; height: 100%; }
       body {
         background: var(--bg);
@@ -77,6 +97,80 @@
         background: var(--fg); color: var(--bg); padding: 5px 12px; border-radius: 8px; font-size: 12px;
       }
       .muted { color: var(--muted); }
+
+      /* ── 插件页：主从两栏（左列表 / 右详情）──────────────────── */
+      .panel.flush { padding: 0; overflow: hidden; }
+      .manage { display: flex; height: 100%; }
+      .mlist {
+        width: 208px; flex: none; min-height: 0; display: flex; flex-direction: column;
+        border-right: 1px solid var(--border);
+      }
+      .mlist input { min-width: 0; width: 100%; }
+      .msearch { padding: 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+      .filters { display: flex; gap: 4px; flex-wrap: wrap; }
+      .filter {
+        border: 0; background: transparent; color: var(--muted); border-radius: 999px;
+        padding: 2px 8px; font: inherit; font-size: 11.5px; cursor: pointer;
+      }
+      .filter:hover { background: var(--hover); }
+      .filter.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
+      .mitems { flex: 1; min-height: 0; overflow: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+      .mitem {
+        display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 8px;
+        background: transparent; color: var(--fg); font: inherit; cursor: pointer; text-align: left;
+      }
+      .mitem:hover { background: var(--hover); }
+      .mitem.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+      .mitem .mname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .mitem .mmeta { color: var(--muted); font-size: 11px; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+      .dot.ok { background: #10b981; }
+      .dot.err { background: #ef4444; }
+      .mdot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; }
+      .mfoot { padding: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+      .install-box { display: flex; flex-direction: column; gap: 6px; }
+      .mdetail { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 28px; }
+      .dempty { display: flex; height: 100%; align-items: center; justify-content: center; }
+      .dhead { display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+      .dtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .dsec { padding: 14px 0; border-bottom: 1px solid var(--border); }
+      .dsec h3 {
+        font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+        margin: 0 0 8px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+      }
+      .dsec h3 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+      .caps { display: flex; gap: 6px; flex-wrap: wrap; }
+      .cap {
+        border: 1px solid var(--border); background: var(--hover); color: var(--fg);
+        border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 11.5px; cursor: pointer;
+      }
+      .cap:hover { border-color: var(--accent); color: var(--accent); }
+      .cap.denied { color: #ef4444; text-decoration: line-through; }
+      .cmd { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+      .cmd-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+      .cmd-head code { background: var(--hover); padding: 1px 6px; border-radius: 5px; font-size: 11.5px; }
+      .kwords { margin-top: 2px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .chip {
+        display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px;
+        background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);
+        border-radius: 999px; font-size: 11.5px;
+      }
+      .chip-x {
+        border: 0; background: transparent; color: inherit; cursor: pointer;
+        font: inherit; opacity: 0.6; padding: 0 4px; border-radius: 50%;
+      }
+      .chip-x:hover { opacity: 1; }
+      .chip-input {
+        min-width: 120px; flex: 1; background: transparent; border: 1px dashed var(--border);
+        border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 11.5px; color: var(--fg);
+      }
+      .chips-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+      .btn.tiny { padding: 2px 8px; font-size: 11px; border-radius: 6px; }
+      .path { word-break: break-all; }
+      .dactions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+      .dactions .btn.danger { margin-left: auto; }
+      .danger-text { color: #ef4444; }
     </style>
   </head>
   <body>

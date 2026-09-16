@@ -24,6 +24,13 @@ import type { Disposer, SessionCloseReason } from './types'
 import { ensureDir, listDirSafe, pathExists } from './util/fsx'
 import type { PluginServerPool } from './http/pluginServers'
 import { LEGACY_PLUGIN_IDS } from './legacy'
+import {
+  commandKeywordsOf,
+  mergeCommandDecls,
+  mergeKeywords,
+  pluginKeywordsOf,
+  type OverrideStore,
+} from './overrides'
 
 export type PluginState =
   | 'discovered'
@@ -56,6 +63,8 @@ export interface PluginManagerDeps {
   /** 出厂插件根目录（可多个；开发态默认就是仓库根的 `plugins/`；靠后的同名插件覆盖靠前的） */
   builtinRoots: string[]
   config: ConfigStore
+  /** 用户覆盖层（别名等）：装配命令时与清单合并 */
+  overrides: OverrideStore
   audit: AuditLog
   bus: EventBus
   registry: CommandRegistry
@@ -181,32 +190,58 @@ export class PluginManager {
   }
 
   info(): PluginRuntimeInfo[] {
-    return this.list().map((record) => ({
-      id: record.id,
-      title: record.manifest?.title ?? record.id,
-      version: record.manifest?.version ?? '0.0.0',
-      ...(record.manifest?.description ? { description: record.manifest.description } : {}),
-      ...(record.manifest?.author ? { author: record.manifest.author } : {}),
-      ...(record.manifest?.icon ? { icon: record.manifest.icon } : {}),
-      apiVersion: record.manifest?.apiVersion ?? '1',
-      capabilities: [...record.capabilities],
-      deniedCapabilities: [...record.denied],
-      commands: (record.manifest?.commands ?? []).map((decl) => ({
-        name: decl.name,
-        title: decl.title,
-        mode: decl.mode,
-        searchable: Boolean(decl.searchable),
-        contributes: Boolean(decl.contributes),
-        hidden: Boolean(decl.hidden),
-        ...(decl.placeholder ? { placeholder: decl.placeholder } : {}),
-        ...(record.commandErrors.has(decl.name) ? { error: record.commandErrors.get(decl.name) } : {}),
-      })),
-      state: record.state,
-      ...(record.error ? { error: record.error } : {}),
-      builtin: record.builtin,
-      dir: record.dir,
-      ...(record.devUrl ? { devUrl: record.devUrl } : {}),
-    }))
+    return this.list().map((record) => {
+      const override = this.deps.overrides.getFor(record.id)
+      const pluginKeywords = pluginKeywordsOf(record.manifest?.keywords, override)
+      return {
+        id: record.id,
+        title: record.manifest?.title ?? record.id,
+        version: record.manifest?.version ?? '0.0.0',
+        ...(record.manifest?.description ? { description: record.manifest.description } : {}),
+        ...(record.manifest?.author ? { author: record.manifest.author } : {}),
+        ...(record.manifest?.icon ? { icon: record.manifest.icon } : {}),
+        apiVersion: record.manifest?.apiVersion ?? '1',
+        capabilities: [...record.capabilities],
+        deniedCapabilities: [...record.denied],
+        // 插件级别名（兜底给全部入口命令）；customized = 被用户覆盖层改过（界面显示「恢复默认」）
+        keywords: pluginKeywords,
+        keywordsCustomized: override?.keywords !== undefined,
+        commands: (record.manifest?.commands ?? []).map((decl) => ({
+          name: decl.name,
+          title: decl.title,
+          mode: decl.mode,
+          searchable: Boolean(decl.searchable),
+          contributes: Boolean(decl.contributes),
+          hidden: Boolean(decl.hidden),
+          ...(decl.placeholder ? { placeholder: decl.placeholder } : {}),
+          // 命令**自己**的别名（不含插件级；实际参与搜索的 = 插件级 ∪ 命令级）
+          keywords: commandKeywordsOf(decl.keywords, override, decl.name),
+          keywordsCustomized: override?.commands?.[decl.name]?.keywords !== undefined,
+          ...(record.commandErrors.has(decl.name) ? { error: record.commandErrors.get(decl.name) } : {}),
+        })),
+        state: record.state,
+        ...(record.error ? { error: record.error } : {}),
+        builtin: record.builtin,
+        dir: record.dir,
+        ...(record.devUrl ? { devUrl: record.devUrl } : {}),
+      }
+    })
+  }
+
+  /**
+   * 覆盖层改动后重新落进命令注册表（不用重载插件、更不用重启）。
+   * 只是登记表里的 `keywords` 变了 —— 下一次搜索立刻用新值。
+   */
+  applyOverrides(pluginId: string): void {
+    const record = this.records.get(pluginId)
+    if (!record?.manifest) return
+    const override = this.deps.overrides.getFor(pluginId)
+    const pluginKeywords = pluginKeywordsOf(record.manifest.keywords, override)
+    for (const decl of record.manifest.commands) {
+      this.deps.registry.update(globalCommandId(pluginId, decl.name), {
+        keywords: mergeKeywords(pluginKeywords, commandKeywordsOf(decl.keywords, override, decl.name)),
+      })
+    }
   }
 
   // ── 装配 ────────────────────────────────────────────────────
@@ -431,7 +466,8 @@ export class PluginManager {
       },
     })
 
-    for (const decl of manifest.commands) {
+    // 注册的是「清单 + 用户覆盖层」的合并结果：keywords = 插件级 ∪ 命令级
+    for (const decl of mergeCommandDecls(manifest, this.deps.overrides.getFor(id))) {
       if (record.commandErrors.has(decl.name)) continue
       const dispose = this.deps.registry.register({
         id: globalCommandId(id, decl.name),
@@ -650,6 +686,8 @@ export class PluginManager {
     if (record.builtin) throw new LauncherError('FORBIDDEN', '出厂插件不可卸载（可禁用）')
     await this.disable(id, 'uninstall')
     await fsp.rm(record.dir, { recursive: true, force: true })
+    // 覆盖层跟着插件走：重装后不该还带着上一份别名
+    await this.deps.overrides.clear(id)
     this.records.delete(id)
     this.emitChanged()
   }

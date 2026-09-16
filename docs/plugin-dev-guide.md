@@ -292,6 +292,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 | `--launcher-ease-exit` | 离场（加速，**一律比进场短**） |
 | `--launcher-ease-move` | 位移与颜色 |
 | `--launcher-ease-spring` | 只给"弹出"用（轻微过冲） |
+| `--launcher-scroll-thumb` / `-hover` / `-active` | 滚动条滑块三态（几何写死在 `theme.css` 末尾的 `::-webkit-scrollbar` 块：10px 轨道、6px 滑块） |
 
 `prefers-reduced-motion` 已在这套令牌里统一降级，插件侧不需要再写媒体查询。
 现成可用的过渡类：`launcher-fade`（纯淡入淡出）、`launcher-toast`（上浮）、`launcher-mask` + `.launcher-dialog-pop`（模态遮罩与面板）。
@@ -381,10 +382,12 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **原因**：部分宿主 WebView 未授予 clipboard-read 权限。
 - **对策**：① 读文本优先用 `paste` 事件里的 `clipboardData`（用户手势触发，不需要权限）；② 写用 `writeText` → `execCommand('copy')` 三级兜底；③ UI 上永远保留手工路径。
 
-### 5.13 WASM 依赖默认走 CDN
+### 5.13 WASM 依赖
 
-- **现象**：非联网环境 / 离线打包后 wasm 加载失败。
-- **对策**：`import wasmUrl from 'pkg/xxx.wasm?url'` 让构建把 wasm 打进 dist，再以 `wasmBinary` 形式喂给 Emscripten（顺带绕开 `instantiateStreaming` 的 MIME 检查）。
+- **现象 ①**：非联网环境 / 离线打包后 wasm 加载失败。
+  **对策**：`import wasmUrl from 'pkg/xxx.wasm?url'` 让构建把 wasm 打进 dist，再以 `wasmBinary` 形式喂给 Emscripten（顺带绕开 `instantiateStreaming` 的 MIME 检查）。
+- **现象 ②**：`Aborted(CompileError: Refused to create a WebAssembly object because ... 'wasm-unsafe-eval' is not an allowed source of script ...)`。
+  **原因**：宿主给插件页的 CSP `script-src` 没放行 wasm 编译。**对策**：内核已加 `'wasm-unsafe-eval'`（见 `apps/kernel/src/http/pluginServers.ts`）；换宿主 / 自建静态服务器时要带上它。
 
 ### 5.14 主题跟随宿主失败
 

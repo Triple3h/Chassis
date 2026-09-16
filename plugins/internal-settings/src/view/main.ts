@@ -17,6 +17,20 @@ interface ConfigLike {
   historyInSearch: boolean
 }
 
+interface CommandLike {
+  name: string
+  title: string
+  mode: string
+  searchable: boolean
+  contributes: boolean
+  hidden: boolean
+  /** 命令**自己**的别名（实际参与搜索 = 插件级 ∪ 命令级） */
+  keywords: string[]
+  /** 被用户覆盖层改过（显示「恢复默认」） */
+  keywordsCustomized: boolean
+  error?: string
+}
+
 interface PluginLike {
   id: string
   title: string
@@ -30,7 +44,10 @@ interface PluginLike {
   capabilities: string[]
   deniedCapabilities: string[]
   apiVersion: string
-  commands: Array<{ name: string; title: string; mode: string; error?: string }>
+  /** 插件级别名：兜底给全部入口命令 */
+  keywords: string[]
+  keywordsCustomized: boolean
+  commands: CommandLike[]
 }
 
 interface AuditLike {
@@ -60,6 +77,21 @@ let config: ConfigLike | null = null
 let plugins: PluginLike[] = []
 let audit: AuditLike[] = []
 let activeTab: TabId = 'general'
+
+// ── 插件页（主从两栏）状态 ──────────────────────────────────────
+type PluginFilter = 'all' | 'active' | 'disabled' | 'error'
+
+const MAX_KEYWORDS = 10
+
+let pluginQuery = ''
+let pluginFilter: PluginFilter = 'all'
+let selectedPluginId: string | null = null
+let installOpen = false
+/** 未落盘的别名编辑（key = `${pluginId}:${command ?? '*'}`） */
+const keywordEdits = new Map<string, string[]>()
+const keywordTimers = new Map<string, number>()
+/** 列表摘要：轮询只在真的变了的时候重渲染 */
+let pluginsDigest = ''
 
 function escapeHtml(input: unknown): string {
   return String(input ?? '').replace(/[&<>"']/g, (ch) => {
@@ -168,59 +200,241 @@ function renderAppearance(): string {
   `
 }
 
-function renderPlugins(): string {
-  if (plugins.length === 0) return '<h2>插件</h2><p class="muted">没有已安装的插件</p>'
-  const cards = plugins
-    .map((plugin) => {
-      const denied = plugin.deniedCapabilities.length
-        ? `<div class="hint">已拒绝能力：${escapeHtml(plugin.deniedCapabilities.join('、'))}</div>`
-        : ''
-      const error = plugin.error ? `<div class="hint" style="color:#ef4444">${escapeHtml(plugin.error)}</div>` : ''
-      const commandErrors = plugin.commands.filter((c) => c.error).length
-      const capabilityList = plugin.capabilities.length
-        ? plugin.capabilities.map((cap) => `<span class="badge">${escapeHtml(cap)}</span>`).join(' ')
-        : '<span class="badge">无</span>'
-      const actions = [
-        plugin.state === 'disabled'
-          ? `<button class="btn" data-action="enable" data-id="${escapeHtml(plugin.id)}">启用</button>`
-          : `<button class="btn" data-action="disable" data-id="${escapeHtml(plugin.id)}">禁用</button>`,
-        `<button class="btn" data-action="reload" data-id="${escapeHtml(plugin.id)}">重载</button>`,
-        `<button class="btn" data-action="reveal" data-id="${escapeHtml(plugin.id)}">目录</button>`,
-        `<button class="btn" data-action="openData" data-id="${escapeHtml(plugin.id)}">数据</button>`,
-        plugin.builtin ? '' : `<button class="btn danger" data-action="uninstall" data-id="${escapeHtml(plugin.id)}">卸载</button>`,
-      ].join(' ')
-      return `
-        <div class="card">
-          <div style="display:flex;align-items:center;gap:8px">
-            <strong>${escapeHtml(plugin.title)}</strong>
-            <span class="muted">${escapeHtml(plugin.version)}</span>
-            ${stateBadge(plugin)}
-            ${plugin.builtin ? '<span class="badge">出厂自带</span>' : ''}
+// ── 插件页：主从两栏（左列表 / 右详情，别名就地编辑）──────────────
+function editKey(pluginId: string, command?: string): string {
+  return `${pluginId}:${command ?? '*'}`
+}
+
+function parseEditKey(key: string): { pluginId: string; command?: string } {
+  const index = key.lastIndexOf(':')
+  if (index < 0) return { pluginId: key }
+  const command = key.slice(index + 1)
+  const pluginId = key.slice(0, index)
+  return command && command !== '*' ? { pluginId, command } : { pluginId }
+}
+
+function pluginById(id: string | null): PluginLike | null {
+  return id ? (plugins.find((plugin) => plugin.id === id) ?? null) : null
+}
+
+/** 别名现值：编辑中的用未落盘的编辑态，其余用内核回传的权威值 */
+function keywordsOf(plugin: PluginLike, command?: string): string[] {
+  const edited = keywordEdits.get(editKey(plugin.id, command))
+  if (edited) return edited
+  if (command) return plugin.commands.find((item) => item.name === command)?.keywords ?? []
+  return plugin.keywords ?? []
+}
+
+function customizedOf(plugin: PluginLike, command?: string): boolean {
+  if (keywordEdits.has(editKey(plugin.id, command))) return true
+  if (command) return plugin.commands.find((item) => item.name === command)?.keywordsCustomized ?? false
+  return plugin.keywordsCustomized
+}
+
+/** 列表摘要：轮询只在真的变了的时候重渲染（否则会打断正在输入的用户） */
+function digestOf(list: PluginLike[]): string {
+  return JSON.stringify(
+    list.map((plugin) => [
+      plugin.id,
+      plugin.state,
+      plugin.error ?? '',
+      plugin.capabilities,
+      plugin.deniedCapabilities,
+      plugin.keywords ?? [],
+      plugin.commands.map((command) => [command.name, command.keywords ?? [], command.error ?? '']),
+    ]),
+  )
+}
+
+function stateDot(state: string): string {
+  const cls = state === 'active' || state === 'degraded' ? 'ok' : state === 'disabled' ? '' : 'err'
+  return `<span class="dot ${cls}"></span>`
+}
+
+function pluginBucket(plugin: PluginLike): Exclude<PluginFilter, 'all'> {
+  if (plugin.state === 'active' || plugin.state === 'degraded') return 'active'
+  if (plugin.state === 'disabled') return 'disabled'
+  return 'error'
+}
+
+function matchQuery(plugin: PluginLike): boolean {
+  if (pluginFilter !== 'all' && pluginBucket(plugin) !== pluginFilter) return false
+  const query = pluginQuery.trim().toLowerCase()
+  if (!query) return true
+  const haystack = [
+    plugin.id,
+    plugin.title,
+    plugin.description ?? '',
+    ...plugin.commands.map((command) => `${command.name} ${command.title}`),
+  ]
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(query)
+}
+
+function filteredPlugins(): PluginLike[] {
+  return plugins.filter(matchQuery)
+}
+
+function renderPluginList(): string {
+  return (
+    filteredPlugins()
+      .map((plugin) => {
+        const active = plugin.id === selectedPluginId ? ' active' : ''
+        const custom =
+          plugin.keywordsCustomized || plugin.commands.some((command) => command.keywordsCustomized)
+        return `
+        <button class="mitem${active}" data-select="${escapeHtml(plugin.id)}">
+          ${stateDot(plugin.state)}
+          <span class="mname">${escapeHtml(plugin.title)}</span>
+          ${custom ? '<span class="mdot" title="别名被改过"></span>' : ''}
+          <span class="mmeta">${plugin.commands.length}</span>
+        </button>
+      `
+      })
+      .join('') || '<p class="muted" style="padding:12px">没有匹配的插件</p>'
+  )
+}
+
+/** chip 编辑器外壳（内容由 chipsInnerHtml 生成，增删时只重建这一个容器） */
+function renderChips(plugin: PluginLike, command?: string): string {
+  const key = editKey(plugin.id, command)
+  return `<div class="kwords" data-chips="${escapeHtml(key)}">${chipsInnerHtml(plugin, command)}</div>`
+}
+
+function renderPluginDetail(): string {
+  const plugin = pluginById(selectedPluginId)
+  if (!plugin) return '<div class="dempty muted">选择左侧的插件查看详情</div>'
+
+  const capabilities = plugin.capabilities
+    .map((cap) => `<button class="cap" data-cap="${escapeHtml(cap)}" title="点击拒绝该能力">${escapeHtml(cap)}</button>`)
+    .join('')
+  const denied = plugin.deniedCapabilities
+    .map(
+      (cap) =>
+        `<button class="cap denied" data-cap="${escapeHtml(cap)}" title="点击恢复该能力">${escapeHtml(cap)}（已拒绝）</button>`,
+    )
+    .join('')
+  const capabilityHtml = capabilities || denied ? `${capabilities}${denied}` : '<span class="muted">无</span>'
+
+  const commands =
+    plugin.commands
+      .map((command) => {
+        const badges = [`<span class="badge">${escapeHtml(command.mode)}</span>`]
+        if (command.searchable) badges.push('<span class="badge ok">可搜索</span>')
+        if (command.contributes) badges.push('<span class="badge ok">贡献结果</span>')
+        if (command.hidden) badges.push('<span class="badge">隐藏</span>')
+        const editable = command.searchable || command.contributes
+        return `
+        <div class="cmd">
+          <div class="cmd-head">
+            <code>${escapeHtml(command.name)}</code>
+            <span>${escapeHtml(command.title)}</span>
+            ${badges.join(' ')}
           </div>
-          ${plugin.description ? `<div class="hint">${escapeHtml(plugin.description)}</div>` : ''}
-          ${denied}${error}
-          <div style="margin-top:6px">${capabilityList}</div>
-          <div class="hint">apiVersion ${escapeHtml(plugin.apiVersion)} ｜ ${plugin.commands.length} 条命令${
-            commandErrors > 0 ? `（${commandErrors} 条不可用）` : ''
-          }</div>
-          <pre>${escapeHtml(plugin.dir)}</pre>
-          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${actions}</div>
+          ${
+            editable
+              ? renderChips(plugin, command.name)
+              : '<div class="hint">该命令不参与搜索，不需要别名</div>'
+          }
+          ${command.error ? `<div class="hint danger-text">${escapeHtml(command.error)}</div>` : ''}
         </div>
       `
-    })
+      })
+      .join('') || '<p class="muted">没有命令</p>'
+
+  const actions = [
+    `<button class="btn" data-action="reload" data-id="${escapeHtml(plugin.id)}">重载</button>`,
+    `<button class="btn" data-action="reveal" data-id="${escapeHtml(plugin.id)}">打开目录</button>`,
+    `<button class="btn" data-action="openData" data-id="${escapeHtml(plugin.id)}">数据目录</button>`,
+    plugin.builtin
+      ? ''
+      : `<button class="btn danger" data-action="uninstall" data-id="${escapeHtml(plugin.id)}">卸载</button>`,
+  ].join('')
+
+  return `
+    <div class="dhead">
+      <div class="dtitle">
+        <strong>${escapeHtml(plugin.title)}</strong>
+        <span class="muted">${escapeHtml(plugin.version)}</span>
+        ${stateBadge(plugin)}
+        ${plugin.builtin ? '<span class="badge">出厂自带</span>' : ''}
+      </div>
+      ${plugin.description ? `<div class="hint">${escapeHtml(plugin.description)}</div>` : ''}
+      <div class="hint">${escapeHtml(plugin.id)} ｜ apiVersion ${escapeHtml(plugin.apiVersion)}${
+        plugin.author ? ` ｜ ${escapeHtml(plugin.author)}` : ''
+      }</div>
+      ${plugin.error ? `<div class="hint danger-text">${escapeHtml(plugin.error)}</div>` : ''}
+    </div>
+
+    <section class="dsec">
+      <h3>能力 <span class="hint">点一下即可拒绝 / 恢复（会重载该插件）</span></h3>
+      <div class="caps">${capabilityHtml}</div>
+    </section>
+
+    <section class="dsec">
+      <h3>插件别名 <span class="hint">兜底给该插件的全部入口命令</span></h3>
+      ${renderChips(plugin)}
+    </section>
+
+    <section class="dsec">
+      <h3>命令（${plugin.commands.length}）</h3>
+      ${commands}
+    </section>
+
+    <section class="dsec danger">
+      <div class="hint path">${escapeHtml(plugin.dir)}</div>
+      <div class="dactions">${actions}</div>
+    </section>
+  `
+}
+
+function renderPlugins(): string {
+  if (plugins.length === 0) return '<div class="dempty muted">没有已安装的插件</div>'
+  const counts: Record<PluginFilter, number> = {
+    all: plugins.length,
+    active: plugins.filter((plugin) => pluginBucket(plugin) === 'active').length,
+    disabled: plugins.filter((plugin) => pluginBucket(plugin) === 'disabled').length,
+    error: plugins.filter((plugin) => pluginBucket(plugin) === 'error').length,
+  }
+  const filters = (
+    [
+      ['all', '全部'],
+      ['active', '启用'],
+      ['disabled', '禁用'],
+      ['error', '异常'],
+    ] as Array<[PluginFilter, string]>
+  )
+    .map(
+      ([id, label]) =>
+        `<button class="filter${pluginFilter === id ? ' active' : ''}" data-filter="${id}">${label} ${counts[id]}</button>`,
+    )
     .join('')
 
   return `
-    <h2>插件（${plugins.length}）</h2>
-    <div class="row">
-      <div class="label">从 zip / 目录安装：把 zip 拖到启动台窗口，或在此填写绝对路径</div>
+    <div class="manage">
+      <aside class="mlist">
+        <div class="msearch">
+          <input id="plugin-search" type="text" placeholder="搜索插件 / 命令…" value="${escapeHtml(pluginQuery)}" />
+          <div class="filters">${filters}</div>
+        </div>
+        <div class="mitems">${renderPluginList()}</div>
+        <div class="mfoot">
+          <button class="btn" id="installToggle">${installOpen ? '收起安装' : '+ 安装插件'}</button>
+          <button class="btn" id="reloadAll">全部重载</button>
+          ${
+            installOpen
+              ? `<div class="install-box">
+                   <input id="installPath" type="text" placeholder="/Users/me/Downloads/my-plugin.zip" />
+                   <button class="btn primary" id="install">安装</button>
+                   <span class="hint">支持 zip 与目录；也可把 zip 拖进启动台窗口</span>
+                 </div>`
+              : ''
+          }
+        </div>
+      </aside>
+      <section class="mdetail">${renderPluginDetail()}</section>
     </div>
-    <div class="row">
-      <input id="installPath" type="text" placeholder="/Users/me/Downloads/my-plugin.zip" style="flex:1" />
-      <button class="btn primary" id="install">安装</button>
-      <button class="btn" id="reloadAll">全部重载</button>
-    </div>
-    ${cards}
   `
 }
 
@@ -293,6 +507,9 @@ function render(): void {
   tabsEl.innerHTML = TABS.map(
     (tab) => `<button class="tab ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}</button>`,
   ).join('')
+
+  // 插件页是主从两栏：两栏各自滚动，面板本身不留内边距
+  panelEl.classList.toggle('flush', activeTab === 'plugins')
 
   panelEl.innerHTML =
     activeTab === 'general'
@@ -369,39 +586,302 @@ function bind(): void {
   })
   on('open-data', 'click', () => void guard(() => settings.openDataDir(), undefined))
 
-  on('install', 'click', async () => {
-    const value = (document.getElementById('installPath') as HTMLInputElement | null)?.value?.trim()
-    if (!value) return
-    const action = value.toLowerCase().endsWith('.zip') ? 'installZip' : 'installDir'
-    await guard(() => settings.pluginAction(action, { path: value, overwrite: false }), undefined)
-    toast('安装完成')
-    await loadPlugins()
-    render()
-  })
-  on('reloadAll', 'click', async () => {
-    await guard(() => settings.pluginAction('reloadAll'), undefined)
-    toast('已重载全部插件')
-    await loadPlugins()
-    render()
-  })
+  // 插件页的交互全部走 panelEl 上的事件委托（渲染会重建 DOM，逐个绑定会失效），
+  // 见文件末尾的 onPanelClick / onPanelKeydown / onPanelInput / onPanelFocusOut。
+}
 
-  for (const button of panelEl.querySelectorAll<HTMLElement>('[data-action]')) {
-    button.addEventListener('click', async () => {
-      const action = button.dataset.action ?? ''
-      const id = button.dataset.id ?? ''
-      if (action === 'uninstall' && !window.confirm(`确定卸载插件「${id}」？其数据目录会保留。`)) return
-      await guard(() => settings.pluginAction(action, { id }), undefined)
-      toast('已执行')
-      await loadPlugins()
-      render()
-    })
+// ── 插件页交互 ─────────────────────────────────────────────────
+function chipsContainer(key: string): HTMLElement | null {
+  for (const element of panelEl.querySelectorAll<HTMLElement>('[data-chips]')) {
+    if (element.dataset.chips === key) return element
   }
+  return null
+}
+
+function chipsInnerHtml(plugin: PluginLike, command?: string): string {
+  const key = editKey(plugin.id, command)
+  const chips = keywordsOf(plugin, command)
+    .map(
+      (word) =>
+        `<span class="chip" data-word="${escapeHtml(word)}">${escapeHtml(word)}<button class="chip-x" data-chip-del title="删除">×</button></span>`,
+    )
+    .join('')
+  const reset = customizedOf(plugin, command)
+    ? `<button class="btn tiny" data-reset="${escapeHtml(key)}">恢复默认</button>`
+    : ''
+  return `
+    <div class="chips">
+      ${chips}
+      <input class="chip-input" data-chip-input="${escapeHtml(key)}" placeholder="+ 添加别名" />
+    </div>
+    <div class="chips-bar">
+      <span class="hint">回车或逗号添加；改动自动保存，搜索立即生效</span>
+      ${reset}
+    </div>
+  `
+}
+
+function rerenderChips(pluginId: string, command?: string, focus = false): void {
+  const plugin = pluginById(pluginId)
+  const container = chipsContainer(editKey(pluginId, command))
+  if (!plugin || !container) return
+  container.innerHTML = chipsInnerHtml(plugin, command)
+  if (focus) container.querySelector<HTMLInputElement>('.chip-input')?.focus()
+}
+
+function scheduleKeywordSave(pluginId: string, command?: string): void {
+  const key = editKey(pluginId, command)
+  const timer = keywordTimers.get(key)
+  if (timer) window.clearTimeout(timer)
+  keywordTimers.set(
+    key,
+    window.setTimeout(() => void saveKeywords(pluginId, command), 600),
+  )
+}
+
+async function saveKeywords(pluginId: string, command?: string): Promise<void> {
+  const key = editKey(pluginId, command)
+  const timer = keywordTimers.get(key)
+  if (timer) {
+    window.clearTimeout(timer)
+    keywordTimers.delete(key)
+  }
+  const words = keywordEdits.get(key)
+  if (!words) return
+  const payload: Record<string, unknown> = { id: pluginId, keywords: words }
+  if (command) payload.command = command
+  const result = await guard(
+    () => settings.pluginAction('setKeywords', payload) as Promise<{ plugins?: PluginLike[] }>,
+    null,
+  )
+  if (!result) return
+  keywordEdits.delete(key)
+  if (result.plugins) {
+    plugins = result.plugins
+    pluginsDigest = digestOf(plugins)
+  }
+  toast('已保存，搜索立即生效')
+}
+
+async function resetKeywords(pluginId: string, command?: string): Promise<void> {
+  const key = editKey(pluginId, command)
+  const timer = keywordTimers.get(key)
+  if (timer) {
+    window.clearTimeout(timer)
+    keywordTimers.delete(key)
+  }
+  keywordEdits.delete(key)
+  const payload: Record<string, unknown> = { id: pluginId }
+  if (command) payload.command = command
+  const result = await guard(
+    () => settings.pluginAction('resetKeywords', payload) as Promise<{ plugins?: PluginLike[] }>,
+    null,
+  )
+  if (!result) return
+  if (result.plugins) {
+    plugins = result.plugins
+    pluginsDigest = digestOf(plugins)
+  }
+  toast('已恢复默认')
+  render()
+}
+
+/** 把输入框里的文本并成 chip（回车 / 逗号 / 失焦都走这里） */
+function commitKeywordInput(input: HTMLInputElement): void {
+  const key = input.dataset.chipInput
+  if (!key) return
+  const { pluginId, command } = parseEditKey(key)
+  const plugin = pluginById(pluginId)
+  if (!plugin) return
+  const additions = input.value
+    .split(/[,，\s]+/)
+    .map((word) => word.trim())
+    .filter(Boolean)
+  if (additions.length === 0) return
+
+  const next: string[] = []
+  const seen = new Set<string>()
+  for (const word of [...keywordsOf(plugin, command), ...additions]) {
+    const lower = word.toLowerCase()
+    if (seen.has(lower)) continue
+    seen.add(lower)
+    next.push(word)
+  }
+  if (next.length > MAX_KEYWORDS) {
+    toast(`最多 ${MAX_KEYWORDS} 个别名`)
+    next.length = MAX_KEYWORDS
+  }
+  keywordEdits.set(key, next)
+  input.value = ''
+  rerenderChips(pluginId, command, true)
+  scheduleKeywordSave(pluginId, command)
+}
+
+function removeKeyword(key: string, word: string): void {
+  const { pluginId, command } = parseEditKey(key)
+  const plugin = pluginById(pluginId)
+  if (!plugin) return
+  keywordEdits.set(
+    key,
+    keywordsOf(plugin, command).filter((item) => item !== word),
+  )
+  rerenderChips(pluginId, command)
+  scheduleKeywordSave(pluginId, command)
+}
+
+async function toggleCapability(pluginId: string, capability: string): Promise<void> {
+  const plugin = pluginById(pluginId)
+  if (!plugin) return
+  const denied = plugin.deniedCapabilities.includes(capability)
+  const verb = denied ? '恢复' : '拒绝'
+  if (!window.confirm(`${verb}能力「${capability}」？插件会立即重载，正在打开的插件页会重开。`)) return
+  const result = await guard(
+    () => settings.pluginAction('setCapability', { id: pluginId, capability, denied: !denied }),
+    null,
+  )
+  if (!result) return
+  toast(`已${verb}：${capability}`)
+  await loadPlugins()
+  render()
+}
+
+async function runPluginAction(action: string, id: string): Promise<void> {
+  if (action === 'uninstall' && !window.confirm(`确定卸载插件「${id}」？其数据目录会保留。`)) return
+  await guard(() => settings.pluginAction(action, { id }), undefined)
+  toast('已执行')
+  await loadPlugins()
+  render()
+}
+
+function selectPlugin(id: string): void {
+  if (selectedPluginId === id) return
+  selectedPluginId = id
+  const list = panelEl.querySelector('.mitems')
+  if (list) list.innerHTML = renderPluginList()
+  const detail = panelEl.querySelector('.mdetail')
+  if (detail) detail.innerHTML = renderPluginDetail()
+}
+
+function setPluginFilter(filter: PluginFilter): void {
+  pluginFilter = filter
+  for (const button of panelEl.querySelectorAll<HTMLElement>('[data-filter]')) {
+    button.classList.toggle('active', button.dataset.filter === filter)
+  }
+  const list = panelEl.querySelector('.mitems')
+  if (list) list.innerHTML = renderPluginList()
+}
+
+async function installPlugin(): Promise<void> {
+  const target = (document.getElementById('installPath') as HTMLInputElement | null)?.value?.trim()
+  if (!target) return
+  const action = target.toLowerCase().endsWith('.zip') ? 'installZip' : 'installDir'
+  await guard(() => settings.pluginAction(action, { path: target, overwrite: false }), undefined)
+  toast('安装完成')
+  installOpen = false
+  await loadPlugins()
+  render()
+}
+
+async function reloadAllPlugins(): Promise<void> {
+  await guard(() => settings.pluginAction('reloadAll'), undefined)
+  toast('已重载全部插件')
+  await loadPlugins()
+  render()
+}
+
+/** 正在编辑（输入框有焦点 / 有没落盘的别名）——轮询刷新要让路 */
+function isEditing(): boolean {
+  const active = document.activeElement
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return true
+  return keywordEdits.size > 0 || keywordTimers.size > 0
+}
+
+function onPanelClick(event: Event): void {
+  const node = event.target as HTMLElement
+  const select = node.closest<HTMLElement>('[data-select]')
+  if (select?.dataset.select) {
+    selectPlugin(select.dataset.select)
+    return
+  }
+  const filter = node.closest<HTMLElement>('[data-filter]')
+  if (filter?.dataset.filter) {
+    setPluginFilter(filter.dataset.filter as PluginFilter)
+    return
+  }
+  const chipDel = node.closest<HTMLElement>('[data-chip-del]')
+  if (chipDel) {
+    const key = chipDel.closest<HTMLElement>('[data-chips]')?.dataset.chips
+    const word = chipDel.closest<HTMLElement>('.chip')?.dataset.word
+    if (key && word) removeKeyword(key, word)
+    return
+  }
+  const reset = node.closest<HTMLElement>('[data-reset]')
+  if (reset?.dataset.reset) {
+    const { pluginId, command } = parseEditKey(reset.dataset.reset)
+    void resetKeywords(pluginId, command)
+    return
+  }
+  const capability = node.closest<HTMLElement>('[data-cap]')
+  if (capability?.dataset.cap && selectedPluginId) {
+    void toggleCapability(selectedPluginId, capability.dataset.cap)
+    return
+  }
+  const action = node.closest<HTMLElement>('[data-action]')
+  if (action?.dataset.action && action.dataset.id) {
+    void runPluginAction(action.dataset.action, action.dataset.id)
+    return
+  }
+  if (node.closest('#installToggle')) {
+    installOpen = !installOpen
+    render()
+    return
+  }
+  if (node.closest('#install')) {
+    void installPlugin()
+    return
+  }
+  if (node.closest('#reloadAll')) void reloadAllPlugins()
+}
+
+function onPanelKeydown(event: KeyboardEvent): void {
+  const input = (event.target as HTMLElement).closest<HTMLInputElement>('.chip-input')
+  if (!input) return
+  if (event.key === 'Enter' || event.key === ',' || event.key === '，') {
+    event.preventDefault()
+    commitKeywordInput(input)
+    return
+  }
+  if (event.key === 'Backspace' && input.value === '') {
+    const key = input.dataset.chipInput
+    const chips = key ? chipsContainer(key)?.querySelectorAll<HTMLElement>('.chip') : undefined
+    const last = chips?.[chips.length - 1]
+    if (key && last?.dataset.word) removeKeyword(key, last.dataset.word)
+  }
+}
+
+function onPanelInput(event: Event): void {
+  const target = event.target as HTMLElement
+  if (target.id !== 'plugin-search') return
+  pluginQuery = (target as HTMLInputElement).value
+  // 只刷新列表：输入框本身不重建，光标与焦点都保住
+  const list = panelEl.querySelector('.mitems')
+  if (list) list.innerHTML = renderPluginList()
+}
+
+function onPanelFocusOut(event: Event): void {
+  const input = (event.target as HTMLElement).closest<HTMLInputElement>('.chip-input')
+  if (input) commitKeywordInput(input)
 }
 
 // 拉取失败（重载期间会话短暂失效等）保留上一次结果：列表闪成「没有已安装的插件」比不刷新更糟
 async function loadPlugins(): Promise<void> {
   try {
     plugins = (await settings.plugins()) as PluginLike[]
+    pluginsDigest = digestOf(plugins)
+    if (selectedPluginId && !plugins.some((plugin) => plugin.id === selectedPluginId)) {
+      selectedPluginId = null
+    }
+    if (!selectedPluginId && plugins.length > 0) selectedPluginId = plugins[0]?.id ?? null
   } catch {
     /* 保留上一次列表 */
   }
@@ -437,11 +917,24 @@ async function boot(): Promise<void> {
   await loadAudit()
   render()
 
-  // 插件状态变化时保持列表新鲜
+  // 插件状态变化时保持列表新鲜：
+  // 只有「真的变了」且「用户没在编辑」才重渲染 —— 早先每 4s 无条件 render()，
+  // 会把正在输入的搜索框 / 别名输入框整个重建，输入被打断、焦点丢失。
   window.setInterval(() => {
     if (activeTab !== 'plugins') return
-    void loadPlugins().then(render)
+    void (async () => {
+      const before = pluginsDigest
+      await loadPlugins()
+      if (activeTab !== 'plugins' || pluginsDigest === before || isEditing()) return
+      render()
+    })()
   }, 4000)
 }
+
+// 委托绑定只做一次（panelEl 常驻，render 只替换它的 innerHTML）
+panelEl.addEventListener('click', onPanelClick)
+panelEl.addEventListener('keydown', onPanelKeydown)
+panelEl.addEventListener('input', onPanelInput)
+panelEl.addEventListener('focusout', onPanelFocusOut)
 
 void boot()

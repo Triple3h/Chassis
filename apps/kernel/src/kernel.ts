@@ -4,12 +4,13 @@ import { AuditLog } from './audit'
 import { ConfigStore, DEFAULT_CONFIG, type Config } from './config'
 import { EventBus } from './events'
 import { HistoryStore } from './history'
+import { OverrideStore } from './overrides'
 import { ShellLink } from './jsonrpc'
 import { Pipeline } from './pipeline'
 import { CommandRegistry, SearchResultHub } from './registry'
 import { SearchEngine, pluginKeyOf } from './search'
 import { SessionManager } from './session'
-import { PluginManager } from './plugin'
+import { PluginManager, type PluginRecord } from './plugin'
 import { LEGACY_ID_TO_CURRENT } from './legacy'
 import { PluginServerPool } from './http/pluginServers'
 import { UiServer } from './http/server'
@@ -83,6 +84,8 @@ export class Kernel {
   readonly config: ConfigStore
   readonly audit: AuditLog
   readonly history: HistoryStore
+  /** 插件别名等用户覆盖（`<dataRoot>/plugin-overrides.json`） */
+  readonly overrides: OverrideStore
   readonly registry = new CommandRegistry()
   readonly hub = new SearchResultHub()
   readonly sessions = new SessionManager()
@@ -119,6 +122,7 @@ export class Kernel {
     this.config = new ConfigStore(opts.dataRoot)
     this.audit = new AuditLog(opts.dataRoot)
     this.history = new HistoryStore(opts.dataRoot)
+    this.overrides = new OverrideStore(opts.dataRoot)
     this.storage = new PluginStorage(opts.dataRoot, this.audit)
     this.quicklinks = new QuicklinkStore(opts.dataRoot, this.audit)
     this.primitives = new Primitives(this.link, this.audit)
@@ -170,6 +174,7 @@ export class Kernel {
       dataRoot: opts.dataRoot,
       builtinRoots: opts.builtinRoots,
       config: this.config,
+      overrides: this.overrides,
       audit: this.audit,
       bus: this.bus,
       registry: this.registry,
@@ -233,6 +238,8 @@ export class Kernel {
 
     await this.config.init()
     const config = await this.config.load()
+    // 覆盖层要在插件装配（plugins.init）之前就位，否则首轮注册拿不到用户别名
+    await this.overrides.load()
     await this.audit.init()
     await this.history.load(config.historyLimit)
     // 插件改过 id：历史 / 固定项里的旧 pluginId 与 key 前缀一次性迁移（否则老条目一律被判「插件不可用」置灰）
@@ -723,6 +730,24 @@ export class Kernel {
         await this.primitives.shellFor('kernel').openPath(this.plugins.dataPathFor(id))
         return { ok: true }
       }
+      case 'setKeywords': {
+        // 界面化编辑别名：覆盖层落盘 + 当场重进注册表（不用重载插件，下一次搜索即生效）
+        const { command, plugin } = this.requireOverrideTarget(id, payload)
+        const keywords = Array.isArray(payload.keywords)
+          ? payload.keywords.filter((k): k is string => typeof k === 'string')
+          : []
+        if (command) await this.overrides.setCommandKeywords(plugin.id, command, keywords)
+        else await this.overrides.setPluginKeywords(plugin.id, keywords)
+        this.plugins.applyOverrides(plugin.id)
+        return { ok: true, plugins: this.plugins.info() }
+      }
+      case 'resetKeywords': {
+        const { command, plugin } = this.requireOverrideTarget(id, payload)
+        if (command) await this.overrides.setCommandKeywords(plugin.id, command, null)
+        else await this.overrides.setPluginKeywords(plugin.id, null)
+        this.plugins.applyOverrides(plugin.id)
+        return { ok: true, plugins: this.plugins.info() }
+      }
       case 'setCapability': {
         // 用户拒绝 / 恢复某项高风险能力（安装时确认的落点）
         const capability = typeof payload.capability === 'string' ? payload.capability : ''
@@ -738,6 +763,17 @@ export class Kernel {
       default:
         throw new LauncherError('BAD_ARGS', `未知插件动作：${action}`)
     }
+  }
+
+  /** setKeywords / resetKeywords 的入参校验：插件必须存在，命令（若给）必须在清单里 */
+  private requireOverrideTarget(id: string, payload: Record<string, unknown>): { command: string; plugin: PluginRecord } {
+    const plugin = this.plugins.get(id)
+    if (!plugin) throw new LauncherError('NOT_FOUND', `插件不存在：${id}`)
+    const command = typeof payload.command === 'string' ? payload.command : ''
+    if (command && !(plugin.manifest?.commands ?? []).some((decl) => decl.name === command)) {
+      throw new LauncherError('NOT_FOUND', `命令不存在：${id}:${command}`)
+    }
+    return { command, plugin }
   }
 
   /** 脚本（worker）侧的宿主调用，统一过审计（P6） */

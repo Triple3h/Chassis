@@ -157,7 +157,8 @@ active → degraded（脚本连续失败 3 次）
 
 - 只 `listen(0, '127.0.0.1')`（不绑 `0.0.0.0`，避免 macOS 防火墙弹窗）
 - 只暴露插件目录（`resolveWithinRoot` 防穿越），响应头带 CSP：
-  `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:; frame-src 'none'; object-src 'none'; base-uri 'none'`
+  `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https:; frame-src 'none'; object-src 'none'; base-uri 'none'`
+  （`'wasm-unsafe-eval'` 只放行随包 wasm 的编译，JS 的 `eval` / `new Function` 仍被禁止）
 - 会话 URL：`http://127.0.0.1:<port>/index.html?sid=&cmd=&theme=&token=[&args=]`
 
 ### 6.3 桥的三重校验

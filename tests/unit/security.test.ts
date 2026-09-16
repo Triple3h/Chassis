@@ -4,6 +4,7 @@ import { assertSafePathPart, resolveWithinRoot } from '../../apps/kernel/src/uti
 import { truncateForAudit } from '../../apps/kernel/src/util/text'
 import { assertHttpUrl } from '../../apps/kernel/src/services/shell'
 import { buildPinyin, matchTarget } from '../../apps/kernel/src/pinyin'
+import { CSP } from '../../apps/kernel/src/http/pluginServers'
 
 test('静态服务路径穿越防护', () => {
   const root = '/tmp/plugin-root'
@@ -74,6 +75,15 @@ test('拼音索引：全拼与首字母都能命中', () => {
   assert(matchTarget('yingyong', { title: '应用启动器' }).score >= 0.5, '全拼应当命中')
   assert(matchTarget('yyqdq', { title: '应用启动器' }).score >= 0.4, '首字母应当命中')
   assertEqual(matchTarget('zzzz', { title: '应用启动器' }).score, -1)
+})
+
+test('插件页 CSP：放行随包 wasm 的编译，但不放行 JS 的 eval', () => {
+  const scriptSrc = CSP.split('; ').find((d) => d.startsWith('script-src'))
+  assert(scriptSrc !== undefined, `CSP 缺少 script-src：${CSP}`)
+  const tokens = scriptSrc.split(' ')
+  assert(tokens.includes("'wasm-unsafe-eval'"), `插件页 wasm 未放行（totp 扫码会报 CompileError）：${scriptSrc}`)
+  assert(!tokens.includes("'unsafe-eval'"), `不得放行 JS 的 eval：${scriptSrc}`)
+  assert(CSP.includes("object-src 'none'"), `object-src 应保持关闭：${CSP}`)
 })
 
 const failed = await run('安全与匹配')

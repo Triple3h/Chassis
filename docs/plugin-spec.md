@@ -96,7 +96,7 @@ my-plugin/
 | `description` | 应当 | string | ≤ 200 字符 | 设置页展示 |
 | `author` | 应当 | string | | |
 | `icon` | 可选 | string | 插件内相对路径 | 默认图标 |
-| `keywords` | 可选 | string[] | ≤ 10 | 提高整体命中率（别名、拼音） |
+| `keywords` | 可选 | string[] | ≤ 10 | 插件级别名：兜底给该插件**全部**入口命令（与命令级取并集后参与匹配，见 §3.2 末） |
 | `categories` | 可选 | string[] | | 分类标签（展示用） |
 | `private` | 可选 | boolean | | 仅源工程用，产物中剥掉 |
 
@@ -120,6 +120,16 @@ my-plugin/
 - `name` 在插件内唯一 → 全局 id = `${pluginId}:${name}`
 - 至少 1 条命令；`mode: 'view'` 的命令共用同一个 `index.html`
 - `searchable: true` 与 `contributes: true` 可同时为真
+
+**别名的两层与匹配**（内核 `apps/kernel/src/overrides.ts` + `pinyin.ts`）：
+
+- 实际参与搜索的别名 = **插件级 ∪ 命令级**（忽略大小写去重、插件级在前，每层 ≤ 10 条）；
+- 别名与 `subtitle` 同权重 0.4（排序见 §9.1），且**同样走拼音索引**：短词会被长词包含命中
+  （例子：别名 `totp` 会让用户搜 `otp` 也命中该命令，属预期行为）；
+- **中文标题 + 英文入口的命令必须配别名**：`title: "双重验证码"` 搜 `totp` 匹配不上（§12 风险表的落地方式）；
+- 用户可在「设置 → 插件」里就地改别名（插件级 / 命令级），存 `<dataRoot>/plugin-overrides.json` ——
+  **不写插件产物**，重装 / 更新插件都不会丢；覆盖层里 `undefined` = 用清单原值、`[]` = 用户显式清空，
+  改完注册表即时更新、**不需要重载插件**。
 
 ### 3.3 清单校验矩阵（内核实现依据）
 
@@ -193,7 +203,8 @@ http://127.0.0.1:<port>/index.html?sid=<uuid>&cmd=<command>&theme=dark|light&tok
 
 ### 5.4 网络
 
-- CSP：`default-src 'self'; img-src 'self' data: blob:; connect-src 'self' https:; frame-src 'none'`
+- CSP：`default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; connect-src 'self' https:; frame-src 'none'`
+  （`'wasm-unsafe-eval'` 只放行随包 wasm 的编译；JS 的 `eval` / `new Function` 仍被禁止）
 - **禁止**访问 `http://127.0.0.1:*` / `http://localhost:*`（防插件探测本机服务）；需要局域网/本地服务请提 capability 需求
 - wasm **必须**随包（`?url` 打进产物），**不得**走 CDN
 
@@ -391,6 +402,8 @@ type ActionDecl =
 - 深浅色**必须**都可用；不要在白色背景上写死深色文本
 - 字号：正文 13px / 次要 12px；圆角与间距用令牌变量
 - 过渡时长与缓动**应当**用 `--launcher-motion-*` / `--launcher-ease-*` 令牌（ADR-0004），不要写死数值；离场时长**应当**短于进场
+- 滚动条**不要**自己写样式：引了 `theme.css` 就已经是「轨道隐形 + 6px 药丸滑块、轨道颜色只由前景色推导」的统一款式（宿主与全部插件页同一套）。
+  不引 `theme.css` 的插件页会落到系统样式 —— 系统开着「始终显示滚动条」时是带边框轨道与两端箭头的经典样式，和本套扁平界面放在一起很扎眼
 
 ### 10.2 键盘
 

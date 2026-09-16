@@ -117,7 +117,24 @@
 
 ### 3.4 设置面板（internal 插件）
 
-分组：**通用**（热键、开机自启、隐藏行为、语言）、**外观**（主题 跟随系统/浅/深、主题色、结果密度）、**插件**（列表、启停、卸载、从文件夹/zip 安装、刷新）、**数据**（历史条数上限、清空历史、清空审计日志、数据目录位置）、**关于**（版本、检查更新、许可证、日志）。
+分组：**通用**（热键、开机自启、隐藏行为、语言）、**外观**（主题 跟随系统/浅/深、主题色、结果密度）、
+**插件**（主从两栏，见下）、**数据**（历史条数上限、清空历史、清空审计日志、数据目录位置）、
+**关于**（版本、检查更新、许可证、日志）。
+
+**插件页（主从两栏）**：左列表带搜索（插件名 / id / 命令名）与状态筛选（全部 / 启用 / 禁用 / 异常），
+每行显示状态点与命令数；右侧详情：
+
+- 能力列表可点击**拒绝 / 恢复**（写 `config.denied`，插件立即重载）；已拒绝的能力红字划掉；
+- **插件级别名**一行：兜底给该插件全部入口命令；
+- **命令逐条列出**（名称 / 标题 / 模式 / 是否可搜索 / 是否贡献结果 / 报错），
+  `searchable` 与 `contributes` 的命令可就地编辑**命令级别名**；
+- 别名编辑走 chip 输入：回车或逗号添加、`×` 删除、停顿或失焦自动保存并提示「搜索立即生效」；
+  实际参与搜索 = 插件级 ∪ 命令级；每项提供「恢复默认」；
+- 别名存 `<dataRoot>/plugin-overrides.json`，**不写插件产物**（重装 / 更新插件不丢），改完无需重载；
+- 危险操作（卸载，需二次确认）与常规操作（重载 / 打开目录 / 数据目录）分区；
+- 安装入口在列表底部（zip / 目录路径），另支持把 zip 拖进启动台窗口。
+
+刷新策略：列表轮询只在**摘要真的变了**且用户没有正在编辑时才重渲染（否则会打断输入、丢焦点）。
 
 ### 3.5 插件安装
 
@@ -413,6 +430,8 @@ interface PinnedItem extends Omit<HistoryItem, 'lastUsed' | 'count'> {
 - 置灰判定：`command` 是命令名（`COMMAND_NAME_RE`）时校验命令是否还在；是结果项 id 时只校验插件是否可用
 - 排序公式（内核侧）：`score = 0.55 * match + 0.30 * recency + 0.15 * frequency`
   - `match`：标题前缀命中 1.0 / 包含 0.7 / 拼音全拼 0.6 / 首字母 0.5 / 副标题与 keywords 0.4
+    - `keywords` = **插件级 ∪ 命令级**（忽略大小写去重）；用户在设置页改的别名存
+      `<dataRoot>/plugin-overrides.json`，覆盖清单原值，改完注册表即时更新
   - `recency`：`exp(-Δh / 72)`（半衰 3 天）
   - `frequency`：`min(1, log2(count + 1) / 5)`
   - 插件自评 `score` 存在时：`final = 0.6 * pluginScore + 0.4 * kernelScore`
@@ -519,7 +538,7 @@ http://127.0.0.1:<port>/index.html?sid=<uuid>&cmd=<command>&theme=dark|light&tok
 ```
 - 每次打开 view 命令 = 一个新会话（同插件复用同一 listener/端口，`sid` 区分）
 - 只绑 `127.0.0.1`（**不要 0.0.0.0**，避免 macOS 防火墙弹窗）
-- 静态服务只暴露插件目录，禁止目录穿越；响应头带 CSP：`default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' https:; frame-src 'none'`
+- 静态服务只暴露插件目录，禁止目录穿越；响应头带 CSP：`default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https:; frame-src 'none'`（`'wasm-unsafe-eval'` 只放行随包 wasm 的编译，不放行 JS 的 `eval`）
 
 ### 8.5 桥协议（postMessage）
 

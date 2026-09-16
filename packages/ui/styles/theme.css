@@ -33,6 +33,11 @@
   --launcher-key: #2563eb;
   --launcher-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
 
+  /* 滚动条滑块：只由前景色调出来（深浅主题各自动取值），几何在文件末尾的 ::-webkit-scrollbar 块 */
+  --launcher-scroll-thumb: color-mix(in srgb, var(--launcher-fg) 16%, transparent);
+  --launcher-scroll-thumb-hover: color-mix(in srgb, var(--launcher-fg) 34%, transparent);
+  --launcher-scroll-thumb-active: color-mix(in srgb, var(--launcher-fg) 50%, transparent);
+
   /* ── 动效令牌（与宿主 apps/launcher-ui/src/styles/app.css 同值同档）──
      插件页视觉要与宿主一致，动效也得同一手感；改档位请两边一起改。 */
   --launcher-motion-instant: 90ms;
@@ -128,24 +133,33 @@ body {
   box-sizing: border-box;
 }
 
-/* 宿主同款极简滚动条 */
+/* ── 滚动条：宿主同款「极简滚动条」──────────────────────────────
+   轨道隐形、滑块收成 6px 药丸，平时极淡、悬停与拖动才加深。
+   必须显式覆盖，否则系统开着「始终显示滚动条」时 WebKit 会画那套
+   带边框轨道 + 两端箭头的经典样式，和本套扁平界面放在一起很扎眼。
+   改参数请与 apps/launcher-ui/src/styles/app.css、plugins/internal-settings/index.html 三处一起改。 */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
-::-webkit-scrollbar-thumb {
-  background: var(--launcher-line-strong);
-  border: 3px solid transparent;
-  background-clip: content-box;
-  border-radius: 8px;
+::-webkit-scrollbar-button {
+  display: none; /* 两端箭头：只有经典样式才有的部件 */
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--launcher-muted);
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
+::-webkit-scrollbar-track,
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--launcher-scroll-thumb);
+  border: 2px solid transparent; /* 10px 轨道里只露出 6px 滑块 */
+  background-clip: content-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--launcher-scroll-thumb-hover);
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--launcher-scroll-thumb-active);
 }
 
 input,

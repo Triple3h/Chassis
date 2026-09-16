@@ -8,7 +8,9 @@ const CSP = [
   "default-src 'self'",
   "img-src 'self' data: blob:",
   "style-src 'self' 'unsafe-inline'",
-  "script-src 'self'",
+  // 'wasm-unsafe-eval'：放行随包 wasm 的编译（如 totp 的 zxing 二维码解码器）。
+  // 它只允许 WebAssembly 编译，不放行 JS 的 eval / new Function。
+  "script-src 'self' 'wasm-unsafe-eval'",
   "font-src 'self' data:",
   "connect-src 'self' https:",
   "frame-src 'none'",
