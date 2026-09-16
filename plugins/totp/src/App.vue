@@ -117,7 +117,11 @@ async function copyAccount(a: Account) {
   }
   toast.ok(a.type === 'hotp' ? `已复制 ${code}（计数器 +1）` : `已复制 ${formatCode(code)}`)
   if (a.type === 'hotp') {
-    await persist(accounts.value.map((x) => (x.id === a.id ? { ...x, counter: x.counter + 1 } : x)))
+    try {
+      await persist(accounts.value.map((x) => (x.id === a.id ? { ...x, counter: x.counter + 1 } : x)))
+    } catch (err) {
+      toast.err(`计数器保存失败：${errorText(err)}`)
+    }
     hotpCodes.value = new Map(hotpCodes.value)
     hotpCodes.value.delete(a.id)
     await ensureHotp({ ...a, counter: a.counter + 1 })
@@ -138,20 +142,33 @@ function scheduleClear(code: string) {
 
 /* ------------------------------------------------------------------ 存储 */
 
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * 落库成功后才更新内存 —— 写失败时界面不该展示一个并未保存的状态。
+ * （反面教材：先前 `accounts.value = list` 提前执行，于是「列表看起来改好了、其实没落盘」。）
+ */
 async function persist(list: Account[]) {
-  accounts.value = list
   if (vault.value && passphrase.value) {
     const blob = await encryptJson(passphrase.value, list)
-    vault.value = blob
     await saveVault(blob)
+    vault.value = blob
   } else {
     await saveAccounts(list)
   }
+  accounts.value = list
 }
 
 async function updateSettings(next: Settings) {
+  try {
+    await saveSettings(next)
+  } catch (err) {
+    toast.err(`设置保存失败：${errorText(err)}`)
+    return
+  }
   settings.value = next
-  await saveSettings(next)
 }
 
 async function enableVault(password: string) {
@@ -200,11 +217,15 @@ function exportAccounts() {
 }
 
 async function clearAll() {
-  accounts.value = []
+  try {
+    await persist([])
+  } catch (err) {
+    toast.err(`清空失败：${errorText(err)}`)
+    return
+  }
   codeMap.value = new Map()
   hotpCodes.value = new Map()
   cache.clear()
-  await persist([])
   toast.info('已清空')
 }
 
@@ -223,14 +244,24 @@ function openEdit(a: Account) {
 async function saveAccount(account: Account) {
   const exists = accounts.value.some((a) => a.id === account.id)
   const list = exists ? accounts.value.map((a) => (a.id === account.id ? account : a)) : [...accounts.value, account]
-  await persist(list)
+  try {
+    await persist(list)
+  } catch (err) {
+    toast.err(`保存失败：${errorText(err)}`)
+    return
+  }
   dialog.value = 'none'
   await refreshCodes()
   toast.ok(exists ? '已保存' : '已添加')
 }
 
 async function removeAccount(id: string) {
-  await persist(accounts.value.filter((a) => a.id !== id))
+  try {
+    await persist(accounts.value.filter((a) => a.id !== id))
+  } catch (err) {
+    toast.err(`删除失败：${errorText(err)}`)
+    return
+  }
   dialog.value = 'none'
   toast.info('已删除')
 }
@@ -241,7 +272,12 @@ async function importAccounts(list: Account[]) {
     if (merged.some((a) => a.secret === item.secret && a.issuer === item.issuer && a.name === item.name)) continue
     merged.push({ ...item, id: newId() })
   }
-  await persist(merged)
+  try {
+    await persist(merged)
+  } catch (err) {
+    toast.err(`导入失败：${errorText(err)}`)
+    return
+  }
   dialog.value = 'none'
   await refreshCodes()
   for (const a of merged) if (a.type === 'hotp') void ensureHotp(a)
