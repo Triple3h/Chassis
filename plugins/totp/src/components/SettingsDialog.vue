@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import UiDialog from '@launcher/ui/UiDialog.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
+import UiSelect from '@launcher/ui/UiSelect.vue'
 import { passwordHint } from '../core/vault'
 import type { Account, Settings } from '../core/types'
 
@@ -24,6 +25,13 @@ const local = ref<Settings>({ ...props.settings })
 const password = ref('')
 const password2 = ref('')
 const feedback = ref('')
+
+const CLEAR_CLIPBOARD_OPTIONS = [
+  { value: 0, label: '不清空' },
+  { value: 15, label: '15 秒后' },
+  { value: 30, label: '30 秒后' },
+  { value: 60, label: '60 秒后' },
+]
 
 const mode = computed(() => (props.hasVault ? '开' : '关'))
 const strength = computed(() => (password.value ? passwordHint(password.value) : '至少 8 位'))
@@ -64,16 +72,12 @@ function submitVault() {
         </label>
         <label class="flex items-center gap-3 text-[13px]">
           复制后自动清空剪贴板
-          <select
-            class="launcher-input !w-32"
-            :value="local.clearClipboardAfter"
-            @change="patch({ clearClipboardAfter: Number(($event.target as HTMLSelectElement).value) })"
-          >
-            <option :value="0">不清空</option>
-            <option :value="15">15 秒后</option>
-            <option :value="30">30 秒后</option>
-            <option :value="60">60 秒后</option>
-          </select>
+          <UiSelect
+            class="!w-32"
+            :model-value="local.clearClipboardAfter"
+            :options="CLEAR_CLIPBOARD_OPTIONS"
+            @update:model-value="(value) => patch({ clearClipboardAfter: Number(value) })"
+          />
         </label>
       </section>
 

@@ -33,6 +33,12 @@
   --launcher-key: #2563eb;
   --launcher-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
 
+  /* UA 自绘控件（下拉开合列表、取色器、原生滚动条…）的明暗由它决定：
+     不跟着主题走的话，深色主题里会弹出一个纯白的原生下拉列表 */
+  color-scheme: light;
+  /* 下拉箭头：原生箭头是系统色，剥掉外观后用它自绘（深色主题另给一份，与 --launcher-muted 同色） */
+  --launcher-select-arrow: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%20viewBox='0%200%2010%206'%3E%3Cpath%20d='M1%201l4%204%204-4'%20fill='none'%20stroke='%236b7280'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E");
+
   /* 滚动条滑块：只由前景色调出来（深浅主题各自动取值），几何在文件末尾的 ::-webkit-scrollbar 块 */
   --launcher-scroll-thumb: color-mix(in srgb, var(--launcher-fg) 16%, transparent);
   --launcher-scroll-thumb-hover: color-mix(in srgb, var(--launcher-fg) 34%, transparent);
@@ -88,6 +94,8 @@
   --launcher-number: #fdba74;
   --launcher-key: #93c5fd;
   --launcher-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+  --launcher-select-arrow: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%20viewBox='0%200%2010%206'%3E%3Cpath%20d='M1%201l4%204%204-4'%20fill='none'%20stroke='%239a9aa2'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 @theme inline {
@@ -184,13 +192,97 @@ button:focus {
   font-size: 13px;
   transition:
     border-color var(--launcher-motion-fast) var(--launcher-ease-move),
-    background var(--launcher-motion-fast) var(--launcher-ease-move);
+    background var(--launcher-motion-fast) var(--launcher-ease-move),
+    box-shadow var(--launcher-motion-fast) var(--launcher-ease-move);
 }
 .launcher-input:focus {
   border-color: var(--launcher-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--launcher-accent) 18%, transparent);
 }
 .launcher-input::placeholder {
   color: var(--launcher-faint);
+}
+
+/* 原生 <select> 的兜底样式（新代码请用 `UiSelect.vue`）：关掉系统外观后
+   关闭态的箭头 / 圆角 / 配色才跟主题 —— 但**弹出菜单仍是系统绘制的**，
+   连 color-scheme 都改不动它，要菜单也同款只能自绘。 */
+.launcher-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 28px;
+  background-image: var(--launcher-select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  cursor: pointer;
+}
+
+/* ── 自绘下拉（UiSelect.vue）────────────────────────────────────
+   菜单用 fixed 定位挂到 body（对话框内容区 overflow:auto，就地绝对定位会被裁），
+   坐标由组件在打开时算好写进行内 style。 */
+.launcher-selectbox {
+  position: relative;
+  width: 100%;
+}
+.launcher-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+.launcher-select-trigger[aria-expanded='true'] {
+  border-color: var(--launcher-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--launcher-accent) 18%, transparent);
+}
+.launcher-select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.launcher-select-caret {
+  color: var(--launcher-muted);
+}
+.launcher-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 120px;
+  max-height: 260px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--launcher-panel);
+  border: 1px solid var(--launcher-line);
+  border-radius: 10px;
+  box-shadow: var(--launcher-shadow);
+}
+.launcher-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--launcher-fg);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.launcher-menu-item:hover,
+.launcher-menu-item:focus {
+  background: var(--launcher-hover);
+  outline: none;
+}
+.launcher-menu-item[aria-selected='true'] {
+  background: color-mix(in srgb, var(--launcher-accent) 14%, transparent);
+  color: var(--launcher-accent);
+  font-weight: 600;
 }
 
 .launcher-btn {

@@ -661,6 +661,10 @@ function bind(): void {
   on('language', 'change', (el) => void patch({ language: (el as HTMLSelectElement).value }))
 
   on('theme', 'change', (el) => void patch({ theme: (el as HTMLSelectElement).value }))
+  // 取色器面板里每挪一下都落盘太吵：拖动只做预览，change（松手 / 关面板）才写配置
+  on('accent', 'input', (el) => {
+    document.documentElement.style.setProperty('--accent', (el as HTMLInputElement).value)
+  })
   on('accent', 'change', (el) => void patch({ accent: (el as HTMLInputElement).value }))
   on('density', 'change', (el) => void patch({ density: (el as HTMLSelectElement).value }))
 

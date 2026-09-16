@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import UiDialog from '@launcher/ui/UiDialog.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
+import UiSelect from '@launcher/ui/UiSelect.vue'
 import { formatSecret, validateSecret } from '../core/base32'
 import { ALGORITHMS, normalizeAccount, type Account } from '../core/types'
 
@@ -24,6 +25,12 @@ const draft = ref<Account>(
 )
 const showSecret = ref(false)
 const touched = ref(false)
+
+const ALGORITHM_OPTIONS = ALGORITHMS.map((item) => ({ value: item, label: item }))
+const DIGIT_OPTIONS = [
+  { value: 6, label: '6 位' },
+  { value: 8, label: '8 位' },
+]
 
 const secretError = computed(() => (draft.value.secret ? validateSecret(draft.value.secret) : '密钥不能为空'))
 const canSave = computed(() => !secretError.value)
@@ -94,16 +101,19 @@ function save() {
       <div class="grid grid-cols-3 gap-3">
         <label class="block">
           <span class="mb-1 block text-[11.5px] text-muted">算法</span>
-          <select v-model="draft.algorithm" class="launcher-input">
-            <option v-for="a in ALGORITHMS" :key="a" :value="a">{{ a }}</option>
-          </select>
+          <UiSelect
+            :model-value="draft.algorithm"
+            :options="ALGORITHM_OPTIONS"
+            @update:model-value="(value) => (draft.algorithm = value as Account['algorithm'])"
+          />
         </label>
         <label class="block">
           <span class="mb-1 block text-[11.5px] text-muted">位数</span>
-          <select v-model.number="draft.digits" class="launcher-input">
-            <option :value="6">6 位</option>
-            <option :value="8">8 位</option>
-          </select>
+          <UiSelect
+            :model-value="draft.digits"
+            :options="DIGIT_OPTIONS"
+            @update:model-value="(value) => (draft.digits = Number(value))"
+          />
         </label>
         <label v-if="draft.type === 'totp'" class="block">
           <span class="mb-1 block text-[11.5px] text-muted">周期（秒）</span>
