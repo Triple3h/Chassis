@@ -36,6 +36,14 @@ export interface PluginManifest {
   icon?: string
   keywords?: string[]
   categories?: string[]
+  /**
+   * 底座基础能力：**不可禁用**（用户界面不提供开关，内核 setDisabled 直接拒绝）。
+   *
+   * 判定标准：禁用它会让启动台基本功能残废（搜应用/搜文件），或让用户失去自救入口
+   * （设置与插件管理被禁用后，界面上再没有地方能把它改回来）。
+   * **只有出厂 bundle（`builtin`）里的声明生效**：第三方插件声明了也一律按 false 处理。
+   */
+  essential?: boolean
 }
 
 /** 全局命令 id：`${pluginId}:${name}` */

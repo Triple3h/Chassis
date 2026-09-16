@@ -45,6 +45,18 @@ test('name 必须符合 [a-z0-9-] 且首尾为小写字母数字', () => {
   }
 })
 
+test('essential 只接受布尔值；不写 = 未声明（不是 false）', () => {
+  const absent = validateManifest(VALID)
+  assert(absent.ok && absent.manifest.essential === undefined, '不写就是未声明')
+
+  const declared = validateManifest({ ...VALID, essential: true })
+  assert(declared.ok && declared.manifest.essential === true)
+
+  const wrong = validateManifest({ ...VALID, essential: 'yes' })
+  assert(!wrong.ok)
+  assertEqual(wrong.code, 'MANIFEST_INVALID')
+})
+
 test('未知 apiVersion 报 API_VERSION_UNSUPPORTED', () => {
   const result = validateManifest({ ...VALID, apiVersion: '2' })
   assert(!result.ok)

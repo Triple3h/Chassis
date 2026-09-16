@@ -166,6 +166,8 @@ export interface PluginRuntimeInfo {
   state: 'discovered' | 'validating' | 'loading' | 'active' | 'disabled' | 'error' | 'crashed' | 'degraded'
   error?: string
   builtin: boolean
+  /** 底座基础能力：不可禁用（界面不提供开关，内核 setDisabled 直接拒绝） */
+  essential: boolean
   dir: string
   /** dev server 地址（开发模式） */
   devUrl?: string

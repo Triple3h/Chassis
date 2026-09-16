@@ -9,6 +9,7 @@
   "author": "launcher",
   "icon": "settings",
   "keywords": ["settings", "设置", "插件", "plugins", "偏好"],
+  "essential": true,
   "capabilities": ["hostUi"],
   "commands": [
     {

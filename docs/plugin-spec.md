@@ -98,6 +98,7 @@ my-plugin/
 | `icon` | 可选 | string | 插件内相对路径 | 默认图标 |
 | `keywords` | 可选 | string[] | ≤ 10 | 插件级别名：兜底给该插件**全部**入口命令（与命令级取并集后参与匹配，见 §3.2 末） |
 | `categories` | 可选 | string[] | | 分类标签（展示用） |
+| `essential` | 可选 | boolean | 默认 `false` | 底座基础能力：**不可禁用**（设置页不提供开关，内核 `setDisabled` 直接拒绝）。判定标准：禁用它会让启动台基本功能残废（搜应用 / 搜文件），或让用户失去自救入口（设置与插件管理被禁用后，界面上再没有地方能改回来） |
 | `private` | 可选 | boolean | | 仅源工程用，产物中剥掉 |
 
 ### 3.2 `commands[]`（CommandDecl）
@@ -115,6 +116,9 @@ my-plugin/
 | `contributes` | 可选 | boolean，默认 `false` | 贡献型搜索（§9.1）：搜索过程中由插件返回结果项 |
 | `capabilities` | 可选 | string[] | 该命令的额外能力（并入插件级，取并集） |
 | `hidden` | 可选 | boolean，默认 `false` | 不出现在搜索结果（仍可被 `invoke` 调用） |
+
+> `essential` **只有出厂 bundle 的声明生效**：内核按 `builtin && essential` 判定，第三方插件在清单里写 `true` 也不会获得
+> 「用户关不掉」的待遇（那是权限提升）。出厂插件的 id 与数据布局见 §2。
 
 约束：
 - `name` 在插件内唯一 → 全局 id = `${pluginId}:${name}`

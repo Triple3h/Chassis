@@ -147,6 +147,17 @@ export class PluginManager {
     return state === 'active' || state === 'degraded'
   }
 
+  /**
+   * 底座基础能力：出厂 bundle 里声明了 `essential` 的插件 —— **不可禁用**。
+   *
+   * 只认出厂声明（`builtin`）：第三方插件即使在清单里写 `essential: true` 也不生效，
+   * 否则它就能把自己变成「用户关不掉」的插件（权限提升）。
+   */
+  isEssential(id: string): boolean {
+    const record = this.records.get(id)
+    return Boolean(record?.builtin && record.manifest?.essential)
+  }
+
   isCommandAlive(pluginId: string, command: string): boolean {
     if (!this.isActive(pluginId)) return false
     const record = this.records.get(pluginId)
@@ -222,6 +233,7 @@ export class PluginManager {
         state: record.state,
         ...(record.error ? { error: record.error } : {}),
         builtin: record.builtin,
+        essential: this.isEssential(record.id),
         dir: record.dir,
         ...(record.devUrl ? { devUrl: record.devUrl } : {}),
       }
@@ -247,6 +259,7 @@ export class PluginManager {
   // ── 装配 ────────────────────────────────────────────────────
   async init(): Promise<void> {
     await this.scan()
+    await this.pruneEssentialDisabled()
     for (const record of this.list()) {
       if (this.deps.config.get().disabled.includes(record.id)) {
         record.state = 'disabled'
@@ -258,6 +271,31 @@ export class PluginManager {
     }
     const active = this.list().filter((r) => this.isActive(r.id)).length
     this.deps.log('info', `插件装配完成：${active}/${this.records.size} 激活`)
+  }
+
+  /**
+   * 基础能力不可禁用：配置里若残留它们的禁用项（手改配置 / 旧版本留下的），一律忽略并清掉 ——
+   * 否则「设置与插件管理」被禁用后就再没有界面能把它改回来（自救入口没了）。
+   */
+  private async pruneEssentialDisabled(): Promise<void> {
+    const disabled = this.deps.config.get().disabled
+    if (disabled.length === 0) return
+    const kept: string[] = []
+    const dropped: string[] = []
+    for (const id of disabled) {
+      const record = this.records.get(id)
+      if (!record?.builtin) {
+        kept.push(id)
+        continue
+      }
+      // 装配还没开始，manifest 只能现读一次（插件数量少，代价可忽略）
+      const result = await readManifest(record.dir)
+      if (result.ok && result.manifest.essential) dropped.push(id)
+      else kept.push(id)
+    }
+    if (dropped.length === 0) return
+    await this.deps.config.patch({ disabled: kept })
+    this.deps.log('info', `基础能力不可禁用：已忽略配置中的禁用项（${dropped.join(', ')}）`)
   }
 
   /** 监听 extensions/（chokidar）：新增/更新/删除自动热重载 */
@@ -532,6 +570,9 @@ export class PluginManager {
   }
 
   async setDisabled(id: string, disabled: boolean): Promise<void> {
+    if (disabled && this.isEssential(id)) {
+      throw new LauncherError('FORBIDDEN', `「${this.titleOf(id)}」是底座基础能力，不可禁用`)
+    }
     const cfg = this.deps.config.get()
     const next = disabled ? [...new Set([...cfg.disabled, id])] : cfg.disabled.filter((x) => x !== id)
     await this.deps.config.patch({ disabled: next })

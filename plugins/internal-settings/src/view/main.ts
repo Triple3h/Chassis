@@ -40,6 +40,8 @@ interface PluginLike {
   state: string
   error?: string
   builtin: boolean
+  /** 底座基础能力：不可禁用（列表里带「基础」标记、不渲染开关） */
+  essential: boolean
   dir: string
   capabilities: string[]
   deniedCapabilities: string[]
@@ -273,7 +275,8 @@ function matchQuery(plugin: PluginLike): boolean {
 }
 
 function filteredPlugins(): PluginLike[] {
-  return plugins.filter(matchQuery)
+  // 基础能力置顶（sort 稳定：其余保持内核返回的 id 序）
+  return plugins.filter(matchQuery).sort((a, b) => Number(b.essential) - Number(a.essential))
 }
 
 function renderPluginList(): string {
@@ -283,11 +286,21 @@ function renderPluginList(): string {
         const active = plugin.id === selectedPluginId ? ' active' : ''
         const custom =
           plugin.keywordsCustomized || plugin.commands.some((command) => command.keywordsCustomized)
+        // 基础能力没有开关（内核也拒绝禁用）；其余插件的开关：已禁用常显、启用中半透明常显、hover 全显。
+        // role=switch + tabindex：键盘也能操作（Enter / 空格），可访问树里才看得见这个开关
+        const enabled = plugin.state !== 'disabled'
+        const toggle = plugin.essential
+          ? ''
+          : `<span class="mtoggle${enabled ? ' on' : ''}" data-toggle="${escapeHtml(plugin.id)}" role="switch" aria-checked="${enabled}" tabindex="0" title="${
+              enabled ? '禁用' : '启用'
+            }"></span>`
         return `
         <button class="mitem${active}" data-select="${escapeHtml(plugin.id)}">
           ${stateDot(plugin.state)}
           <span class="mname">${escapeHtml(plugin.title)}</span>
+          ${plugin.essential ? '<span class="tag">基础</span>' : ''}
           ${custom ? '<span class="mdot" title="别名被改过"></span>' : ''}
+          ${toggle}
           <span class="mmeta">${plugin.commands.length}</span>
         </button>
       `
@@ -344,6 +357,11 @@ function renderPluginDetail(): string {
       .join('') || '<p class="muted">没有命令</p>'
 
   const actions = [
+    plugin.essential
+      ? ''
+      : plugin.state === 'disabled'
+        ? `<button class="btn" data-action="enable" data-id="${escapeHtml(plugin.id)}">启用</button>`
+        : `<button class="btn" data-action="disable" data-id="${escapeHtml(plugin.id)}">禁用</button>`,
     `<button class="btn" data-action="reload" data-id="${escapeHtml(plugin.id)}">重载</button>`,
     `<button class="btn" data-action="reveal" data-id="${escapeHtml(plugin.id)}">打开目录</button>`,
     `<button class="btn" data-action="openData" data-id="${escapeHtml(plugin.id)}">数据目录</button>`,
@@ -358,7 +376,13 @@ function renderPluginDetail(): string {
         <strong>${escapeHtml(plugin.title)}</strong>
         <span class="muted">${escapeHtml(plugin.version)}</span>
         ${stateBadge(plugin)}
-        ${plugin.builtin ? '<span class="badge">出厂自带</span>' : ''}
+        ${
+          plugin.essential
+            ? '<span class="badge accent">基础能力</span>'
+            : plugin.builtin
+              ? '<span class="badge">出厂自带</span>'
+              : ''
+        }
       </div>
       ${plugin.description ? `<div class="hint">${escapeHtml(plugin.description)}</div>` : ''}
       <div class="hint">${escapeHtml(plugin.id)} ｜ apiVersion ${escapeHtml(plugin.apiVersion)}${
@@ -383,6 +407,11 @@ function renderPluginDetail(): string {
     </section>
 
     <section class="dsec danger">
+      ${
+        plugin.essential
+          ? '<div class="hint">底座基础能力：不可禁用、不可卸载 —— 禁用会让启动台失去基本功能，或让你没有办法把设置改回来</div>'
+          : ''
+      }
       <div class="hint path">${escapeHtml(plugin.dir)}</div>
       <div class="dactions">${actions}</div>
     </section>
@@ -747,8 +776,9 @@ async function toggleCapability(pluginId: string, capability: string): Promise<v
 
 async function runPluginAction(action: string, id: string): Promise<void> {
   if (action === 'uninstall' && !window.confirm(`确定卸载插件「${id}」？其数据目录会保留。`)) return
-  await guard(() => settings.pluginAction(action, { id }), undefined)
-  toast('已执行')
+  const result = await guard(() => settings.pluginAction(action, { id }), null)
+  if (!result) return
+  toast(action === 'disable' ? '已禁用' : action === 'enable' ? '已启用' : '已执行')
   await loadPlugins()
   render()
 }
@@ -775,7 +805,8 @@ async function installPlugin(): Promise<void> {
   const target = (document.getElementById('installPath') as HTMLInputElement | null)?.value?.trim()
   if (!target) return
   const action = target.toLowerCase().endsWith('.zip') ? 'installZip' : 'installDir'
-  await guard(() => settings.pluginAction(action, { path: target, overwrite: false }), undefined)
+  const result = await guard(() => settings.pluginAction(action, { path: target, overwrite: false }), null)
+  if (!result) return
   toast('安装完成')
   installOpen = false
   await loadPlugins()
@@ -783,7 +814,8 @@ async function installPlugin(): Promise<void> {
 }
 
 async function reloadAllPlugins(): Promise<void> {
-  await guard(() => settings.pluginAction('reloadAll'), undefined)
+  const result = await guard(() => settings.pluginAction('reloadAll'), null)
+  if (!result) return
   toast('已重载全部插件')
   await loadPlugins()
   render()
@@ -798,6 +830,13 @@ function isEditing(): boolean {
 
 function onPanelClick(event: Event): void {
   const node = event.target as HTMLElement
+  // 开关必须排在「选中」之前：它长在列表项里面（点击会同时命中 data-select）
+  const toggle = node.closest<HTMLElement>('[data-toggle]')
+  if (toggle?.dataset.toggle) {
+    const plugin = pluginById(toggle.dataset.toggle)
+    if (plugin) void runPluginAction(plugin.state === 'disabled' ? 'enable' : 'disable', plugin.id)
+    return
+  }
   const select = node.closest<HTMLElement>('[data-select]')
   if (select?.dataset.select) {
     selectPlugin(select.dataset.select)
@@ -844,6 +883,16 @@ function onPanelClick(event: Event): void {
 }
 
 function onPanelKeydown(event: KeyboardEvent): void {
+  // 列表开关（role=switch）用 Enter / 空格切换 —— 别让它落到外层列表项的默认行为上
+  const switchEl = (event.target as HTMLElement).closest<HTMLElement>('[data-toggle]')
+  if (switchEl) {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    const plugin = pluginById(switchEl.dataset.toggle ?? '')
+    if (plugin) void runPluginAction(plugin.state === 'disabled' ? 'enable' : 'disable', plugin.id)
+    return
+  }
+
   const input = (event.target as HTMLElement).closest<HTMLInputElement>('.chip-input')
   if (!input) return
   if (event.key === 'Enter' || event.key === ',' || event.key === '，') {

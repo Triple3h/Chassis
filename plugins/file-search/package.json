@@ -9,6 +9,7 @@
   "author": "launcher",
   "icon": "file-search",
   "keywords": ["file", "文件", "搜索", "mdfind", "spotlight"],
+  "essential": true,
   "capabilities": ["storage", "shell.open"],
   "commands": [
     {

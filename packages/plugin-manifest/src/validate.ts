@@ -201,6 +201,10 @@ export function validateManifest(raw: unknown): ManifestValidation {
     }
     manifest.categories = raw.categories as string[]
   }
+  if (raw.essential !== undefined) {
+    if (typeof raw.essential !== 'boolean') return fail('MANIFEST_INVALID', 'essential 必须是布尔值')
+    manifest.essential = raw.essential
+  }
 
   return { ok: true, manifest, warnings }
 }

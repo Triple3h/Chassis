@@ -127,6 +127,24 @@
       .dot.ok { background: #10b981; }
       .dot.err { background: #ef4444; }
       .mdot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; }
+      .tag {
+        font-size: 10px; line-height: 15px; padding: 0 5px; border-radius: 4px; flex: none;
+        background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+      }
+      /* 启用/禁用开关：已禁用常显（灰、滑块靠左），启用中 hover/选中才浮出来 */
+      .mtoggle {
+        width: 26px; height: 15px; border-radius: 999px; flex: none; position: relative;
+        background: var(--border); opacity: 0; transition: opacity 0.15s;
+      }
+      .mtoggle.on { background: #10b981; opacity: 0.4; }
+      .mtoggle:not(.on) { opacity: 1; background: var(--muted); }
+      .mitem:hover .mtoggle, .mitem.active .mtoggle, .mtoggle:focus-visible { opacity: 1; }
+      .mtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .mtoggle::after {
+        content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px;
+        border-radius: 50%; background: var(--bg); transition: transform 0.15s;
+      }
+      .mtoggle.on::after { transform: translateX(11px); }
       .mfoot { padding: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
       .install-box { display: flex; flex-direction: column; gap: 6px; }
       .mdetail { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 28px; }

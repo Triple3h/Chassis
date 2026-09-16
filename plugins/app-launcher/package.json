@@ -9,6 +9,7 @@
   "author": "launcher",
   "icon": "app-window",
   "keywords": ["app", "应用", "启动", "launch"],
+  "essential": true,
   "capabilities": ["storage", "exec.spawn", "shell.open"],
   "commands": [
     {
