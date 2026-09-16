@@ -176,7 +176,7 @@ active → degraded（脚本连续失败 3 次）
 ## 7. 数据布局（`dataRoot`）
 
 ```
-~/Library/Application Support/Launcher/
+~/Library/Application Support/Chassis/
 ├── config.json                  # 配置（版本化，可迁移）
 ├── history.json  pinned.json    # 最近使用 / 已固定（debounce + 原子写）
 ├── quicklinks.json

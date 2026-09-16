@@ -57,16 +57,10 @@ fn set_autostart(app: &AppHandle, params: &Value) -> Result<Value, String> {
 
 fn app_info(app: &AppHandle) -> Result<Value, String> {
     let version = app.package_info().version.to_string();
-    let data_root = if let Ok(home) = std::env::var("HOME") {
-        std::path::PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join("Launcher")
-            .to_string_lossy()
-            .to_string()
-    } else {
-        String::new()
-    };
+    // 数据目录只认 `sidecar::data_root` 这一个来源。
+    // 这里原先自己拼了一份路径常量 —— 应用改名（Launcher → Chassis）时就成了漏改点：
+    // 报告给插件的 dataRoot 与真实数据目录会分叉，插件按它去找文件会找不到。
+    let data_root = crate::sidecar::data_root(app).to_string_lossy().to_string();
     Ok(json!({
         "version": version,
         "platform": std::env::consts::OS,

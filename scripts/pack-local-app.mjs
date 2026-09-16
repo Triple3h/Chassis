@@ -2,10 +2,10 @@
 /**
  * 自用打包（不走 tauri-cli / 不公证 / 不打 dmg）：
  *   1. cargo build --release
- *   2. 手工组装 Launcher.app（Info.plist + MacOS/ + Resources/）
+ *   2. 手工组装 <APP_NAME>.app（Info.plist + MacOS/ + Resources/）
  *   3. ad-hoc 签名（Apple Silicon 上未签名会被内核杀掉）
  *
- * 产出：dist-app/Launcher.app —— 拖进 /Applications 即可双击运行。
+ * 产出：dist-app/<APP_NAME>.app —— 拖进 /Applications 即可双击运行。
  *
  * 用法：node scripts/pack-local-app.mjs [--skip-build]
  *   --skip-build  跳过前端产物构建（只重编 Rust / 重新组装）
@@ -18,7 +18,19 @@ import { assembleResources } from './lib/resources.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const shellDir = path.join(repoRoot, 'apps', 'shell')
-const outApp = path.join(repoRoot, 'dist-app', 'Launcher.app')
+
+/**
+ * 应用名 = 项目名（改这一处即可）。
+ *
+ * 刻意**不动** `CFBundleIdentifier`（仍是 `app.launcher.desktop`）：
+ * 它牵着两件事 —— macOS 的 TCC 授权（辅助功能 / 通知按 bundle id 记账，改了就得重新授权）
+ * 与 `tauri-plugin-single-instance` 的互斥判定（同 id 才认作「同一个应用」）。
+ *
+ * 数据目录跟着应用名走（`~/Library/Application Support/Chassis`，名字在壳的 `sidecar.rs::APP_DATA_DIR_NAME`）：
+ * 老目录 `Launcher/` 由壳启动时**一次性接手（只复制不移动，老目录留着回退）**，换包即可，不用手动拷。
+ */
+const APP_NAME = 'Chassis'
+const outApp = path.join(repoRoot, 'dist-app', `${APP_NAME}.app`)
 
 const skipBuild = process.argv.includes('--skip-build')
 
@@ -101,7 +113,7 @@ try {
 
 line('')
 line(`✓ 打包完成：${path.relative(repoRoot, outApp)}`)
-line('  安装：把 Launcher.app 拖进 /Applications，双击运行')
+line(`  安装：把 ${APP_NAME}.app 拖进 /Applications，双击运行`)
 line('  首次运行：系统会提示"辅助功能/通知"权限，按提示授权即可')
 
 function infoPlist() {
@@ -111,8 +123,8 @@ function infoPlist() {
 <dict>
   <key>CFBundleExecutable</key><string>launcher-shell</string>
   <key>CFBundleIdentifier</key><string>app.launcher.desktop</string>
-  <key>CFBundleName</key><string>Launcher</string>
-  <key>CFBundleDisplayName</key><string>Launcher</string>
+  <key>CFBundleName</key><string>${APP_NAME}</string>
+  <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>

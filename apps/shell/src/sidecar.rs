@@ -282,6 +282,11 @@ fn newest_node_under(dir: &Path, suffix: &str) -> Option<PathBuf> {
     versions.pop().map(|(_, path)| path)
 }
 
+/// 数据目录名 = 应用名（2026-09-16 起从 `Launcher` 改成 `Chassis`）
+pub const APP_DATA_DIR_NAME: &str = "Chassis";
+/// 改名前的数据目录名 —— 只用于一次性接手，别再往这里写东西
+const LEGACY_DATA_DIR_NAME: &str = "Launcher";
+
 pub fn data_root(app: &AppHandle) -> PathBuf {
     if let Ok(path) = std::env::var("LAUNCHER_DATA_ROOT") {
         return PathBuf::from(path);
@@ -292,12 +297,61 @@ pub fn data_root(app: &AppHandle) -> PathBuf {
             return PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
-                .join("Launcher");
+                .join(APP_DATA_DIR_NAME);
         }
     }
     app.path()
         .app_data_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// 应用名从 Launcher 改成 Chassis 时，把老数据目录一次性接手过来。
+///
+/// **只复制、不移动**：老目录原样留着，出问题随时能回退（自己动手、或把 `APP_DATA_DIR_NAME` 指回去）。
+/// 只在「新目录不存在、老目录存在」时动手 ⇒ 重复启动是廉价 no-op；用户自己删掉老目录也不影响。
+///
+/// 调用必须排在 `logging::init` 之前：日志初始化会在数据目录里建 `logs/`，
+/// 那会让「新目录已存在」成立 —— 迁移从此再也不跑，用户看到的是"历史全没了"。
+/// 返回 `Some((老目录, 复制文件数))` 表示这次真的迁移过，供调用方落日志。
+pub fn adopt_legacy_data_dir(current: &Path) -> Option<(PathBuf, usize)> {
+    #[cfg(target_os = "macos")]
+    {
+        let legacy = current.parent()?.join(LEGACY_DATA_DIR_NAME);
+        if current.exists() || !legacy.exists() {
+            return None;
+        }
+        match copy_dir(&legacy, current) {
+            Ok(count) => Some((legacy, count)),
+            Err(err) => {
+                eprintln!("[shell] 接手旧数据目录失败（将用空目录启动）：{err}");
+                None
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = current;
+        None
+    }
+}
+
+/// 递归复制目录（std 没有现成的），返回复制成功的文件数
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<usize> {
+    std::fs::create_dir_all(to)?;
+    let mut count = 0;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if file_type.is_dir() {
+            count += copy_dir(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            std::fs::copy(entry.path(), &target)?;
+            count += 1;
+        }
+        // 符号链接等其它类型直接跳过：数据目录里不该有，宁缺勿错
+    }
+    Ok(count)
 }
 
 fn builtin_plugins_dir(app: &AppHandle) -> PathBuf {

@@ -45,10 +45,10 @@
 ```bash
 pnpm install
 pnpm build        # 内核 + 启动台 UI + 8 个出厂插件
-pnpm app:local    # release 编译 + 组装 + ad-hoc 签名 → dist-app/Launcher.app
+pnpm app:local    # release 编译 + 组装 + ad-hoc 签名 → dist-app/Chassis.app
 ```
 
-把 `dist-app/Launcher.app` 拖进 `/Applications` 双击即可，首次运行会申请辅助功能 / 通知权限。
+把 `dist-app/Chassis.app` 拖进 `/Applications` 双击即可，首次运行会申请辅助功能 / 通知权限。
 
 > **为什么要 ad-hoc 签名**：Apple Silicon 上未签名的可执行文件会被内核直接杀掉（`Killed: 9`），这不是公证问题。
 > 打包脚本会自动执行 `codesign --force --deep --sign -`（免费、仅本机有效），自用**不需要** Apple Developer、公证或自动更新；
@@ -86,7 +86,7 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run / tauri dev）
 
 | 数据位置 | 说明 |
 |---|---|
-| `~/Library/Application Support/Launcher/` | 数据目录（`LAUNCHER_DATA_ROOT` 可覆盖） |
+| `~/Library/Application Support/Chassis/` | 数据目录（`LAUNCHER_DATA_ROOT` 可覆盖；从旧目录 `Launcher/` 自动接手一次） |
 | `.../logs/shell.log` | 壳与内核日志（内核日志走 stderr，由壳转发落盘），排障先看这里 |
 | `.../extensions/<id>/` | 已安装的插件 |
 | `.../plugins/<id>/` | 插件数据目录（插件的唯一可写处） |
@@ -196,7 +196,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | `pnpm smoke:real` | 真内核 + 出厂插件冒烟（不起壳） |
 | `pnpm smoke:first-batch` | 四个 Vue 插件的端到端（HTTP 驱动，不起壳） |
 | `pnpm dev` / `dev:kernel` / `dev:ui` | 开发模式（见上） |
-| `pnpm app:local` | 自用打包 → `dist-app/Launcher.app` |
+| `pnpm app:local` | 自用打包 → `dist-app/Chassis.app` |
 | `pnpm pack:plugins` | 把 8 个插件打成 zip → `plugins/release/` |
 | `pnpm icon` | 由 `apps/shell/icons/*.svg` 生成位图（需 `brew install librsvg`） |
 

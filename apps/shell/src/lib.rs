@@ -49,9 +49,19 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
 
-            // ① 日志：GUI 启动时 stderr 会被丢弃，必须落盘才能排查
+            // ① 数据目录 + 日志：GUI 启动时 stderr 会被丢弃，必须落盘才能排查
+            // 顺序不能反：接手老目录（应用改名迁移）必须早于 `logging::init`，
+            // 因为日志初始化会在数据目录下建 `logs/`，让「新目录已存在」成立后就再也不迁了。
             let data_root = sidecar::data_root(&handle);
+            let adopted = sidecar::adopt_legacy_data_dir(&data_root);
             logging::init(&data_root);
+            if let Some((legacy, count)) = adopted {
+                logging::log(&format!(
+                    "[shell] 已接手旧数据目录：{} → {}（复制 {count} 个文件，老目录保留可回退）",
+                    legacy.display(),
+                    data_root.display()
+                ));
+            }
             logging::log(&format!("[shell] 启动，数据目录 {}", data_root.display()));
 
             // ② macOS：不进 Dock（Accessory）
@@ -185,7 +195,7 @@ pub fn run() {
 
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
-        .title("Launcher")
+        .title("Chassis")
         .inner_size(720.0, 480.0)
         .resizable(false)
         .maximizable(false)
@@ -212,7 +222,7 @@ fn show_boot_error(app: &AppHandle, message: &str) {
     let escaped = text.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', " ");
     let script = format!(
         "(function () {{ var el = document.getElementById('text'); if (el) {{ el.textContent = '{escaped}'; }} \
-         else {{ document.body.textContent = '{escaped}'; }} document.title = 'Launcher — 内核错误'; }})();"
+         else {{ document.body.textContent = '{escaped}'; }} document.title = 'Chassis — 内核错误'; }})();"
     );
     if let Err(err) = window.eval(&script) {
         logging::log(&format!("[shell] 错误面板注入失败：{err}"));

@@ -39,4 +39,4 @@ Pull requests: state the behavior change and rationale, list commands run (`type
 
 ## Security & Configuration
 
-Runtime data lives in `~/Library/Application Support/Launcher` (override with `LAUNCHER_DATA_ROOT`); plugins may only write under their injected `dataPath`. Kernel protocol output stays on stdout, logs on stderr. Never persist secrets in plaintext.
+Runtime data lives in `~/Library/Application Support/Chassis` (override with `LAUNCHER_DATA_ROOT`; the pre-rename `Launcher/` directory is adopted once by the shell); plugins may only write under their injected `dataPath`. Kernel protocol output stays on stdout, logs on stderr. Never persist secrets in plaintext.

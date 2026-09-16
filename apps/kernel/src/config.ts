@@ -24,7 +24,12 @@ export const DEFAULT_CONFIG: Config = {
   devPlugins: {},
 }
 
-export function defaultDataRoot(appName = 'Launcher'): string {
+/**
+ * 内核自己算数据目录时的默认位置（standalone / 没传 `--data-root`）。
+ * 目录名必须与壳一致（`apps/shell/src/sidecar.rs` 的 `APP_DATA_DIR_NAME`）——
+ * 两边不一致就会出现两个数据目录，表现为「换个启动方式，历史全没了」。
+ */
+export function defaultDataRoot(appName = 'Chassis'): string {
   const override = process.env.LAUNCHER_DATA_ROOT
   if (override) return path.resolve(override)
   if (process.platform === 'darwin') {
