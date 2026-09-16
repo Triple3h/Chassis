@@ -1,0 +1,70 @@
+---
+description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、窗口显隐三方协作、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名）、数据迁移与样式同源
+alwaysApply: true
+enabled: true
+provider:
+---
+
+# 底座开发铁律（apps/ 与 packages/）
+
+`apps/shell`（Rust 壳）/ `apps/kernel`（TS 内核）/ `apps/launcher-ui`（Vue UI）/ `packages/*` 的硬约束。
+每条都是「不遵守就一定出问题」的；原理与复盘见 `docs/architecture.md` 与 `docs/decisions/`（ADR-0001~0004）。
+插件侧约束见规则 `chassis-plugin`；收尾验证见技能 `chassis-deliver`。
+
+## 职责边界（三铁律）
+
+- **内核零能力**：扫描应用 / 读写文件 / 启动 / 连网全在插件；内核 diff 里出现能力词（app / file / network）= 越界。
+- 出厂插件与第三方插件走**同一机制**（可禁用可卸载）；未声明 capability 的调用装配期就不挂载。
+- **协议只走 stdout，日志一律 stderr**（壳 ↔ 内核 = stdio + newline JSON-RPC）。
+- 新增槽位 / 字段 / 协议行为：先改 `docs/launcher-requirements.md`（需求唯一源）与 `docs/plugin-spec.md`（对外契约），再实现。
+
+## 窗口显隐与动效（踩坑最多，动它前读完）
+
+- 唯一裁决者是壳：壳 `window/toggled` → 内核只广播；**任何真改了显隐的路径都必须回报**（托盘 / 单实例 / ⌘W 都补齐过；漏报 = 唤出是空窗口），显示失败也要广播。
+- 排队中的隐藏可被 `cancelPendingHide()` 撤销，**迟到的回执也要作废**；`isVisible(): boolean | null`（「问不到」≠「否定」）。
+- **显示**要等窗口真能画：窗口隐藏时 webview 不绘制、CSS 时钟照走 ⇒ 内核 `emitVisibleAnimated()` 推迟 `SHOW_ANIMATION_MS`(80ms) 广播；UI `setWindowVisible()` 等可见信号 + `waitForPaint()`（页面可见后两帧；120ms 上限 + setTimeout 保险）。
+- **隐藏一律等 UI 回执才落地**：`emit(false)` → UI 演离场 → `POST /api/window/hidden` → 内核 `hideWindowNow()`；兜底 `HIDE_FALLBACK_MS` 500ms（内核）/ 800ms（壳）。
+- `window/hide` 落地后**必须清 `HIDE_AT_MS`**（否则下次热键被当成「取消隐藏」）；`toggle()` 的「离场途中再按 = 取消隐藏」判断排最前；UI `REVEAL_FAST_MS`(180ms) 必须小于「离场 + 回执」耗时。
+- **窗口边角**：`.shell` 上不放 `backdrop-filter`（唯一会溢出圆角的属性），也不放 `box-shadow`（阴影全在窗口外、一个像素都渲染不出来，却会让 WebKit 把贴住视口底边的圆角画成直角）；`clip-path: inset(0 round var(--radius-shell))` 兜底。
+- 动效令牌单一来源（ADR-0004）：UI `--motion-*`、插件侧镜像 `--launcher-motion-*`；`show/hideWindowAnimated()` 是唯一收口。
+
+## 配置与事件
+
+- **配置写入只有一个收口 `Kernel.patchConfig()`**：落盘 → 副作用（历史上限 / 自启 / 热键）→ `emit('config/changed')`。`POST /api/config`、管理面 `ctx.settings.patch`、`setAutostart` / `setHistoryLimit` 全部转发到它 —— **别在调用点上补广播**。
+- 广播的 UI 侧配套三处：`lib/api.ts` 事件名单、`stores/data.ts` 用 payload 更新快照、`App.vue` watch；守卫 `tests/unit/config-events.test.ts`（每条路径一条用例）。
+- 验证必须走**真实路径**：设置页走的是 `ctx.settings.patch`，`curl /api/config` 会恰好绕开坏的那条。
+
+## 宿主 ↔ 插件边界
+
+- **postMessage 是结构化克隆**：Vue 的 `reactive` / `ref`（Proxy）混进 payload 抛 `DataCloneError` ⇒ 消息根本发不出去（表现为「点按钮没反应、审计无记录、SDK 只超时」）。SDK `post()` 已内置 JSON 展平兜底；插件侧写库前 `map((x) => ({ ...x }))`。
+- **插件页主题**：手动 > 宿主 `?theme=` > `data-theme` > 系统；**只有手动切换才写 localStorage**（自动判定落盘 = 把首次打开时的主题永久钉死）；系统变化只在来源是 system 时跟随。
+- **插件页 CSP**：`script-src 'self' 'wasm-unsafe-eval'`（放行随包 wasm 编译，必须随包、禁 CDN；JS `eval` 仍禁）；受 `tests/unit/security.test.ts` 守护。
+- **插件重载会打死它自己的插件页**：`session/closed{reason}` + `plugin/reloaded` ⇒ UI 用同一命令换新会话重开；其余 reason 直接卸载 iframe。
+- **插件视图的退出入口是宿主的责任**（顶栏由插件自己画）：footer 最左「返回」+ `Esc` / `⌘W`，三条路径统一走 `leavePluginView()`（close → `nextTick()` → focus）。
+- v1 view 会话打开时**没有搜索框** ⇒ `watchSearchContent` 不触发；入口型插件用 `getSearchContent()` 取初始输入；footer 的 keys 只展示、不派发。
+
+## 插件策略（内核侧）
+
+- **`essential`（不可禁用）**：只认出厂清单的 `essential: true`（`isEssential = builtin && manifest.essential`，第三方写了无效）；启动期 `pruneEssentialDisabled()` 清配置里的残留禁用；其调用**不进审计**（`audit.setExempt`）。
+- **`history: false`（不进最近使用）**：写历史前判 `PluginManager.excludesHistory(id)`（`Kernel.invoke` 与 `rememberItemResult` 两处）**且**启动装配期 `history.dropHistoryBy(...)` 摘掉存量条目（只「以后不写」的话，界面上旧记录还在 = 用户以为没生效）；只动历史、**不动固定项**。
+- **清单字段白名单只有一份**：`scripts/lib/manifest-keys.mjs`（两套构建器 + spec-check 共用），加字段先动它。
+- **搜索命中面 = 命令 `title` / `subtitle` / `keywords`**（`pinyin.matchTarget`：前缀 1.0 / 包含 0.7 / 全拼 0.6 / 首字母 0.5 / subtitle 与 keywords 0.4）；别名两层 = 插件级（兜底全部入口命令）∪ 命令级；用户改动存 `<dataRoot>/plugin-overrides.json`（`undefined` = 用清单值 / `[]` = 显式清空），改完只 `registry.update` 即时生效、**不重载插件**。
+- 固定 / 历史项必须存 `action` 快照：应用 / 文件 / 网址的 `command` 是**结果项 id**（不是命令名）；UI `pinPayload` 要带 `result.item.action`。
+
+## 内置原生插件（internal-settings）
+
+- `ctx.settings` 只注入 `internal-` 前缀插件（ADR-0003）；`pluginAction` 有 `setKeywords` / `resetKeywords` / `enable` / `disable` / `setCapability` / `installZip` 等。
+- 设置页插件 tab 是原生 DOM 单文件：主从两栏；事件**全走 panelEl 委托**（render 重建 innerHTML）；4s 轮询只在「摘要变了且非编辑态」才 render；chip 未落盘值放 `keywordEdits`、增删只重建局部容器 —— **别整体重渲染，会打断输入丢焦点**。
+
+## 数据与插件装载
+
+- **插件根识别**：`<dir>/dist/package.json` 存在 ⇒ 插件根 = `<dir>/dist`（`scan()` 与 `installFromDirectory()` 必须一致）。
+- 数据布局：`<dataRoot>/{config,history,pinned}.json`、`plugin-overrides.json`、`extensions/<id>/`、`plugins/<id>/`（插件唯一可写处）、`logs/audit-*.jsonl`（滚动 7 天）。
+- 插件 id 改名后老数据由内核接手：`adoptLegacyDataDir()`（数据目录）+ `HistoryStore.migratePluginIds()`（历史 / 固定项）；`LEGACY_PLUGIN_IDS` 是「新→旧」、`LEGACY_ID_TO_CURRENT` 是「旧→新」，**传错 = 把新条目改回旧 id**。
+- 壳启动 `adopt_legacy_data_dir()` 从 `Launcher/` 一次性复制接手（只复制不移动），必须排在 `logging::init()` 之前 —— 否则新目录已存在、迁移永不执行。
+
+## 样式
+
+- **表单控件样式两处同源**：设置页 `index.html` 全局控件样式 ↔ `packages/ui/styles/theme.css` 的 `.launcher-input`（滚动条是「宿主 `app.css` + 这两处」的既有约定）。原生控件明暗靠 `color-scheme`（`:root` light / `[data-theme='dark']` dark）；focus 环一律 `--accent`（系统蓝不跟主题色）。
+- **下拉框一律自绘**：`<select>` 的**弹出菜单**在 macOS 由系统（NSMenu）绘制 —— `appearance:none` / `color-scheme` 都改不动它（2026-09-16 实机截图确认）。Vue 插件用 `@launcher/ui/UiSelect.vue`（菜单 Teleport 到 body + fixed 定位 ⇒ 对话框的 `overflow:auto` 裁不到它）；设置页用 `.lselect` 结构 + `selectHtml()`（交互全在 panelEl 委托里）。两边行为必须对齐：↑↓ / Enter / Esc / Tab / 点外部与滚动关闭、上下翻转、`role=listbox|option` + `aria-selected`。
+- 坑：`.lselect-menu { display: flex }` 会盖掉 `[hidden]` 的 UA `display:none` ⇒ 必须显式补 `.lselect-menu[hidden] { display: none }`（实机才会发现的「关了还开着」）。
