@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * 预置插件（`presets/sofast-*` 四个）在**真底座**上的冒烟：
+ * sofast 四件套（`plugins/sofast-*`）在**真底座**上的冒烟：
  * 覆盖 docs/first-batch-plugins.md §4 阶段 1 / 阶段 2 里能自动化的部分。
  *
  * 做法：把 4 个插件的 dist 拷成临时「已安装插件」，起真内核（standalone），
@@ -22,18 +22,18 @@ import { fileURLToPath } from 'node:url'
  *   · N2：插件安装目录在整个过程中不得被写入；备份/存储只能落 dataRoot
  *
  * 用法：node scripts/smoke-first-batch.mjs
- * 没构建预置插件时退出码 1，并提示先跑 npm run build:presets。
+ * 没构建这些插件时退出码 1，并提示先跑 npm run build:plugins。
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const kernelEntry = path.join(repoRoot, 'apps', 'kernel', 'dist', 'kernel.mjs')
-const presetsRoot = path.join(repoRoot, 'presets')
+const pluginsRoot = path.join(repoRoot, 'plugins')
 
 const PLUGINS = [
-  { id: 'sofast-json-tools', command: 'json', query: 'JSON', capability: ['hostUi'] },
-  { id: 'sofast-text-diff', command: 'diff', query: '比对', capability: ['hostUi'] },
-  { id: 'sofast-totp', command: 'totp', query: '验证码', capability: ['storage', 'hostUi', 'screenshot', 'exec.spawn'] },
-  { id: 'sofast-hosts', command: 'hosts', query: 'hosts', capability: ['storage', 'hostUi', 'exec.spawn'] },
+  { id: 'json-tools', command: 'json', query: 'JSON', capability: ['hostUi'] },
+  { id: 'text-diff', command: 'diff', query: '比对', capability: ['hostUi'] },
+  { id: 'totp', command: 'totp', query: '验证码', capability: ['storage', 'hostUi', 'screenshot', 'exec.spawn'] },
+  { id: 'hosts', command: 'hosts', query: 'hosts', capability: ['storage', 'hostUi', 'exec.spawn'] },
 ]
 
 function line(text) {
@@ -44,8 +44,8 @@ if (!fs.existsSync(kernelEntry)) {
   line('✗ 找不到内核产物，先跑 npm run build:kernel')
   process.exit(1)
 }
-if (!fs.existsSync(presetsRoot)) {
-  line('✗ 找不到 presets/ 目录')
+if (!fs.existsSync(pluginsRoot)) {
+  line('✗ 找不到 plugins/ 目录')
   process.exit(1)
 }
 
@@ -68,22 +68,15 @@ fs.mkdirSync(builtinRoot, { recursive: true })
 /** 安装形态：<builtinRoot>/<pluginId>/ 直接是插件根（与解压 zip 后一致） */
 function installPlugins() {
   for (const plugin of PLUGINS) {
-    const dist = path.join(presetsRoot, plugin.id, 'dist')
+    const dist = path.join(pluginsRoot, plugin.id, 'dist')
     if (!fs.existsSync(path.join(dist, 'package.json'))) {
-      line(`✗ ${plugin.id} 没有 dist/package.json —— 先跑 npm run build:presets`)
+      line(`✗ ${plugin.id} 没有 dist/package.json —— 先跑 npm run build:plugins`)
       process.exit(1)
     }
     fs.cpSync(dist, path.join(builtinRoot, plugin.id), { recursive: true })
   }
 
-  // 模拟「从如快搬过来」的插件目录：旧宿主把数据放在插件目录下的 data/storage.json
-  const legacyDir = path.join(builtinRoot, 'sofast-totp', 'data')
-  fs.mkdirSync(legacyDir, { recursive: true })
-  fs.writeFileSync(path.join(legacyDir, 'storage.json'), JSON.stringify(MIGRATION_FIXTURE))
 }
-
-/** 旧数据样本（阶段 2.3 的迁移对象：用户攒下来的 2FA 账户） */
-const MIGRATION_FIXTURE = { accounts: [{ id: 'legacy-account', secret: 'JBSWY3DPEHPK3PXP' }] }
 
 /** 目录快照：验证 N2「安装目录只读」 */
 function snapshot(dir) {
@@ -187,7 +180,7 @@ try {
   }
   line(`内核已就绪：${base}`)
   line(`数据目录：${dataRoot}`)
-  line(`插件来源：${presetsRoot}\n`)
+  line(`插件来源：${pluginsRoot}\n`)
 
   /* ------------------------------------------------------------ 阶段 1：加载 */
   line('[加载] 清单与产物')
@@ -215,7 +208,7 @@ try {
     check(Boolean(hit), `搜「${plugin.query}」命中 ${plugin.id}`, JSON.stringify(search.groups.best.map((i) => i.pluginId)))
   }
 
-  const jsonSession = await openSession('sofast-json-tools', 'json')
+  const jsonSession = await openSession('json-tools', 'json')
   check(Boolean(jsonSession.sid && jsonSession.token), 'json-tools 打开会话拿到 sid/token', JSON.stringify(jsonSession.error))
 
   if (jsonSession.sid) {
@@ -248,7 +241,7 @@ try {
 
     const info = await bridge(jsonSession, 'ctx.host.info')
     check(
-      info.ok === true && info.result.pluginId === 'sofast-json-tools' && info.result.command === 'json',
+      info.ok === true && info.result.pluginId === 'json-tools' && info.result.command === 'json',
       'host.info 返回当前插件与命令',
       JSON.stringify(info),
     )
@@ -272,7 +265,7 @@ try {
   /* --------------------------------------------- 阶段 2：脚本（真读本机文件） */
   line('\n[阶段 2] 脚本命令（exec.run → Node Worker）')
 
-  const hostsSession = await openSession('sofast-hosts', 'hosts')
+  const hostsSession = await openSession('hosts', 'hosts')
   check(Boolean(hostsSession.sid), 'hosts 打开会话', JSON.stringify(hostsSession.error))
 
   if (hostsSession.sid) {
@@ -303,28 +296,17 @@ try {
     check(stored.ok === true && back.result?.at === 1, 'storage 读写回到同一份数据', JSON.stringify(back))
     // 落盘是 debounce + 原子写（200ms），等一下再断言文件
     await sleep(500)
-    const storageFile = path.join(dataRoot, 'plugins', 'sofast-hosts', 'storage.json')
+    const storageFile = path.join(dataRoot, 'plugins', 'hosts', 'storage.json')
     const onDisk = fs.existsSync(storageFile) ? JSON.parse(fs.readFileSync(storageFile, 'utf-8')) : null
     check(
       onDisk?.smoke?.at === 1,
-      '存储落在 <dataRoot>/plugins/sofast-hosts/storage.json',
+      '存储落在 <dataRoot>/plugins/hosts/storage.json',
       fs.existsSync(storageFile) ? storageFile : '文件不存在',
     )
   }
 
-  const totpSession = await openSession('sofast-totp', 'totp')
+  const totpSession = await openSession('totp', 'totp')
   if (totpSession.sid) {
-    // 阶段 2.3：旧宿主（如快）留在插件目录里的数据必须被搬进 dataRoot
-    const migratedFile = path.join(dataRoot, 'plugins', 'sofast-totp', 'storage.json')
-    const migrated = fs.existsSync(migratedFile) ? JSON.parse(fs.readFileSync(migratedFile, 'utf-8')) : null
-    check(
-      migrated?.accounts?.[0]?.id === 'legacy-account',
-      '旧 data/storage.json 已迁移到 <dataRoot>/plugins/sofast-totp/',
-      fs.existsSync(migratedFile) ? migratedFile : '目标文件不存在',
-    )
-    const throughBridge = await bridge(totpSession, 'ctx.storage.get', { key: 'accounts' })
-    check(throughBridge.result?.[0]?.id === 'legacy-account', '插件侧读到的就是迁移后的账户', JSON.stringify(throughBridge))
-
     const images = await bridge(totpSession, 'ctx.exec.run', {
       command: 'read-image',
       args: { listOnly: true, withinMinutes: 240, limit: 5 },

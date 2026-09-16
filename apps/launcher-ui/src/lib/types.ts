@@ -21,23 +21,7 @@ export interface SearchResponse {
     best: RankedResult[]
     recent: RankedResult[]
   }
-  collapse: { pinned: number; recent: number }
   pending: string[]
-}
-
-export type RowKind = 'header' | 'item'
-
-export interface Row {
-  kind: RowKind
-  key: string
-  /** header 用 */
-  label?: string
-  count?: number
-  collapsed?: boolean
-  group?: 'pinned' | 'best' | 'recent'
-  /** item 用 */
-  result?: RankedResult
-  index?: number
 }
 
 export type { ResultItem, MatchSpan }

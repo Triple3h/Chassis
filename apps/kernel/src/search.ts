@@ -1,4 +1,4 @@
-import type { CommandDecl, HistoryItem, RankedResult, ResultItem } from '@launcher/plugin-manifest'
+import type { ActionDecl, CommandDecl, HistoryItem, RankedResult, ResultItem } from '@launcher/plugin-manifest'
 import type { AuditLog } from './audit'
 import type { ConfigStore } from './config'
 import type { EventBus } from './events'
@@ -18,8 +18,6 @@ export interface SearchResponse {
     best: RankedResult[]
     recent: RankedResult[]
   }
-  /** 折叠阈值（UI 用它决定是否显示「已固定 (N)」） */
-  collapse: { pinned: number; recent: number }
   /** 命中的插件（用于 UI 提示哪些插件还在补位） */
   pending: string[]
 }
@@ -36,7 +34,8 @@ export interface SearchDeps {
   pluginTitleOf: (pluginId: string) => string
   /** 插件静态资源基址（相对路径图标 → 绝对 URL） */
   pluginBaseUrl: (pluginId: string) => string | null
-  isCommandAlive: (pluginId: string, command: string) => boolean
+  /** 历史/固定项可用性（command 可能是命令名，也可能是结果项 id） */
+  isResultAlive: (pluginId: string, command: string) => boolean
 }
 
 const MAX_BEST = 20
@@ -71,7 +70,6 @@ export class SearchEngine {
         token,
         query,
         groups: { pinned: this.pinnedResults(''), best: [], recent: this.recentResults('') },
-        collapse: { pinned: 8, recent: 6 },
         pending: [],
       }
     }
@@ -147,7 +145,6 @@ export class SearchEngine {
       token,
       query,
       groups: { pinned, best, recent },
-      collapse: { pinned: 8, recent: 6 },
       pending: [...new Set(pending)],
     }
   }
@@ -208,7 +205,7 @@ export class SearchEngine {
     const list = this.deps.history.pinnedList()
     const results: RankedResult[] = []
     for (const pin of list) {
-      const alive = this.deps.isCommandAlive(pin.pluginId, pin.command)
+      const alive = this.deps.isResultAlive(pin.pluginId, pin.command)
       const target: SearchTarget = { title: pin.title, ...(pin.subtitle ? { subtitle: pin.subtitle } : {}) }
       const match = query ? matchTarget(query, target) : { score: 1, span: null }
       if (query && match.score < 0) continue
@@ -221,7 +218,7 @@ export class SearchEngine {
           title: pin.title,
           ...(pin.subtitle ? { subtitle: pin.subtitle } : {}),
           ...(pin.icon ? { icon: this.resolveIcon(pin.pluginId, pin.icon) } : {}),
-          action: { type: 'command', command: pin.command, args: pin.args },
+          action: snapshotAction(pin.command, pin.args, pin.action),
         },
         itemKey: pin.key,
         score: 1,
@@ -237,7 +234,7 @@ export class SearchEngine {
     const items: HistoryItem[] = this.deps.history.allRecent()
     const results: RankedResult[] = []
     for (const item of items) {
-      const alive = this.deps.isCommandAlive(item.pluginId, item.command)
+      const alive = this.deps.isResultAlive(item.pluginId, item.command)
       const target: SearchTarget = { title: item.title, ...(item.subtitle ? { subtitle: item.subtitle } : {}) }
       const match = query ? matchTarget(query, target) : { score: 1, span: null }
       if (query && match.score < 0) continue
@@ -251,7 +248,7 @@ export class SearchEngine {
           title: item.title,
           ...(item.subtitle ? { subtitle: item.subtitle } : {}),
           ...(item.icon ? { icon: this.resolveIcon(item.pluginId, item.icon) } : {}),
-          action: { type: 'command', command: item.command, args: item.args },
+          action: snapshotAction(item.command, item.args, item.action),
         },
         itemKey: item.key,
         score,
@@ -315,10 +312,18 @@ function commandTarget(entry: RegisteredCommand): SearchTarget {
   return target
 }
 
-function pluginKeyOf(item: ResultItem): string {
+export function pluginKeyOf(item: ResultItem): string {
   const action = item.action
   if (action.type === 'command') return action.command
   return item.id
+}
+
+/**
+ * 固定/历史项的动作：优先用持久化的快照（open / copy / host …），
+ * 老数据没有快照时退回「按命令名执行」。
+ */
+function snapshotAction(command: string, args: unknown, action?: ActionDecl): ActionDecl {
+  return action ?? { type: 'command', command, args }
 }
 
 export type { CommandDecl, ResultItem }

@@ -82,18 +82,18 @@ test('命令 mode / name 非法或重名报 MANIFEST_INVALID', () => {
   assert(String(dup.message).includes('重复'), '错误信息应说明重名')
 })
 
-test('兼容模式：缺 apiVersion / capabilities 视为 "1" / 全给并给出警告', () => {
+test('缺 apiVersion / capabilities 一律拒绝（无兼容放行）', () => {
   const legacy = { ...VALID } as Record<string, unknown>
   delete legacy.apiVersion
   delete legacy.capabilities
-  const strict = validateManifest(legacy)
-  assert(!strict.ok, '严格模式应当失败')
+  const result = validateManifest(legacy)
+  assert(!result.ok, '缺 apiVersion 应当失败')
+  assertEqual(result.code, 'MANIFEST_INVALID')
 
-  const relaxed = validateManifest(legacy, { allowLegacy: true })
-  assert(relaxed.ok, '兼容模式应当通过')
-  assertEqual(relaxed.manifest.apiVersion, '1')
-  assert(relaxed.manifest.capabilities.includes('exec.spawn'), '兼容模式应给出全部能力')
-  assertEqual(relaxed.warnings.length, 2)
+  const partial = { ...VALID, capabilities: undefined } as Record<string, unknown>
+  delete partial.capabilities
+  const noCaps = validateManifest(partial)
+  assert(!noCaps.ok, '缺 capabilities 应当失败')
 })
 
 test('产物校验：view 缺 index.html、脚本缺同名产物都报 ENTRY_MISSING', () => {

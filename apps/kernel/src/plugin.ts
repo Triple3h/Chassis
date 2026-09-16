@@ -1,6 +1,7 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import {
+  COMMAND_NAME_RE,
   LauncherError,
   PLUGIN_ID_RE,
   globalCommandId,
@@ -22,6 +23,18 @@ import type { ScriptRuntime } from './services/exec'
 import type { Disposer } from './types'
 import { ensureDir, listDirSafe, pathExists } from './util/fsx'
 import type { PluginServerPool } from './http/pluginServers'
+
+/**
+ * 插件改过 id 的历史映射（2026-09-16：四个 Vue 插件去掉 `sofast-` 前缀）。
+ * 加载时若新数据目录不存在、旧目录还在 ⇒ 整体复制过来（只复制不删除）。
+ * 映射是单向、一次性的；旧目录留由用户自行清理。
+ */
+const LEGACY_PLUGIN_IDS: Record<string, string> = {
+  totp: 'sofast-totp',
+  hosts: 'sofast-hosts',
+  'text-diff': 'sofast-text-diff',
+  'json-tools': 'sofast-json-tools',
+}
 
 export type PluginState =
   | 'discovered'
@@ -51,7 +64,7 @@ export interface PluginRecord {
 
 export interface PluginManagerDeps {
   dataRoot: string
-  /** 出厂插件根目录（可多个：内置 `plugins/` + 预置 `presets/`；靠后的同名插件覆盖靠前的） */
+  /** 出厂插件根目录（可多个；开发态默认就是仓库根的 `plugins/`；靠后的同名插件覆盖靠前的） */
   builtinRoots: string[]
   config: ConfigStore
   audit: AuditLog
@@ -62,12 +75,6 @@ export interface PluginManagerDeps {
   binder: ServiceBinder
   services: KernelServices
   exec: ScriptRuntime
-  /**
-   * 旧宿主（如快 Sofast）把插件数据放在**插件目录**下（`<插件目录>/data/storage.json`）。
-   * 首次加载时把它搬进 dataRoot（requirements §8.10 / plugin-spec §11 过渡期）。
-   * 只在目标不存在时执行一次，失败不阻塞加载。
-   */
-  migrateLegacyStorage?: (pluginId: string, legacyFile: string) => Promise<boolean>
   /** 管理面特权服务工厂（仅 id 以 internal- 开头的插件会被注入） */
   settingsFor?: (pluginId: string) => Record<string, unknown>
   log: (level: 'info' | 'warn' | 'error' | 'debug', message: string, data?: unknown) => void
@@ -111,6 +118,28 @@ export class PluginManager {
     return path.join(this.deps.dataRoot, 'plugins', id)
   }
 
+  /**
+   * 插件改过 id 时，把旧数据目录整体搬到新 id 下（只复制不删除；新目录已存在则不动）。
+   * 映射见 LEGACY_PLUGIN_IDS；失败只记日志，不阻塞加载。
+   */
+  private async adoptLegacyDataDir(id: string): Promise<void> {
+    const legacyId = LEGACY_PLUGIN_IDS[id]
+    if (!legacyId) return
+    const next = this.dataPathFor(id)
+    const prev = this.dataPathFor(legacyId)
+    if (await pathExists(next)) return
+    if (!(await pathExists(prev))) return
+    try {
+      await fsp.cp(prev, next, { recursive: true })
+      this.deps.log('info', `已迁移旧插件数据目录：${legacyId} → ${id}`)
+    } catch (err) {
+      this.deps.log(
+        'warn',
+        `旧插件数据目录迁移失败：${legacyId} → ${id}（${err instanceof Error ? err.message : String(err)}）`,
+      )
+    }
+  }
+
   capabilitiesOf(id: string): ReadonlySet<string> {
     return this.records.get(id)?.capabilities ?? new Set<string>()
   }
@@ -125,6 +154,17 @@ export class PluginManager {
     const record = this.records.get(pluginId)
     if (!record?.manifest) return false
     return record.manifest.commands.some((c) => c.name === command)
+  }
+
+  /**
+   * 历史/固定项里的「这条结果还能用吗」（requirements §7.5 的置灰判定）。
+   * `command` 可能不是命令名而是结果项 id（`pluginKeyOf`：`app:/…`、`web:…`），
+   * 那种情况无从校验，只要插件仍可用就不置灰。
+   */
+  isResultAlive(pluginId: string, command: string): boolean {
+    if (!this.isActive(pluginId)) return false
+    if (!COMMAND_NAME_RE.test(command)) return true
+    return this.isCommandAlive(pluginId, command)
   }
 
   /** 插件静态资源基址（相对路径图标 → 绝对 URL） */
@@ -325,7 +365,7 @@ export class PluginManager {
     record.error = undefined
     record.commandErrors.clear()
 
-    const manifestResult = await readManifest(record.dir, { allowLegacy: id.startsWith('sof-') })
+    const manifestResult = await readManifest(record.dir)
     if (!manifestResult.ok) {
       record.state = 'error'
       record.error = manifestResult.message
@@ -353,26 +393,8 @@ export class PluginManager {
 
     await this.validateEntries(record, manifest)
 
-    // 旧宿主遗留数据：`<插件目录>/data/storage.json` → `<dataRoot>/plugins/<id>/storage.json`。
-    // 只复制不删除（源目录留给用户自己清理），目标已存在时不动它（避免覆盖新数据）。
-    if (record.capabilities.has('storage') && this.deps.migrateLegacyStorage) {
-      const legacyFile = path.join(record.dir, 'data', 'storage.json')
-      if (await pathExists(legacyFile)) {
-        const moved = await this.deps.migrateLegacyStorage(id, legacyFile).catch(() => false)
-        if (moved) {
-          this.deps.log('info', `已迁移旧数据：${id} → ${this.dataPathFor(id)}/storage.json`)
-          this.deps.audit.record({
-            pluginId: id,
-            channel: 'kernel',
-            method: 'storage.migrateLegacy',
-            ok: true,
-            ms: 0,
-            capability: 'storage',
-            args: { from: legacyFile },
-          })
-        }
-      }
-    }
+    // 插件改过 id：旧数据目录整体搬到新 id 下（只复制不删除，见 LEGACY_PLUGIN_IDS）
+    await this.adoptLegacyDataDir(id).catch(() => undefined)
 
     record.state = 'loading'
     const devUrl = this.deps.config.get().devPlugins[id]
@@ -540,7 +562,7 @@ export class PluginManager {
     const sourceDir = (await pathExists(path.join(sourceInput, 'dist', 'package.json')))
       ? path.join(sourceInput, 'dist')
       : sourceInput
-    const manifestResult = await readManifest(sourceDir, { allowLegacy: false })
+    const manifestResult = await readManifest(sourceDir)
     if (!manifestResult.ok) throw new LauncherError(manifestResult.code, manifestResult.message)
     const id = manifestResult.manifest.name
 
@@ -680,7 +702,6 @@ export function resolveCapabilities(manifest: PluginManifest): Set<string> {
 
 export async function readManifest(
   dir: string,
-  opts: { allowLegacy: boolean },
 ): Promise<{ ok: true; manifest: PluginManifest } | { ok: false; code: ManifestErrorCode; message: string }> {
   let raw: unknown
   try {
@@ -692,7 +713,7 @@ export async function readManifest(
       message: `package.json 无法解析：${err instanceof Error ? err.message : String(err)}`,
     }
   }
-  const result = validateManifest(raw, { allowLegacy: opts.allowLegacy })
+  const result = validateManifest(raw)
   if (!result.ok) return { ok: false, code: result.code, message: result.message }
   return { ok: true, manifest: result.manifest }
 }

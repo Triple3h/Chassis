@@ -128,13 +128,7 @@ function post(method: string, payload?: Record<string, unknown>, options?: CallO
       params: payload ?? {},
     }
     window.parent.postMessage(message, '*')
-    // 兼容旧桥（如快 Sofast）：同时发一份平铺格式
-    window.parent.postMessage({ ...(payload ?? {}), id, method: legacyMethod(method), from: 'plugin' }, '*')
   })
-}
-
-function legacyMethod(method: string): string {
-  return method.replace(/^ctx\./, '')
 }
 
 function handleMessage(event: MessageEvent): void {
@@ -154,29 +148,10 @@ function handleMessage(event: MessageEvent): void {
     return
   }
 
-  // 旧桥应答（如快）：{ id, result } / { id, error }
-  if (typeof data.id === 'number' && (('result' in data && !('method' in data)) || 'error' in data)) {
-    const entry = pending.get(data.id)
-    if (!entry) return
-    pending.delete(data.id)
-    window.clearTimeout(entry.timer)
-    if ('error' in data && data.error) {
-      const error = data.error as { code?: string; message?: string } | string
-      entry.reject(
-        typeof error === 'string'
-          ? new LauncherError('INTERNAL', error)
-          : new LauncherError((error.code as LauncherErrorCode) ?? 'INTERNAL', error.message ?? '宿主调用失败'),
-      )
-    } else {
-      entry.resolve(data.result)
-    }
-    return
-  }
-
   // 事件推送
-  const eventName = (data.event ?? data.type) as string | undefined
+  const eventName = data.event as string | undefined
   if (!eventName) return
-  const payload = (data.payload ?? data) as { query?: string; token?: number; sid?: string; id?: string }
+  const payload = (data.payload ?? {}) as { query?: string; token?: number; sid?: string; id?: string }
   if (eventName === 'search/query') {
     for (const handler of searchHandlers) {
       try {

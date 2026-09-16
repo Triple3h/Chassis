@@ -23,6 +23,10 @@
 
 **未移植**：ZTools 的插件管理、窗口管理、存储、同步、AI、支付、市场等模块（架构不同：Electron `WebContentsView` → Tauri WebView + iframe + 每插件独立端口）。
 
+### 设计对照：启动台结果网格（UI，未复制代码）
+
+`apps/launcher-ui` 的**结果网格**（分区标题 + 每行 N 个「图标 + 名称」格子、「展开 (N) / 收起」、方向键按格子移动、`Esc` 分步退出、已固定分区拖拽重排）是照 ZTools 渲染层的聚合视图**行为语义**重写的本仓库实现（Vue 3 + Pinia + Tailwind，代码见 `apps/launcher-ui/src/lib/grid.ts`、`components/ResultGrid.vue`）：对照 `src/renderer/src/components/search/AggregateView.vue`、`components/common/CollapsibleList.vue`、`CommandList.vue`、`composables/useNavigation.ts`。**代码为原创，不含 ZTools 源码。**
+
 ### 依赖选型参考（非代码移植）
 
 以下 npm 包的选择参考了 ZTools 的实践（ZTools `package.json`）：

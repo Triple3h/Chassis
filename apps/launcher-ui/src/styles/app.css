@@ -19,7 +19,6 @@
   --color-accent-soft: color-mix(in srgb, var(--color-accent) 18%, transparent);
 
   --radius-shell: 16px;
-  --row-height: 52px;
 }
 
 :root {
@@ -44,10 +43,6 @@
   --sel: color-mix(in srgb, var(--color-accent) 22%, transparent);
   --panel: rgba(13, 17, 25, 0.96);
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-[data-density='compact'] {
-  --row-height: 44px;
 }
 
 html,
@@ -78,20 +73,17 @@ body {
   height: 100%;
 }
 
-.row-title {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.25;
-}
-
-.row-subtitle {
-  font-size: 11.5px;
-  color: var(--fg-muted);
-  line-height: 1.3;
-}
-
 .hairline {
   border-top: 1px solid var(--border);
+}
+
+/* 结果网格：滚动条会破坏「整片图标墙」的观感（ZTools 同样隐藏） */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 .kbd {

@@ -92,7 +92,7 @@ UI 输入 → debounce 80ms → POST /api/search
   → ③ 等待（预算 200ms + 30ms 宽限）
   → ④ 合并：按 `${pluginId}:${item.id}` 去重（保留高分）→ 排序
   → ⑤ 稳定排序：集合不变则保持上次顺序（避免列表抖动）
-  → 返回 { token, groups:{pinned,best,recent}, collapse, pending }
+  → 返回 { token, groups:{pinned,best,recent}, pending }
 ```
 
 打分（`apps/kernel/src/pinyin.ts`）：
@@ -107,7 +107,7 @@ UI 输入 → debounce 80ms → POST /api/search
 
 - UI 侧立即用本地快照渲染（不闪空白），插件结果到达后替换 → `POST /api/search` 只做一次往返
 - 同一 query 的并发请求合并（`SearchEngine.inFlight`）
-- 列表 > 200 行启用虚拟滚动（`apps/launcher-ui/src/lib/virtual.ts`）
+- 结果网格 > 200 条启用虚拟滚动（`apps/launcher-ui/src/lib/virtual.ts`，按「一排格子」为单位定高）
 
 ---
 
@@ -137,7 +137,7 @@ active → degraded（脚本连续失败 3 次）
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/bootstrap` | 配置 / 插件 / 命令快照 / 固定 / 最近 |
-| POST | `/api/search` | `{ query }` → `{ token, groups, collapse, pending }` |
+| POST | `/api/search` | `{ query }` → `{ token, groups, pending }` |
 | POST | `/api/exec` | 执行结果项 / 指定命令 / ActionDecl |
 | POST | `/api/invoke` | 按全局命令 id 执行（托盘、测试用） |
 | GET | `/api/events` | SSE：`registry/changed`、`plugin/state`、`history/changed`、`search/query`、`ui/*`、`shell/visibility`… |
@@ -186,15 +186,15 @@ active → degraded（脚本连续失败 3 次）
 ```
 
 出厂插件在 `<appRoot>/builtin-plugins/`（打包后是 `Contents/Resources/builtin-plugins`），只读、可禁用不可卸载。
-源码分两个目录管理，运行时在同一个 bundle 里：
+源码全部住在 `plugins/`，只是一个目录里有两套工具链：
 
-| 源码 | 类别 | 说明 |
+| 插件 | 工具链 | 说明 |
 |---|---|---|
-| `plugins/` | 内置插件 | 官方，与底座同一套工具链（esbuild，无框架） |
-| `presets/` | 预置插件 | 第三方来源移植（如快 Sofast 生态），自带 Vite + Vue 工具链；见 `presets/README.md` |
+| 内置（app-launcher / file-search / web-open / internal-settings） | esbuild，无框架 | 与底座同一套发布节奏 |
+| Vue 插件（totp / hosts / text-diff / json-tools） | Vite + Vue + Tailwind，共享 `plugins/shared/`（UI 积木 + 构建配置） | 2026-09-16 起与内置插件同目录维护、直连底座 SDK；见 `plugins/README.md` |
 
-开发态两者都从仓库根加载：内核 `--builtin-plugins` 接受**逗号分隔的多个目录**（默认 `plugins/` + `presets/`），
-壳的开发态回退也同样拼两个路径；打包时 `scripts/lib/resources.mjs` 把它们一起拷进 `builtin-plugins/`。
+开发态从仓库根加载：内核 `--builtin-plugins` 接受**逗号分隔的多个目录**（默认 `plugins/`），
+壳的开发态回退指向同一处；打包时 `scripts/lib/resources.mjs` 把各插件的 `dist/` 拷进 `builtin-plugins/`。
 
 ---
 
@@ -215,8 +215,8 @@ active → degraded（脚本连续失败 3 次）
 | D9 | §11 契约测试用 `echo-plugin` | 已实现（`tests/fixtures/echo-plugin` + `tests/contract/*.test.ts`，真 HTTP） | — |
 | D10 | §10「主线程 > 50ms 的必须进 Worker」（拼音索引构建、大文件解析） | 拼音索引规模小（命令级），暂未进 Worker；历史文件 ≤ 2000 条，读取在毫秒级 | 记为待办：命令数量破千或历史破万时迁移 |
 | D11 | §6.3 打包体积/冷启动指标 | 未测（M4 待做）；`scripts/build-shell.mjs` 已就绪 | 需要真机 `tauri build` 后才能测 |
-| D12 | §8.10 与如快 Sofast 的兼容层 | **兼容层只到信封层**：桥同时识别 `__launcher: 1` 与平铺 `{ id, method }` 两种消息格式、兼容 `apiVersion` / `capabilities` 缺省；**不做 method 名映射**（如快的 `Context.*` / `LocalStorage.*` → 底座的 `ctx.*`）。4 个 `sofast-*` 插件改用**适配层**（`presets/shared/lib/`）在运行期判宿主，而不是让底座去认旧方法名 | 方法名映射会把"未实现的能力"伪装成"能用"，且每加一个能力就要两边同步；适配层是单份代码、可单测、两个宿主行为一致（见 `docs/first-batch-plugins.md` §9） |
-| D16 | §8「出厂插件」只描述了 `plugins/` | 出厂 bundle 增加 `presets/`（预置插件）这一来源，`--builtin-plugins` 支持多目录 | 4 个 sofast 插件要"移进仓库统一管理但作为预置插件与内置插件区分开"；源码分目录便于各管各的工具链与验收口径，运行时仍是同一份出厂 bundle |
+| D12 | §8.10 与第三方旧宿主（Sofast）的兼容层 | **不做兼容**（2026-09-16 起）：桥只认原生信封 `__launcher: 1`，清单校验不再为旧前缀放行 `apiVersion` / `capabilities` 缺省，旧布局数据迁移一并移除 | 半兼容的代价是长期维护两套语义，还会把"未实现的能力"伪装成"能用"；底座与插件同仓库，没有历史包袱要背 |
+| D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
 | D13 | §7.5 「拼音匹配」 | 用 `pinyin-pro`（ZTools 同选型） | 需求 §12 风险对策明确要求"用成熟库" |
 | D14 | 未规定 plist 读取方式 | 自研 `plugins/app-launcher/src/core/plist.ts`（binary + XML 只读） | `simple-plist` 内部是运行时 `require`，打不进自包含产物（违反 N1）；`build-plugin.mjs` 现在会校验产物只含 `node:*` 依赖 |
 | D15 | §7.6「插件在 200ms 内回结果」 | 插件激活后**延迟 800ms 预热**贡献型搜索 worker | 否则用户第一次输入必然吃一次 worker 冷启动 + 索引加载而超时（体验上就是"第一次搜不到"） |

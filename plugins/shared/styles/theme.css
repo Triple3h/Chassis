@@ -1,0 +1,243 @@
+/**
+ * 插件通用设计令牌（四个 Vue 插件共用，经 Tailwind v4 @theme 桥接）。
+ * 视觉基调对齐宿主（Raycast 风格）：中性色面板 + 低饱和描边 + 8px 圆角行。
+ * 变量前缀统一 `--launcher-`，通过 @theme inline 桥接成 Tailwind 工具类。
+ *
+ * 注意：本文件不 import tailwindcss，由各插件的 src/styles/app.css 负责引入
+ * （CSS 规定 @import 必须位于最前，两层嵌套 import 会破坏顺序）。
+ */
+
+:root {
+  --launcher-bg: #f6f6f7;
+  --launcher-panel: #ffffff;
+  --launcher-panel-2: #f1f1f3;
+  --launcher-hover: rgba(0, 0, 0, 0.045);
+  --launcher-active: rgba(0, 0, 0, 0.075);
+  --launcher-line: rgba(0, 0, 0, 0.08);
+  --launcher-line-strong: rgba(0, 0, 0, 0.16);
+  --launcher-fg: #18181b;
+  --launcher-muted: #6b7280;
+  --launcher-faint: #9ca3af;
+  --launcher-accent: #2563eb;
+  --launcher-accent-fg: #ffffff;
+  --launcher-danger: #dc2626;
+  --launcher-success: #16a34a;
+  --launcher-warn: #d97706;
+  --launcher-add-bg: rgba(22, 163, 74, 0.14);
+  --launcher-add-fg: #15803d;
+  --launcher-del-bg: rgba(220, 38, 38, 0.13);
+  --launcher-del-fg: #b91c1c;
+  --launcher-code: #7c3aed;
+  --launcher-string: #16a34a;
+  --launcher-number: #ea580c;
+  --launcher-key: #2563eb;
+  --launcher-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+
+[data-theme="dark"] {
+  --launcher-bg: #1b1b1d;
+  --launcher-panel: #232326;
+  --launcher-panel-2: #2a2a2e;
+  --launcher-hover: rgba(255, 255, 255, 0.055);
+  --launcher-active: rgba(255, 255, 255, 0.095);
+  --launcher-line: rgba(255, 255, 255, 0.075);
+  --launcher-line-strong: rgba(255, 255, 255, 0.16);
+  --launcher-fg: #ececee;
+  --launcher-muted: #9a9aa2;
+  --launcher-faint: #6f6f78;
+  --launcher-accent: #5b8cff;
+  --launcher-accent-fg: #0b1220;
+  --launcher-danger: #f87171;
+  --launcher-success: #4ade80;
+  --launcher-warn: #fbbf24;
+  --launcher-add-bg: rgba(74, 222, 128, 0.16);
+  --launcher-add-fg: #86efac;
+  --launcher-del-bg: rgba(248, 113, 113, 0.15);
+  --launcher-del-fg: #fca5a5;
+  --launcher-code: #c4b5fd;
+  --launcher-string: #86efac;
+  --launcher-number: #fdba74;
+  --launcher-key: #93c5fd;
+  --launcher-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+@theme inline {
+  --color-bg: var(--launcher-bg);
+  --color-panel: var(--launcher-panel);
+  --color-panel2: var(--launcher-panel-2);
+  --color-hover: var(--launcher-hover);
+  --color-active: var(--launcher-active);
+  --color-line: var(--launcher-line);
+  --color-linestrong: var(--launcher-line-strong);
+  --color-fg: var(--launcher-fg);
+  --color-muted: var(--launcher-muted);
+  --color-faint: var(--launcher-faint);
+  --color-accent: var(--launcher-accent);
+  --color-accentfg: var(--launcher-accent-fg);
+  --color-danger: var(--launcher-danger);
+  --color-success: var(--launcher-success);
+  --color-addbg: var(--launcher-add-bg);
+  --color-addfg: var(--launcher-add-fg);
+  --color-delbg: var(--launcher-del-bg);
+  --color-delfg: var(--launcher-del-fg);
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--launcher-bg);
+  color: var(--launcher-fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 宿主同款极简滚动条 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--launcher-line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--launcher-muted);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input:focus,
+textarea:focus,
+button:focus {
+  outline: none;
+}
+
+.launcher-input {
+  width: 100%;
+  background: var(--launcher-panel-2);
+  border: 1px solid var(--launcher-line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.launcher-input:focus {
+  border-color: var(--launcher-accent);
+}
+.launcher-input::placeholder {
+  color: var(--launcher-faint);
+}
+
+.launcher-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--launcher-line);
+  background: var(--launcher-panel-2);
+  padding: 5px 10px;
+  font-size: 12.5px;
+  line-height: 18px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+.launcher-btn:hover {
+  background: var(--launcher-active);
+}
+.launcher-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.launcher-btn.primary {
+  background: var(--launcher-accent);
+  border-color: transparent;
+  color: var(--launcher-accent-fg);
+  font-weight: 600;
+}
+.launcher-btn.primary:hover {
+  filter: brightness(1.08);
+}
+.launcher-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.launcher-btn.ghost:hover {
+  background: var(--launcher-hover);
+}
+.launcher-btn.danger {
+  color: var(--launcher-danger);
+}
+
+.launcher-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  background: var(--launcher-panel-2);
+  border: 1px solid var(--launcher-line);
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--launcher-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.launcher-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--launcher-panel-2);
+  border: 1px solid var(--launcher-line);
+  font-size: 11px;
+  color: var(--launcher-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.launcher-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.launcher-divider {
+  height: 1px;
+  background: var(--launcher-line);
+  flex: none;
+}
+
+.launcher-fade-enter-active,
+.launcher-fade-leave-active {
+  transition: opacity 0.14s ease;
+}
+.launcher-fade-enter-from,
+.launcher-fade-leave-to {
+  opacity: 0;
+}

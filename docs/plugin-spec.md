@@ -293,7 +293,7 @@ const content = await hostUi.getSearchContent()
 
 - 用 `host.isLauncher()` 判断，而不是"等超时"
 - 宿主能力缺失时：要么用本地实现兜底，要么在 UI 上给出可操作的提示（**不得**白屏、不得静默失败）
-- 参考实现：`shared/lib/platform.ts`（如快版适配层）
+- 参考实现：`import { host } from '@launcher/api'` 后用 `host.isLauncher()` 判断（4 个 Vue 插件都这么做）
 
 ---
 
@@ -333,7 +333,7 @@ const content = await hostUi.getSearchContent()
 
 **入口型插件的输入必须用 `hostUi.getSearchContent()` 取初始值**：v1 底座在 view 会话打开后不显示搜索框
 （插件页占满窗口），因此 `hostUi.watchSearchContent` 在底座里**不会有回调**——它是为「搜索框与插件页并存」
-的宿主（如快 Sofast）保留的接口。要「边打字边联动」，请把输入框做在插件页自己的界面里。
+的宿主形态有意义。要「边打字边联动」，请把输入框做在插件页自己的界面里。
 
 ### 9.2 贡献型协议
 
@@ -427,30 +427,6 @@ v1 只要求：所有面向用户的字符串集中在 `src/locales/zh-CN.ts`（
 | 能力只增不减 | 同一 `apiVersion` 内不得删除/重命名 capability 与 API；新增为 minor |
 | 弃用流程 | 标注 `@deprecated` → 至少保留一个 minor → 下一个主版本移除（写入 changelog） |
 | 插件版本 | 插件自身 semantic versioning；底座在设置页展示"插件声明需要 apiVersion X，当前底座支持 Y" |
-
-### 与如快 Sofast 的兼容（过渡期）
-
-| 如快能力 | 本底座 | 过渡期处理 |
-|---|---|---|
-| `@sofastapp/api`（postMessage 协议） | `@launcher/api` | 内核识别两套消息格式；`@launcher/api` 自动探测宿主 |
-| `Context.*` | `hostUi.*` | 同名语义映射 |
-| `LocalStorage` | `storage` | **路径不兼容**：新底座落 `<dataRoot>/plugins/<id>/storage.json`；首次加载做一次性迁移 |
-| `Backend.run` | `exec.run` | 同语义 |
-| `ctx().pluginPath` | `ctx().dataPath` | **必须改**：`pluginPath` 在新底座指向只读安装目录（保留兼容字段但标注 deprecated） |
-
-**Node Worker 协议并非逐字节相同**（首批插件实施时实测 `@sofastapp/api@0.0.3` ↔ 本底座）：
-
-| 消息 | 如快 | 本底座 | 双宿主脚本的做法 |
-|---|---|---|---|
-| `progress(p, data)` | `{type:'progress', progress, data}` | `{type:'progress', p, data}` | 两个字段都发 |
-| `done(undefined)` | 不发 `result`，只发 `done` | `result` + `done` | 与如快一致（对底座等价） |
-| `fail(e)` | `{type:'error', error}` | `{type:'result', data:{__error}}` + `{type:'done'}` | 三种都发，谁认谁处理 |
-| `ctx()` 字段 | `command` / `args` / `pluginPath` | 另加 `dataPath` / `dataRoot` / `pluginId` / `mode` | 取并集，`dataPath` 兜底 `pluginPath/data` |
-
-写双宿主脚本时不必依赖任何 SDK：`shared/lib/host-node.ts`（如快仓库）就是这 30 行协议本身。
-| `Screenshot.start` / `Quicklink` | 同名 | 直接映射 |
-
-过渡期：**v1 支持双协议，v2 只留原生协议**（时间点见 changelog）。
 
 ---
 

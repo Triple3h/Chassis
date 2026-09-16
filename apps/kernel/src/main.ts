@@ -8,7 +8,7 @@ const VERSION = '0.1.0'
 
 interface CliOptions {
   dataRoot: string
-  /** 出厂插件根目录（可多个：内置 plugins/ + 预置 presets/） */
+  /** 出厂插件根目录（可多个；开发态默认就是仓库根的 plugins/） */
   builtinRoots: string[]
   uiDistDir: string | null
   uiDevUrl?: string

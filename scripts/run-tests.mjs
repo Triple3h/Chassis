@@ -12,8 +12,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const scope = process.argv[2] ?? 'all'
 
 const ROOTS = {
-  // presets/tests：预置插件适配层的单测（宿主映射等价性、超时与兜底语义）
-  unit: ['tests/unit', 'packages', 'apps', 'presets/tests'],
+  unit: ['tests/unit', 'packages', 'apps'],
   contract: ['tests/contract'],
   smoke: ['tests/smoke'],
 }
@@ -29,8 +28,8 @@ function walk(dir, out = []) {
   return out
 }
 
-// presets：预置插件自己的单测（适配层 + 各插件的 core/script 用例）也纳入统一入口
-const roots = scope === 'all' ? ['packages', 'apps', 'tests', 'presets'] : (ROOTS[scope] ?? [scope])
+// plugins：适配层与各插件自己的单测（core/script 用例）也纳入统一入口
+const roots = scope === 'all' ? ['packages', 'apps', 'tests', 'plugins'] : (ROOTS[scope] ?? [scope])
 const files = [...new Set(roots.flatMap((r) => walk(path.join(repoRoot, r))))].sort()
 
 if (files.length === 0) {

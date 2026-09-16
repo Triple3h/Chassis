@@ -92,24 +92,24 @@ packages/
   plugin-manifest/  清单类型 + 校验 + 契约类型（内核/UI/CLI 共用）
   plugin-api/       @launcher/api —— 插件页 SDK（postMessage 客户端）
   plugin-api-node/  @launcher/api-node —— 脚本 SDK（ctx/log/progress/done/fail/storage/onQuery）
-plugins/            内置插件（官方，出厂预装、机制与第三方完全相同）
-  app-launcher/     应用扫描 + 启动（macOS）
+plugins/            出厂插件（预装、机制与第三方完全相同；可禁用可卸载）
+  app-launcher/     应用扫描 + 启动（macOS）｜ esbuild 工具链
   file-search/      Spotlight 文件搜索 + Finder 显示
   web-open/         网址直达 / 搜索引擎
   internal-settings/ 设置 + 插件管理（internal：不可卸载）
-presets/            预置插件（第三方来源移植，同样出厂预装；源码与工具链独立管理）
-  shared/           四个插件共用的适配层与 UI（构建期打进各自产物）
-  scripts/          预置插件脚手架：build-all / spec-check / vite-shared / manifest-plugin
-  tests/            适配层单测（宿主映射等价性、超时与兜底）
-  sofast-totp/      双重验证器（TOTP/HOTP + 扫码导入）
-  sofast-hosts/     Hosts 管家（读写系统 hosts，含提权）
-  sofast-text-diff/ 文本比对（Myers 差分，Worker 内计算）
-  sofast-json-tools/ JSON 工具箱（无损格式化 / 树视图）
+  shared/           四个 Vue 插件共用（构建期打进各自产物）
+    build/          vite-shared.mjs（构建别名）+ manifest-plugin.mjs（清单裁剪）
+    lib/            virtual（虚拟滚动）/ clipboard / keys / theme / toast
+    ui/ styles/     AppShell / SofIcon / SofDialog + 设计令牌
+  totp/             双重验证器（TOTP/HOTP + 扫码导入）｜ Vite + Vue
+  hosts/            Hosts 管家（读写系统 hosts，含提权）
+  text-diff/        文本比对（Myers 差分，Worker 内计算）
+  json-tools/       JSON 工具箱（无损格式化 / 树视图）
 tests/
   fixtures/echo-plugin/  契约测试插件（覆盖宿主 API 全表）
   unit/ contract/ smoke/ 单元 / 契约 / 验收
-scripts/            build-all / build-plugin / build-shell / run-ts / run-tests / run-tsc / make-icons
-docs/               需求、规范、架构、ADR、第三方许可
+scripts/            build-all / build-plugin / build-shell / spec-check / pack-plugins / run-ts / run-tests / run-tsc / make-icons
+docs/               需求、规范、架构、手册、ADR、第三方许可
 ```
 
 ---
@@ -121,8 +121,9 @@ docs/               需求、规范、架构、ADR、第三方许可
 | [`docs/launcher-requirements.md`](docs/launcher-requirements.md) | **唯一需求源**（产品定义、行为规格、架构、里程碑） |
 | [`docs/plugin-spec.md`](docs/plugin-spec.md) | 插件接入规范 v1（对外契约） |
 | [`docs/architecture.md`](docs/architecture.md) | 内核实现细节 + **与需求的差异清单** + 已知边界 |
-| [`docs/first-batch-plugins.md`](docs/first-batch-plugins.md) | 首批（如快）插件接入计划 + 实施记录 |
-| [`presets/README.md`](presets/README.md) | 预置插件：定位、目录约定、构建 / 自检 / 发布 |
+| [`docs/first-batch-plugins.md`](docs/first-batch-plugins.md) | 首批 4 个出厂插件的接入计划 + 实施记录 |
+| [`plugins/README.md`](plugins/README.md) | 出厂插件：两套工具链、目录约定、构建 / 自检 / 发布 |
+| [`docs/plugin-dev-guide.md`](docs/plugin-dev-guide.md) | Vue 插件开发手册（命令形态 / 产物契约 / 脚本协议 / 踩坑复盘） |
 | [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) | 第三方代码与许可证（含 ZTools MIT 原文） |
 | `docs/decisions/ADR-0001~0003` | UI 托管方式 / 贡献型搜索载体 / 管理面特权边界 |
 

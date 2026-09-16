@@ -13,10 +13,10 @@
 
 | 插件 | 命令 | UI 侧实际用到的宿主能力 | 脚本侧 | 可变数据落哪 |
 |---|---|---|---|---|
-| `sofast-totp` | `totp`(view, searchable) + `read-image`(script) | `storage`、`exec.run`(=runScript)、`screenshot`、`hostUi`(搜索框 + setFooter) | `ctx/done/log/onError`，读 `pluginPath` | 宿主 LocalStorage → `<插件目录>/data/storage.json`；vault 密文同处 |
-| `sofast-hosts` | `hosts`(view, searchable) + `hosts-read` / `hosts-write`(script) | `storage`、`hostUi` | `ctx/done/log/onError`，读 `pluginPath` | 快照走宿主 LocalStorage；**hosts 备份写 `<插件目录>/data/backups`** ❌ |
-| `sofast-text-diff` | `diff`(view, searchable) | `hostUi` | — | 无 |
-| `sofast-json-tools` | `json`(view, searchable) | `hostUi` | — | 无 |
+| `totp` | `totp`(view, searchable) + `read-image`(script) | `storage`、`exec.run`(=runScript)、`screenshot`、`hostUi`(搜索框 + setFooter) | `ctx/done/log/onError`，读 `pluginPath` | 宿主 LocalStorage → `<插件目录>/data/storage.json`；vault 密文同处 |
+| `hosts` | `hosts`(view, searchable) + `hosts-read` / `hosts-write`(script) | `storage`、`hostUi` | `ctx/done/log/onError`，读 `pluginPath` | 快照走宿主 LocalStorage；**hosts 备份写 `<插件目录>/data/backups`** ❌ |
+| `text-diff` | `diff`(view, searchable) | `hostUi` | — | 无 |
+| `json-tools` | `json`(view, searchable) | `hostUi` | — | 无 |
 
 四个插件**都是入口型搜索**（`searchable: true`，命中命令后把输入流给插件页），没有一个是贡献型 —— 说明 v1 的两种搜索模式都得先在底座里实现，但首批只用得上入口型。
 
@@ -87,7 +87,7 @@ export const onError = () => { process.on('uncaughtException', (e) => fail(e)); 
 ```
 
 - `dataPath` 的兜底（`pluginPath/data`）就是**如快下的旧行为**，所以 hosts 的备份在如快里位置不变、在新底座里自动落到 appData —— **N2 一次修好，两边都对**。
-- 三个脚本文件（`sofast-totp/src/no-view/read-image.ts`、`sofast-hosts/src/no-view/hosts-read.ts`、`hosts-write.ts`）只改 import 行 + 把 `pluginPath` 换成 `dataPath`。
+- 三个脚本文件（`totp/src/no-view/read-image.ts`、`hosts/src/no-view/hosts-read.ts`、`hosts-write.ts`）只改 import 行 + 把 `pluginPath` 换成 `dataPath`。
 
 ### 3.3 为什么不分叉
 
@@ -116,8 +116,8 @@ export const onError = () => { process.on('uncaughtException', (e) => fail(e)); 
 
 | # | 插件 | 验收（在新底座上） |
 |---|---|---|
-| 1.1 | `sofast-json-tools` | 搜"JSON"命中 → Enter 打开 → 粘贴 → 格式化/压缩/树视图正常；`hostUi` 的搜索框读写与 footer 正常；无 capability 缺失告警 |
-| 1.2 | `sofast-text-diff` | 同上；Worker 内差分正常；生产构建资源路径正确（静态服务器验证） |
+| 1.1 | `json-tools` | 搜"JSON"命中 → Enter 打开 → 粘贴 → 格式化/压缩/树视图正常；`hostUi` 的搜索框读写与 footer 正常；无 capability 缺失告警 |
+| 1.2 | `text-diff` | 同上；Worker 内差分正常；生产构建资源路径正确（静态服务器验证） |
 | 1.3 | 内核侧 | 未声明的 capability 调用 → 方法不存在 + 审计有记录；禁用/启用插件无残留 |
 
 顺序理由：这两个插件只用 `hostUi`，是**最小可用的协议验证器**，桥通了再往上加能力。
@@ -126,8 +126,8 @@ export const onError = () => { process.on('uncaughtException', (e) => fail(e)); 
 
 | # | 插件 | 验收（在新底座上） |
 |---|---|---|
-| 2.1 | `sofast-totp` | `storage` 读写 + 口令加密解锁；`screenshot` 触发；`exec.run('read-image')` 返回结果；扫码导入全链路 |
-| 2.2 | `sofast-hosts` | `hosts-read` / `hosts-write` 跑通；提权时由**底座 pre-execute 中间件**弹确认；备份落在 `<dataRoot>/plugins/sofast-hosts/backups`；**旧备份目录一次性迁移** |
+| 2.1 | `totp` | `storage` 读写 + 口令加密解锁；`screenshot` 触发；`exec.run('read-image')` 返回结果；扫码导入全链路 |
+| 2.2 | `hosts` | `hosts-read` / `hosts-write` 跑通；提权时由**底座 pre-execute 中间件**弹确认；备份落在 `<dataRoot>/plugins/hosts/backups`；**旧备份目录一次性迁移** |
 | 2.3 | 数据迁移 | 首次在新底座加载时：旧 `<插件目录>/data/storage.json` → `<dataRoot>/plugins/<id>/storage.json`；迁移失败不阻塞（只告警） |
 
 ---
@@ -136,10 +136,10 @@ export const onError = () => { process.on('uncaughtException', (e) => fail(e)); 
 
 | 插件 | `capabilities` | 依据 |
 |---|---|---|
-| `sofast-json-tools` | `["hostUi"]` | 只用搜索框 / footer |
-| `sofast-text-diff` | `["hostUi"]` | 同上 |
-| `sofast-totp` | `["storage", "hostUi", "screenshot", "exec.spawn"]` | `storage`（账户/设置/口令密文）、`hostUi`、`triggerScreenshot`、`runScript('read-image')`；剪贴板走 DOM `paste` 事件，**不需要** `clipboard.read` |
-| `sofast-hosts` | `["storage", "hostUi", "exec.spawn"]` | 快照持久化、搜索框 / footer、`hosts-read` / `hosts-write` |
+| `json-tools` | `["hostUi"]` | 只用搜索框 / footer |
+| `text-diff` | `["hostUi"]` | 同上 |
+| `totp` | `["storage", "hostUi", "screenshot", "exec.spawn"]` | `storage`（账户/设置/口令密文）、`hostUi`、`triggerScreenshot`、`runScript('read-image')`；剪贴板走 DOM `paste` 事件，**不需要** `clipboard.read` |
+| `hosts` | `["storage", "hostUi", "exec.spawn"]` | 快照持久化、搜索框 / footer、`hosts-read` / `hosts-write` |
 
 > 原则：**只声明实际用到的**。多声明会被评审拒收，也会让安装时的权限提示失去可信度。
 
@@ -236,6 +236,15 @@ export const onError = () => { process.on('uncaughtException', (e) => fail(e)); 
 | 构建 | `pnpm build` 一并构建；`presets/scripts/build-all.mjs` 保留 `--pack`（打 zip 给如快安装） |
 | 校验 | `pnpm typecheck`（vue 工程自动改用各自的 `vue-tsc`）、`pnpm test`（含 `presets/tests` 与四个插件用例）、`pnpm presets:check` |
 | 出厂形态 | 内核 `--builtin-plugins` 支持逗号分隔的多目录；`scripts/lib/resources.mjs` 把 `plugins/` 与 `presets/` 一起拷进 `Resources/builtin-plugins/`；壳的开发态回退也带上 `presets/` |
+
+**2026-09-16 后续（同日第一批）**：这层 `presets/` 已取消 —— 四个插件连同 `shared/` 一并搬进 `plugins/`，与内置插件同目录、
+同出厂流程（构建按各包 `package.json` 的 `build:view` / `build:scripts` 由根 `scripts/build-all.mjs` 驱动；
+`spec-check` / `pack:plugins` 收进根 `scripts/`），工具链仍是各自的 Vite + Vue。见 `plugins/README.md`。
+
+**2026-09-16 后续（同日第二批）**：**如快退役** —— 双宿主适配层（`platform` / `host-adapter` / `host-calls` / `host-node`）
+连同两个单测删除，插件改为直连 `@launcher/api` / `@launcher/api-node`；插件 id 去掉 `sofast-` 前缀
+（`sofast-totp` → `totp` 等），旧数据目录由内核一次性接手（`apps/kernel/src/plugin.ts` 的 `LEGACY_PLUGIN_IDS`）。
+本节其余内容（含如快侧的兼容说明）自此只作历史记录。
 
 ### 9.5 尚未做（明确缺口）
 

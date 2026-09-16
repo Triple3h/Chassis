@@ -1,8 +1,8 @@
 /**
  * @launcher/api-node —— script / no-view 产物的运行时 SDK（plugin-spec §8.7）。
  *
- * 消息协议与如快 Sofast 完全一致：`{type:'log'|'progress'|'result'|'done'}`，
- * 因此现有脚本零改动即可双宿主运行；`storage` / `onQuery` 是本底座的扩展。
+ * 消息协议（脚本 → 宿主）：`{type:'log'|'progress'|'result'|'done'}`；
+ * `storage` / `onQuery` / `rpc` 是底座的扩展面。
  */
 import { parentPort, workerData } from 'node:worker_threads'
 
@@ -44,16 +44,15 @@ function send(payload: Record<string, unknown>): void {
   }
 }
 
-/** 运行上下文（与如快同构；`dataPath` 是新底座字段，旧宿主缺省时回落插件目录） */
+/** 运行上下文：全部字段由宿主经 `workerData` 注入（见 apps/kernel/src/services/exec.ts） */
 export function ctx(): NodeContext {
-  const wd = (workerData ?? {}) as Partial<NodeContext> & { pluginPath?: string }
-  const pluginPath = (wd.pluginPath ?? process.cwd()).trim() || process.cwd()
+  const wd = (workerData ?? {}) as Partial<NodeContext>
   return {
     command: wd.command ?? '',
     args: wd.args,
-    pluginPath,
-    dataPath: wd.dataPath ?? `${pluginPath}/data`,
-    dataRoot: wd.dataRoot ?? pluginPath.split('/').slice(0, -1).join('/'),
+    pluginPath: wd.pluginPath ?? '',
+    dataPath: wd.dataPath ?? '',
+    dataRoot: wd.dataRoot ?? '',
     pluginId: wd.pluginId ?? '',
     mode: wd.mode === 'search' ? 'search' : 'run',
   }

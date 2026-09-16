@@ -3,8 +3,8 @@
  * 对所有带 tsconfig.json 的工作区包执行类型检查。
  *
  * 两种编译器：
- *  - 普通 TS 包（含内置插件）：根目录的 `tsc -p`;
- *  - **vue 工程**（预置插件 `presets/sofast-*`）：它们有自己的 `vue-tsc`（`tsc` 认不了 `.vue`），
+ *  - 普通 TS 包（含 esbuild 工具链的插件）：根目录的 `tsc -p`;
+ *  - **vue 工程**（`plugins/sofast-*`）：它们有自己的 `vue-tsc`（`tsc` 认不了 `.vue`），
  *    所以走包自己的 `typecheck` 脚本 —— 判定依据是源码里有 `.vue` 文件。
  */
 import { spawnSync } from 'node:child_process'
@@ -15,7 +15,7 @@ import path from 'node:path'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const tscBin = path.join(repoRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tsc.cmd' : 'tsc')
 
-const roots = ['packages', 'apps', 'plugins', 'presets', 'tests'].map((r) => path.join(repoRoot, r))
+const roots = ['packages', 'apps', 'plugins', 'tests'].map((r) => path.join(repoRoot, r))
 const dirs = []
 
 function collect(dir) {

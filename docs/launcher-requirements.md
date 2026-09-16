@@ -11,7 +11,7 @@
 
 ### 1.1 一句话
 
-一个 **ZTools 形态的启动台**：全局热键唤出、输入即搜、结果列表支持**最近使用**与**已固定**。底座**零能力**，所有能力（包括"启动应用"本身）都以插件形式一点点集成进来。
+一个 **ZTools 形态的启动台**：全局热键唤出、输入即搜、结果支持**最近使用**与**已固定**。底座**零能力**，所有能力（包括"启动应用"本身）都以插件形式一点点集成进来。
 
 ### 1.2 核心原则
 
@@ -64,37 +64,42 @@
 | 单实例 | 第二次启动只唤起已运行实例 |
 | 开机自启 | 可配置，默认关 |
 
-### 3.2 搜索与结果列表
+### 3.2 搜索与结果网格
+
+**结果以「图标网格」呈现**（布局与操作逻辑对照 ZTools 的聚合视图）：分区标题 + 每行 N 个格子（图标 + 名称两行截断），列数由窗口宽度算出（720px ⇒ 7 列，上限 9）。
 
 **空输入时**展示（按此顺序）：
 
-1. **已固定**（`PinnedItem`，按用户拖拽顺序；超过 8 个折叠为"已固定 (N)"可展开）
-2. **最近使用**（`HistoryItem`，按 `lastUsed` 倒序；超过 6 个折叠）
+1. **已固定**（`PinnedItem`，按用户拖拽顺序；默认露 1 行，超出时标题右侧显示「展开 (N)」）
+2. **最近使用**（`HistoryItem`，按 `lastUsed` 倒序；默认露 2 行，超出同上）
 
 **有输入时**展示：
 
-1. **最佳匹配**（跨插件合并后的搜索结果，最多 20 条）
+1. **最佳匹配**（跨插件合并后的搜索结果，最多 20 条；默认露 3 行）
 2. **已固定**中命中的项（置顶，带固定标记）
 3. **最近使用**中命中的项（权重低于最佳匹配；可在设置里关掉"最近使用参与搜索"）
 
-**每条结果的渲染**：图标 20px + 主标题 + 副标题（可选）+ 右侧动作提示键（如有）。固定项左侧有固定图钉。
+**每个格子的渲染**：图标 36px（无图标时退化为字形磁贴 / 首字母磁贴）+ 名称（2 行截断）；副标题与插件名进 tooltip。非固定分区里命中固定项时右上角有固定角标，插件不可用时整格置灰并标 `!`。
+
+**分区标题**：左「最近使用」右「展开 (19) / 收起」，整行可点。
 
 **键盘**：
 
 | 键 | 行为 |
 |---|---|
-| `↑` `↓` | 上下移动选择（跨分组连续） |
-| `→` `←` | 有二级面板时展开/收起；无则忽略 |
+| `↑` `↓` | 同列换到上一排 / 下一排（跨分区连续；落点排更短时贴到排尾） |
+| `←` `→` | 逐格左右移动（跨分区连续） |
+| `Tab` / `⇧Tab` | 同上，逐格前后移动 |
 | `Enter` | 执行选中项的默认动作 |
 | `⌘Enter` / `⇧Enter` | 执行第二动作（若声明） |
+| `⌘I` | 展开 / 收起二级面板（该项有 `detail` 时） |
 | `⌘K` | 打开动作面板（等同右键菜单） |
 | `⌘,` | 打开设置 |
-| `Tab` | 把选中项作为"作用对象"传给下一次搜索（v2，M3 之后） |
-| `Esc` | 有二级面板先收起，否则隐藏窗口 |
+| `Esc` | 分步退出：收起二级面板 → 清空输入 → 隐藏窗口 |
 
-**鼠标**：单击选中并执行；右键 = 动作菜单；拖拽固定项 = 重排。
+**鼠标**：单击执行；右键 = 动作菜单；拖拽固定项 = 重排（仅空输入且该分区已展开）；点空白处回到搜索框。
 
-**性能红线**：输入到首屏结果 ≤ 100ms（可用旧结果 + 高亮，不闪空白）；列表 > 200 行必须虚拟滚动。
+**性能红线**：输入到首屏结果 ≤ 100ms（可用旧结果 + 高亮，不闪空白）；结果 > 200 条必须虚拟滚动。
 
 ### 3.3 动作菜单（右键 / ⌘K）
 
@@ -217,8 +222,9 @@ launcher/
 │   │   └── src/
 │   │       ├── main.ts
 │   │       ├── App.vue
-│   │       ├── components/{SearchBox,ResultList,ResultItem,GroupHeader,DetailPanel,Footer,ActionsMenu}.vue
+│   │       ├── components/{SearchBox,ResultGrid,GridItem,SectionHeader,DetailPanel,Footer,ActionsMenu}.vue
 │   │       ├── stores/{commands.ts,history.ts,pinned.ts,ui.ts,plugins.ts}
+│   │       ├── lib/grid.ts           # 结果网格：列数/度量/分区/导航
 │   │       ├── lib/virtual.ts        # 虚拟滚动
 │   │       ├── lib/keys.ts           # ⌘/Ctrl 归一化、快捷键表
 │   │       └── styles/app.css        # @source 声明本包 src 与 shared-ui
@@ -385,10 +391,11 @@ interface ActionResult {
 interface HistoryItem {
   key: string          // 稳定 key = `${pluginId}:${command}:${hash(args)}`（不是下标！）
   pluginId: string
-  command: string
+  command: string      // 命令名，或非命令结果项的结果项 id（pluginKeyOf）
   title: string        // 展示快照：插件卸载/改名后仍可显示（置灰 + 提示）
   icon?: string
   args?: unknown
+  action?: ActionDecl  // 结果项动作快照：open/copy 这类结果项靠它才能再次执行
   lastUsed: number     // epoch ms
   count: number        // 使用次数
 }
@@ -399,7 +406,8 @@ interface PinnedItem extends Omit<HistoryItem, 'lastUsed' | 'count'> {
 
 - 持久化：`<dataRoot>/history.json`、`<dataRoot>/pinned.json`；写入 debounce 500ms + 原子写（临时文件 + rename）
 - 历史上限：默认 500（可配置 100–2000），超出按 `lastUsed` 淘汰
-- **只在 `execute` 成功且 `kind !== 'host'` 时写历史**
+- **只在 `execute` 成功且 `kind !== 'host'` 时写历史**（命令走 `invoke`；应用/文件/网址这类结果项走 `executeItem` 写快照，key 与搜索侧一致）
+- 置灰判定：`command` 是命令名（`COMMAND_NAME_RE`）时校验命令是否还在；是结果项 id 时只校验插件是否可用
 - 排序公式（内核侧）：`score = 0.55 * match + 0.30 * recency + 0.15 * frequency`
   - `match`：标题前缀命中 1.0 / 包含 0.7 / 拼音全拼 0.6 / 首字母 0.5 / 副标题与 keywords 0.4
   - `recency`：`exp(-Δh / 72)`（半衰 3 天）
@@ -565,7 +573,7 @@ progress(0.4, { step: 'halfway' })
 done({ ok: true })                          // 正常结束，返回值交给 ctx.exec.run
 fail('boom')                                // 异常结束
 ```
-消息协议（与如快一致，便于复用现成脚本）：`{type:'log',level,message,data}` / `{type:'progress',p,data}` / `{type:'result',data}` + `{type:'done'}`。
+消息协议：`{type:'log',level,message,data}` / `{type:'progress',p,data}` / `{type:'result',data}` + `{type:'done'}`。
 
 ### 8.8 ResultItem 与 ActionDecl
 
@@ -602,19 +610,6 @@ npm run pack                     # 打 zip 供安装
 - 调试：设置里有"打开插件 DevTools"（macOS WKWebView 用 `isInspectable` + Safari 开发者菜单；开发构建可用）
 - 自测：`npm run test`（本地 harness）+ 用 `tests/fixtures/echo-plugin` 的协议自检工具
 
-### 8.10 与如快 Sofast 的兼容
-
-目标：**现有 4 个如快插件零改动直接跑**。
-
-| 如快 | 本底座 | 处理 |
-|---|---|---|
-| 清单顶层 `commands[]`（`name/title/mode/searchable/placeholder`） | 同 | 直接兼容；本底座新增字段可缺省（`apiVersion` 缺省视为 `"1"`，`capabilities` 缺省 = 全给，仅对 `sof-*` 前缀或开发模式） |
-| `@sofastapp/api` 的 postMessage 协议 | `@launcher/api` | 内核同时识别 `@sofastapp/api` 的消息格式（兼容层，M1 实现） |
-| `LocalStorage`（落 `data/storage.json`） | `ctx.storage` | **故意不兼容路径**：数据落 `<dataRoot>/plugins/<id>/storage.json`（P7）。首次加载时若发现旧路径数据，做一次迁移 |
-| `Screenshot.start()` | `ctx.screenshot` | 同语义（只返回是否触发成功） |
-| `Quicklink` | `ctx.quicklink` | 同 |
-| `Context.setFooter` | `ctx.hostUi.setFooter` | 同 |
-
 ---
 
 ## 9. 安全与权限
@@ -638,7 +633,7 @@ npm run pack                     # 打 zip 供安装
 | 冷启动到可唤出 | ≤ 800ms | 壳先起窗口并显示骨架，内核异步就绪；插件懒加载（首次搜索才激活） |
 | 输入 → 首屏结果 | ≤ 100ms | 本地拼音索引先出、插件结果异步补位、不闪空白 |
 | 单次搜索 | 插件超时 200ms | 超时插件本次丢弃并记审计 |
-| 列表渲染 | > 200 行必须虚拟滚动 | `apps/launcher-ui/src/lib/virtual.ts`，定高行 |
+| 网格渲染 | > 200 条必须虚拟滚动 | `apps/launcher-ui/src/lib/virtual.ts`，按「一排格子」定高 |
 | 主线程计算 | > 50ms 的必须进 Worker | 拼音索引构建、历史大文件解析、插件结果合并的排序（> 500 条时） |
 | 常驻内存 | ≤ 120MB | 插件会话关闭即销毁 iframe；历史/审计全量不驻内存（按需读页） |
 | 历史文件 | ≤ 500 条，写入 debounce | 原子写 |
@@ -651,8 +646,8 @@ npm run pack                     # 打 zip 供安装
 |---|---|---|
 | 单元 | `history` 排序/淘汰、`search` 去重与合并、清单校验、拼音、token 校验、路径穿越防护 | `scripts/run-ts.mjs`（esbuild → node），无框架 |
 | 契约 | `tests/fixtures/echo-plugin` 覆盖 §8.6 全表 API（含错误码与未授权路径） | node + 真 HTTP listener |
-| 集成 | 装一个真插件（如快的 `sofast-json-tools`）→ 搜索 → 执行 → 历史落盘 | node 驱动内核（不起壳） |
-| 兼容 | 4 个如快插件全部加载、命令可见、核心动作可用 | 同上 |
+| 集成 | 装一个真插件（`json-tools`）→ 搜索 → 执行 → 历史落盘 | node 驱动内核（不起壳） |
+| 出厂插件 | `plugins/` 下全部插件加载、命令可见、核心动作可用 | `npm run smoke:first-batch` |
 | 冒烟 | 壳 + 内核真实启动：唤出 → 输入 → 选中 → 执行 → 隐藏 | 手动清单 + 截图存证 |
 | E2E | 插件页行为用 Playwright 直连 `http://127.0.0.1:<port>`（绕过壳，稳定） | Playwright |
 
@@ -677,7 +672,7 @@ npm run pack                     # 打 zip 供安装
 ## 13. 里程碑与验收
 
 ### M0 — 壳 + 启动台 UI（1–1.5 周）
-**交付**：`apps/shell`（窗口/热键/托盘）、`apps/launcher-ui`（搜索框 + 结果列表 + 键盘导航 + 固定的假数据）、`history.ts` 落盘。
+**交付**：`apps/shell`（窗口/热键/托盘）、`apps/launcher-ui`（搜索框 + 结果网格 + 键盘导航 + 固定的假数据）、`history.ts` 落盘。
 **验收**：
 - 热键唤出/`Esc` 隐藏/失焦隐藏/多屏居中正常，托盘菜单可退出
 - 输入过滤假数据、↑↓ 选择、Enter 触发（先只打日志）
@@ -687,14 +682,14 @@ npm run pack                     # 打 zip 供安装
 **交付**：`context/registry/pipeline/plugin/audit`、`services/{storage,bridge,hostUi,exec}`、每插件 HTTP listener + token、`packages/plugin-api`、`packages/plugin-manifest`、`echo-plugin`。
 **验收**：
 - `echo-plugin` 通过 §8.6 全表契约测试（含未授权 → 方法不存在）
-- **`sofast-json-tools` 零改动跑起来**：搜索到命令 → 打开 → 内部交互 → 存储读写
+- **`json-tools` 零改动跑起来**：搜索到命令 → 打开 → 内部交互 → 存储读写
 - 未声明的 capability 调用失败且审计有记录
 - 禁用/启用插件不留残留（命令消失又出现，历史项置灰）
 
 ### M2 — 脚本运行时 + 第一个官方插件（1–1.5 周）
 **交付**：`services/exec.ts`（worker_threads）+ `plugins/app-launcher`（macOS 扫描 + 启动）。
 **验收**：
-- **`sofast-hosts` 跑通**（含提权脚本的确认提示）
+- **`hosts` 跑通**（含提权脚本的确认提示）
 - `app-launcher` 能搜到 `/Applications` 下的应用并启动；历史里能出现"最近启动的应用"
 - 脚本超时/异常不拖垮内核
 
@@ -715,8 +710,8 @@ npm run pack                     # 打 zip 供安装
 
 | # | 问题 | 默认取值 |
 |---|---|---|
-| 1 | 代码放哪 | **独立新仓库**，本文件作为 `docs/REQUIREMENTS.md`；现有 4 个如快插件与 `shared/` 作为**外部测试床**引用，不复制进来 |
-| 2 | 是否兼容如快 `@sofastapp/api` 协议 | **是**，M1 做兼容层 |
+| 1 | 代码放哪 | **独立新仓库**，本文件作为 `docs/REQUIREMENTS.md`；`plugins/` 下的出厂插件与底座同仓库维护 |
+| 2 | 是否兼容第三方旧协议（`@sofastapp/api`） | **否**（2026-09-16 起）：底座只认原生协议 `@launcher/api` |
 | 3 | 存储后端 | **JSON 文件 + 原子写**；历史 > 2000 条再评估 SQLite |
 | 4 | 平台 | **先 macOS（arm64）**，Windows 在 M4 之后单独立项 |
 | 5 | Node sidecar | **接受体积代价**；构建期把 Node 运行时裁到最小 |

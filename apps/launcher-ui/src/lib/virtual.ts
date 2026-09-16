@@ -1,8 +1,8 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
-import type { Row } from './types'
+import type { GridRow } from './grid'
 
 export interface VirtualRow {
-  row: Row
+  row: GridRow
   index: number
   top: number
   height: number
@@ -10,25 +10,26 @@ export interface VirtualRow {
 
 /**
  * 定高虚拟滚动（requirements §10：列表 > 200 行必须虚拟滚动）。
- * 组头与条目高度可不同（header 28 / item rowHeight）。
+ * 一行 = 一个分区标题，或一排网格格子（最多 `columns` 个条目），高度由 heightOf 给出。
  */
 export function useVirtualRows(
-  rows: ComputedRef<Row[]>,
-  rowHeight: Ref<number>,
+  rows: ComputedRef<GridRow[]>,
+  heightOf: (row: GridRow) => number,
   viewportHeight: Ref<number>,
   opts: { threshold?: number; overscan?: number } = {},
 ) {
-  const threshold = opts.threshold ?? 200
-  const overscan = opts.overscan ?? 6
+  // 一排最多 9 个条目 ⇒ 24 排 ≈ 200 条，越过这条线就开虚拟滚动
+  const threshold = opts.threshold ?? 24
+  const overscan = opts.overscan ?? 4
   const scrollTop = ref(0)
 
   const enabled = computed(() => rows.value.length > threshold)
 
   const layout = computed(() => {
-    const items: Array<{ row: Row; top: number; height: number }> = []
+    const items: Array<{ row: GridRow; top: number; height: number }> = []
     let top = 0
     for (const row of rows.value) {
-      const height = row.kind === 'header' ? 30 : rowHeight.value
+      const height = heightOf(row)
       items.push({ row, top, height })
       top += height
     }
@@ -42,12 +43,10 @@ export function useVirtualRows(
     }
     const start = scrollTop.value
     const end = scrollTop.value + viewportHeight.value
-    let first = 0
-    let last = items.length - 1
-    // 线性扫描足够快（< 1 万行）；起始位置用简单估算再回退
-    first = Math.max(0, Math.floor(start / Math.max(1, rowHeight.value)) - overscan * 3)
+    // 线性扫描足够快（< 1 千行）；起始位置用简单估算再回退
+    let first = Math.max(0, Math.floor(start / 90) - overscan * 3)
     while (first > 0 && (items[first]?.top ?? 0) > start) first -= 1
-    last = Math.min(items.length - 1, first)
+    let last = Math.min(items.length - 1, first)
     while (last < items.length - 1 && (items[last]?.top ?? 0) + (items[last]?.height ?? 0) < end) last += 1
     last = Math.min(items.length - 1, last + overscan)
 

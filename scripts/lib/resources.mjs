@@ -28,12 +28,11 @@ export function assembleResources(repoRoot) {
   const builtin = path.join(resources, 'builtin-plugins')
   fs.rmSync(builtin, { recursive: true, force: true })
   fs.mkdirSync(builtin, { recursive: true })
+  // 出厂预装 = `plugins/` 下全部插件。目录里插件工具链有两套（内置 esbuild /
+  // 移植件 Vite + Vue），但产物形态一致：有 dist/package.json 才算插件。
   let count = 0
-  // 出厂预装 = 内置插件（plugins/）+ 预置插件（presets/）。
-  // 源码分成两个目录管理，运行时都在同一个「出厂 bundle」目录里，内核一视同仁。
-  for (const root of ['plugins', 'presets']) {
-    const pluginsRoot = path.join(repoRoot, root)
-    if (!fs.existsSync(pluginsRoot)) continue
+  const pluginsRoot = path.join(repoRoot, 'plugins')
+  if (fs.existsSync(pluginsRoot)) {
     for (const name of fs.readdirSync(pluginsRoot)) {
       const dist = path.join(pluginsRoot, name, 'dist')
       if (!fs.existsSync(path.join(dist, 'package.json'))) continue

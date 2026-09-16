@@ -56,30 +56,36 @@ export interface ActionResult {
   hideLauncher?: boolean
 }
 
-/** §7.5：能力无关的历史项 */
-export interface HistoryItem {
-  /** 稳定 key = `${pluginId}:${command}:${hash(args)}`（不是下标！） */
-  key: string
-  pluginId: string
-  command: string
+/**
+ * 历史/固定项里的 `command` 有两种来源（内核 `pluginKeyOf`）：
+ * 真命令名（`ResultItem.action` 是 command），或结果项 id（open/copy… 结果项）。
+ * 后者不是命令声明，靠 `action` 快照才能再次执行 —— 所以快照必须持久化。
+ */
+export interface ItemSnapshot {
   /** 展示快照：插件卸载/改名后仍可显示（置灰 + 提示） */
   title: string
   subtitle?: string
   icon?: string
   args?: unknown
+  /** 结果项默认动作快照（非 command 结果项执行时用） */
+  action?: ActionDecl
+}
+
+/** §7.5：能力无关的历史项 */
+export interface HistoryItem extends ItemSnapshot {
+  /** 稳定 key = `${pluginId}:${command}:${hash(args)}`（不是下标！） */
+  key: string
+  pluginId: string
+  command: string
   /** epoch ms */
   lastUsed: number
   count: number
 }
 
-export interface PinnedItem {
+export interface PinnedItem extends ItemSnapshot {
   key: string
   pluginId: string
   command: string
-  title: string
-  subtitle?: string
-  icon?: string
-  args?: unknown
   order: number
 }
 

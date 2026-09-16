@@ -7,7 +7,7 @@ import { HistoryStore } from './history'
 import { ShellLink } from './jsonrpc'
 import { Pipeline } from './pipeline'
 import { CommandRegistry, SearchResultHub } from './registry'
-import { SearchEngine } from './search'
+import { SearchEngine, pluginKeyOf } from './search'
 import { SessionManager } from './session'
 import { PluginManager } from './plugin'
 import { PluginServerPool } from './http/pluginServers'
@@ -25,7 +25,7 @@ import { itemKey } from './util/text'
 
 export interface KernelOptions {
   dataRoot: string
-  /** 出厂插件根目录（可多个：内置 `plugins/` + 预置 `presets/`） */
+  /** 出厂插件根目录（可多个；开发态默认就是仓库根的 `plugins/`） */
   builtinRoots: string[]
   uiDistDir: string | null
   uiDevUrl?: string
@@ -145,7 +145,6 @@ export class Kernel {
       binder: this.binder,
       services: this.services,
       exec: this.exec,
-      migrateLegacyStorage: (pluginId, legacyFile) => this.storage.migrateLegacy(pluginId, legacyFile),
       settingsFor: (pluginId) => this.createSettingsService(pluginId) as unknown as Record<string, unknown>,
       log: (level, message, data) => this.log(level, message, data),
       onChanged: () => {
@@ -164,7 +163,7 @@ export class Kernel {
       config: this.config,
       pluginTitleOf: (pluginId) => this.plugins.titleOf(pluginId),
       pluginBaseUrl: (pluginId) => this.plugins.baseUrlFor(pluginId),
-      isCommandAlive: (pluginId, command) => this.plugins.isCommandAlive(pluginId, command),
+      isResultAlive: (pluginId, command) => this.plugins.isResultAlive(pluginId, command),
     })
 
     this.bridge = new BridgeDispatcher({
@@ -448,14 +447,32 @@ export class Kernel {
   /** 把一个结果项转换为可执行动作（列表项默认动作） */
   async executeItem(pluginId: string, item: ResultItem, args?: unknown, command?: string): Promise<ActionResult> {
     const targetCommand = command ?? (item.action.type === 'command' ? item.action.command : '')
-    if (!targetCommand) {
-      return this.runAction(item.action, { pluginId, command: command ?? '' })
-    }
-    const action: ActionDecl = { ...item.action, ...(args !== undefined ? { args } : {}) } as ActionDecl
-    if (action.type === 'command' && action.command !== undefined) {
+    const action: ActionDecl = args !== undefined ? ({ ...item.action, args } as ActionDecl) : item.action
+    if (targetCommand && action.type === 'command' && action.command !== undefined) {
       return this.invoke(`${pluginId}:${action.command}`, args ?? action.args, 'ui')
     }
-    return this.runAction(action, { pluginId, command: targetCommand })
+    const result = await this.runAction(action, { pluginId, command: targetCommand })
+    this.rememberItemResult(pluginId, item, action, result)
+    return result
+  }
+
+  /**
+   * 非命令结果项（应用 / 文件 / 网址）执行成功也写历史 —— 否则「最近使用」永远只有命令（§7.5）。
+   * key 与搜索侧 `rankPluginItem` 完全一致，最近使用才能和最佳匹配对上号。
+   */
+  private rememberItemResult(pluginId: string, item: ResultItem, action: ActionDecl, result: ActionResult): void {
+    if (!result.ok || result.kind === 'host') return
+    const key = itemKey(pluginId, pluginKeyOf(item), item.action)
+    this.history.record({
+      key,
+      pluginId,
+      command: pluginKeyOf(item),
+      title: item.title,
+      ...(item.subtitle ? { subtitle: item.subtitle } : {}),
+      ...(item.icon ? { icon: item.icon } : {}),
+      action,
+    })
+    this.bus.emit('history/changed', { key })
   }
 
   /** 供 UI 查询：命令 + 固定/最近（空输入的本地快照） */

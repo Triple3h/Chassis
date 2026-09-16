@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * 构建：kernel（自包含 mjs）→ launcher-ui（vite）→ plugins（内置插件，自包含产物）
- *       → presets（预置插件，各带自己的 vite 工具链）。
- * 用法：node scripts/build-all.mjs [kernel|ui|plugins|presets|all]
+ * 构建：kernel（自包含 mjs）→ launcher-ui（vite）→ plugins（全部出厂插件）。
+ *
+ * 插件工具链有两套（内置 esbuild 无框架 / 移植件 Vite + Vue），统一由 buildPluginRoot
+ * 按各插件 package.json 里的 build:view / build:scripts 驱动，产物形态一致。
+ * 用法：node scripts/build-all.mjs [kernel|ui|plugins|all]
  */
 import { build } from 'esbuild'
 import { spawnSync } from 'node:child_process'
@@ -57,17 +59,6 @@ function buildPlugins() {
   for (const root of roots) buildPluginRoot(root)
 }
 
-/** 预置插件：自带 vite 工具链，委托给 presets/scripts/build-all.mjs（依赖由根 pnpm install 统一装） */
-function buildPresets() {
-  const script = path.join(repoRoot, 'presets', 'scripts', 'build-all.mjs')
-  if (!fs.existsSync(script)) {
-    console.log('· 跳过预置插件（presets/ 不存在）')
-    return
-  }
-  run(process.execPath, [script], repoRoot)
-  console.log('✓ presets → presets/*/dist')
-}
-
 function buildPluginRoot(root) {
   if (!fs.existsSync(root)) return
   for (const name of fs.readdirSync(root)) {
@@ -92,5 +83,4 @@ function buildPluginRoot(root) {
 if (scope === 'all' || scope === 'kernel') await buildKernel()
 if (scope === 'all' || scope === 'ui') buildUi()
 if (scope === 'all' || scope === 'plugins') buildPlugins()
-if (scope === 'all' || scope === 'presets') buildPresets()
 console.log('构建完成')

@@ -98,30 +98,14 @@ importers:
         specifier: ^22.10.0
         version: 22.20.2
 
-  plugins/internal-settings:
+  plugins/hosts:
     dependencies:
       '@launcher/api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
-
-  plugins/web-open:
-    dependencies:
       '@launcher/api-node':
         specifier: workspace:*
         version: link:../../packages/plugin-api-node
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.0
-        version: 22.20.2
-
-  presets/sofast-hosts:
-    dependencies:
-      '@launcher/api':
-        specifier: workspace:*
-        version: link:../../packages/plugin-api
-      '@sofastapp/api':
-        specifier: ^0.0.3
-        version: 0.0.3(typescript@5.9.3)
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@5.9.3)
@@ -148,14 +132,17 @@ importers:
         specifier: ^3.3.11
         version: 3.3.11(typescript@5.9.3)
 
-  presets/sofast-json-tools:
+  plugins/internal-settings:
     dependencies:
       '@launcher/api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
-      '@sofastapp/api':
-        specifier: ^0.0.3
-        version: 0.0.3(typescript@5.9.3)
+
+  plugins/json-tools:
+    dependencies:
+      '@launcher/api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@5.9.3)
@@ -179,14 +166,11 @@ importers:
         specifier: ^3.3.11
         version: 3.3.11(typescript@5.9.3)
 
-  presets/sofast-text-diff:
+  plugins/text-diff:
     dependencies:
       '@launcher/api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
-      '@sofastapp/api':
-        specifier: ^0.0.3
-        version: 0.0.3(typescript@5.9.3)
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@5.9.3)
@@ -210,14 +194,14 @@ importers:
         specifier: ^3.3.11
         version: 3.3.11(typescript@5.9.3)
 
-  presets/sofast-totp:
+  plugins/totp:
     dependencies:
       '@launcher/api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
-      '@sofastapp/api':
-        specifier: ^0.0.3
-        version: 0.0.3(typescript@5.9.3)
+      '@launcher/api-node':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api-node
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@5.9.3)
@@ -246,6 +230,16 @@ importers:
       vue-tsc:
         specifier: ^3.3.11
         version: 3.3.11(typescript@5.9.3)
+
+  plugins/web-open:
+    dependencies:
+      '@launcher/api-node':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api-node
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.2
 
   tests/fixtures/echo-plugin:
     dependencies:
@@ -853,11 +847,6 @@ packages:
     resolution: {integrity: sha512-6NHnk/K3eq2ZFYcU1X8g67s9qIJRCOTT92gwLMVBp08dB2uuuwI1/Q/empzL2Bfr2f2WRLJVwpp90RmacQyFkw==}
     cpu: [x64]
     os: [win32]
-
-  '@sofastapp/api@0.0.3':
-    resolution: {integrity: sha512-JdkC34VJymbS6uPvVWm2q1Zh5SK8puRq+bkNEJA5ywiItu42EeCx5EUjpUmN4rE0gsHY25zoD/T1O2wwG5lkHQ==}
-    peerDependencies:
-      typescript: '>=5.0.0'
 
   '@tailwindcss/node@4.3.3':
     resolution: {integrity: sha512-/T8IKEsf9VTU6tLjgC7+sv2mOPtQxzE2jMw7u4Tt40Tx+QSZxpzh95/H6cMKoja9XuW7iMdLJYBB0o9G1CaAgg==}
@@ -1777,10 +1766,6 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.63.2':
     optional: true
-
-  '@sofastapp/api@0.0.3(typescript@5.9.3)':
-    dependencies:
-      typescript: 5.9.3
 
   '@tailwindcss/node@4.3.3':
     dependencies:

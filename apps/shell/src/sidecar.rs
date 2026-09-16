@@ -316,15 +316,7 @@ fn builtin_plugins_dir(app: &AppHandle) -> PathBuf {
         while let Some(dir) = cursor {
             let candidate = dir.join("plugins");
             if candidate.exists() {
-                // 开发态（从仓库里跑）：内置插件与预置插件分两处，逗号分隔一起交给内核
-                let presets = dir.join("presets");
-                if presets.exists() {
-                    return PathBuf::from(format!(
-                        "{},{}",
-                        candidate.to_string_lossy(),
-                        presets.to_string_lossy()
-                    ));
-                }
+                // 开发态（从仓库里跑）：全部出厂插件都在 plugins/ 下
                 return candidate;
             }
             cursor = dir.parent();

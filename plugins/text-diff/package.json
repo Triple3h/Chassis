@@ -1,0 +1,46 @@
+{
+  "name": "text-diff",
+  "title": "文本比对",
+  "author": "triple3h",
+  "description": "逐行 + 逐字符的文本差异比对，Worker 内计算，十万行也不卡",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "1",
+  "categories": [
+    "developer",
+    "tool"
+  ],
+  "capabilities": [
+    "hostUi"
+  ],
+  "commands": [
+    {
+      "name": "diff",
+      "title": "文本比对",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "粘贴两段文本做差异比对（可在插件内用 | 分隔）"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/myers.test.ts && node ../../scripts/run-ts.mjs test/core.test.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.42",
+    "@launcher/api": "workspace:*"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}

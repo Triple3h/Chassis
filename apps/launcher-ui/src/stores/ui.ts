@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref, computed } from 'vue'
 import { api } from '../lib/api'
+import type { ResultGroup } from '../lib/grid'
 import type { RankedResult } from '../lib/types'
 
 export interface PluginViewState {
@@ -23,10 +24,10 @@ export interface FooterButtonView {
 
 export const useUiStore = defineStore('ui', () => {
   const query = ref('')
-  /** 扁平行索引（跨分组连续） */
+  /** 扁平条目下标（跨分区连续，与网格行模型解耦） */
   const selected = ref(0)
-  const expandedPinned = ref(false)
-  const expandedRecent = ref(false)
+  /** 分区折叠状态：默认只露「一行/两行」格子，展开后全显示 */
+  const expandedGroups = ref<Record<ResultGroup, boolean>>({ pinned: false, best: false, recent: false })
   const detailOpen = ref(false)
   const actionsOpen = ref(false)
   const actionsAnchor = ref<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -41,7 +42,12 @@ export const useUiStore = defineStore('ui', () => {
     query.value = value
     selected.value = 0
     detailOpen.value = false
+    expandedGroups.value = { pinned: false, best: false, recent: false }
     if (pluginView.value) closePluginView()
+  }
+
+  function toggleGroup(group: ResultGroup): void {
+    expandedGroups.value[group] = !expandedGroups.value[group]
   }
 
   function openPluginView(state: PluginViewState): void {
@@ -65,13 +71,13 @@ export const useUiStore = defineStore('ui', () => {
     }, 2000)
   }
 
-  function clampSelection(rowCount: number): void {
-    if (rowCount <= 0) {
+  function clampSelection(itemCount: number): void {
+    if (itemCount <= 0) {
       selected.value = 0
       return
     }
     if (selected.value < 0) selected.value = 0
-    if (selected.value >= rowCount) selected.value = rowCount - 1
+    if (selected.value >= itemCount) selected.value = itemCount - 1
   }
 
   function pinPayload(result: RankedResult, key: string): Record<string, unknown> {
@@ -83,14 +89,15 @@ export const useUiStore = defineStore('ui', () => {
       ...(result.item.subtitle ? { subtitle: result.item.subtitle } : {}),
       ...(result.item.icon ? { icon: result.item.icon } : {}),
       ...(result.item.action && result.item.action.type === 'command' ? { args: result.item.action.args } : {}),
+      // 结果项动作快照：非 command 结果项（应用 / 文件 / 网址）全靠它才能再次执行
+      ...(result.item.action ? { action: result.item.action } : {}),
     }
   }
 
   return {
     query,
     selected,
-    expandedPinned,
-    expandedRecent,
+    expandedGroups,
     detailOpen,
     actionsOpen,
     actionsAnchor,
@@ -100,6 +107,7 @@ export const useUiStore = defineStore('ui', () => {
     toast,
     inPluginView,
     setQuery,
+    toggleGroup,
     openPluginView,
     closePluginView,
     showToast,

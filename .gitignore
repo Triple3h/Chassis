@@ -3,7 +3,7 @@ dist/
 *.tsbuildinfo
 .DS_Store
 tmp-*
-presets/release/
+plugins/release/
 
 # CodeBuddy 的本地目录（记忆 / 规则 / 技能）：只放本地，不入库
 .codebuddy/

@@ -14,14 +14,6 @@ export type ManifestValidation =
   | { ok: true; manifest: PluginManifest; warnings: string[] }
   | { ok: false; code: ManifestErrorCode; message: string }
 
-export interface ValidateOptions {
-  /**
-   * 兼容模式（requirements §8.10）：`apiVersion` 缺省视为 "1"，`capabilities` 缺省 = 全给。
-   * 只允许对 `sof-*` 前缀（如快插件）或开发模式开启。
-   */
-  allowLegacy?: boolean
-}
-
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 const MAX_COMMANDS = 32
 
@@ -104,7 +96,7 @@ function validateCommand(
  * 清单校验（plugin-spec §3.3）。
  * 纯函数：不触碰文件系统；产物存在性校验用 `checkEntries`。
  */
-export function validateManifest(raw: unknown, opts: ValidateOptions = {}): ManifestValidation {
+export function validateManifest(raw: unknown): ManifestValidation {
   if (!isPlainObject(raw)) return fail('MANIFEST_INVALID', 'package.json 顶层必须是对象')
 
   const warnings: string[] = []
@@ -129,12 +121,10 @@ export function validateManifest(raw: unknown, opts: ValidateOptions = {}): Mani
     return fail('MANIFEST_INVALID', 'type 必须是 "module"')
   }
 
-  // apiVersion：缺省视为 "1"（兼容模式）
+  // apiVersion：必填
   let apiVersion: string
   if (raw.apiVersion === undefined) {
-    if (!opts.allowLegacy) return fail('MANIFEST_INVALID', 'apiVersion 必填（当前只接受 "1"）')
-    apiVersion = '1'
-    warnings.push('apiVersion 缺省，按 "1" 处理（兼容模式）')
+    return fail('MANIFEST_INVALID', 'apiVersion 必填（当前只接受 "1"）')
   } else if (typeof raw.apiVersion !== 'string') {
     return fail('MANIFEST_INVALID', 'apiVersion 必须是字符串')
   } else {
@@ -147,12 +137,10 @@ export function validateManifest(raw: unknown, opts: ValidateOptions = {}): Mani
     )
   }
 
-  // capabilities：缺省 = 全给（仅兼容模式）
+  // capabilities：必填（可以是空数组）
   let capabilities: string[]
   if (raw.capabilities === undefined) {
-    if (!opts.allowLegacy) return fail('MANIFEST_INVALID', 'capabilities 必填（可以是空数组）')
-    capabilities = [...CAPABILITIES]
-    warnings.push('capabilities 缺省，按「全给」处理（兼容模式，P5 边界被放宽）')
+    return fail('MANIFEST_INVALID', 'capabilities 必填（可以是空数组）')
   } else {
     if (!Array.isArray(raw.capabilities) || raw.capabilities.some((c) => typeof c !== 'string')) {
       return fail('MANIFEST_INVALID', 'capabilities 必须是字符串数组')

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../lib/api'
-import { createCallDedupe } from '../lib/bridge-calls'
 import type { PluginViewState } from '../stores/ui'
 
 const props = defineProps<{ state: PluginViewState }>()
@@ -13,8 +12,6 @@ const emit = defineEmits<{
 
 const iframe = ref<HTMLIFrameElement | null>(null)
 const failed = ref(false)
-/** 每次会话一份：丢弃 SDK 为兼容旧桥而多发的平铺副本（见 lib/bridge-calls.ts） */
-const dedupe = createCallDedupe()
 
 const expectedOrigin = computed(() => {
   try {
@@ -36,17 +33,13 @@ async function onMessage(event: MessageEvent): Promise<void> {
   if (!frame || event.source !== frame.contentWindow) return
   if (expectedOrigin.value && event.origin !== expectedOrigin.value) return
 
-  // 兼容：原生协议 `__launcher: 1`，也接受任何 { id, method } 形态的旧桥（如快 Sofast）
-  const isNative = data.__launcher === 1
-  const looksLikeCall = typeof data.id === 'number' && typeof data.method === 'string'
-  if (!isNative && !looksLikeCall) return
+  // 只认原生信封：`__launcher: 1`
+  if (data.__launcher !== 1) return
 
   const id = Number(data.id ?? 0)
   const method = String(data.method ?? '')
   if (!method) return
-  // SDK 为兼容旧宿主会同时发原生信封与平铺副本：原生那条是唯一裁决者，副本丢掉
-  if (dedupe.isDuplicate(id, isNative)) return
-  const params = data.params ?? inferParams(method, data)
+  const params = (data.params ?? {}) as Record<string, unknown>
   const token = typeof data.token === 'string' && data.token ? data.token : props.state.url.match(/token=([^&]+)/)?.[1] ?? ''
 
   try {
@@ -55,31 +48,12 @@ async function onMessage(event: MessageEvent): Promise<void> {
       { __launcher: 1, id: res.id, ok: res.ok, result: res.result ?? null, ...(res.error ? { error: res.error } : {}) },
       expectedOrigin.value || '*',
     )
-    // 兼容旧桥：同时回一份平铺格式
-    if (!isNative) {
-      frame.contentWindow?.postMessage(
-        { ...(res.ok ? { result: res.result } : { error: res.error }), id: res.id, success: res.ok },
-        expectedOrigin.value || '*',
-      )
-    }
   } catch (err) {
     frame.contentWindow?.postMessage(
       { __launcher: 1, id, ok: false, error: { code: 'INTERNAL', message: err instanceof Error ? err.message : String(err) } },
       expectedOrigin.value || '*',
     )
   }
-}
-
-/** 旧桥把参数平铺在顶层（如快：{ method:'setFooter', buttons:[...] }） */
-function inferParams(method: string, data: Record<string, unknown>): Record<string, unknown> {
-  const skip = new Set(['__launcher', 'id', 'method', 'token', 'from'])
-  const params: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(data)) {
-    if (skip.has(key)) continue
-    params[key] = value
-  }
-  void method
-  return params
 }
 
 function onLoad(): void {
@@ -95,8 +69,6 @@ function postEvent(name: string, payload: unknown): void {
   const frame = iframe.value
   if (!frame?.contentWindow) return
   frame.contentWindow.postMessage({ __launcher: 1, event: name, payload }, expectedOrigin.value || '*')
-  // 兼容旧桥的事件形态
-  frame.contentWindow.postMessage({ ...(payload as object), event: name, type: name }, expectedOrigin.value || '*')
 }
 
 defineExpose({ postEvent })

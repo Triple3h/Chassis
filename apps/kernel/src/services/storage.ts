@@ -81,25 +81,6 @@ export class PluginStorage {
     }
   }
 
-  /**
-   * 兼容迁移（requirements §8.10）：旧宿主把数据放在插件目录下。
-   * 只在目标不存在时执行一次，失败不阻塞加载。
-   */
-  async migrateLegacy(pluginId: string, legacyFile: string): Promise<boolean> {
-    const target = this.fileFor(pluginId)
-    try {
-      const existing = await readJson<Record<string, unknown> | null>(target, null)
-      if (existing) return false
-      const legacy = await readJson<Record<string, unknown> | null>(legacyFile, null)
-      if (!legacy || typeof legacy !== 'object') return false
-      await writeJsonAtomic(target, legacy)
-      this.cache.set(pluginId, { ...legacy })
-      return true
-    } catch {
-      return false
-    }
-  }
-
   private async load(pluginId: string): Promise<Record<string, unknown>> {
     const cached = this.cache.get(pluginId)
     if (cached) return cached

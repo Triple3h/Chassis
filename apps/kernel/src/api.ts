@@ -99,6 +99,7 @@ export function registerApi(kernel: Kernel): void {
       subtitle?: string
       icon?: string
       args?: unknown
+      action?: ActionDecl
     }>(ctx)
     const key = required(payload.key, 'key')
     if (kernel.history.isPinned(key)) {
@@ -114,6 +115,7 @@ export function registerApi(kernel: Kernel): void {
       ...(payload.subtitle ? { subtitle: payload.subtitle } : {}),
       ...(payload.icon ? { icon: payload.icon } : {}),
       ...(payload.args !== undefined ? { args: payload.args } : {}),
+      ...(payload.action ? { action: payload.action } : {}),
     }
     kernel.history.pin(item)
     kernel.emit('pinned/changed', { key, pinned: true })

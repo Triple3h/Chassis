@@ -1,0 +1,73 @@
+@import "tailwindcss";
+@import "../../../shared/styles/theme.css";
+
+@source "../";
+@source "../../../shared";
+
+.launcher-diff-row {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+.launcher-diff-line {
+  white-space: pre;
+  overflow: hidden;
+  padding: 0 10px 0 6px;
+}
+
+.launcher-diff-no {
+  width: 44px;
+  flex: none;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--launcher-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  user-select: none;
+}
+
+.launcher-seg-del {
+  background: var(--launcher-del-bg);
+  border-radius: 2px;
+}
+
+.launcher-seg-add {
+  background: var(--launcher-add-bg);
+  border-radius: 2px;
+}
+
+.launcher-row-del {
+  background: var(--launcher-del-bg);
+}
+
+.launcher-row-add {
+  background: var(--launcher-add-bg);
+}
+
+/* 修改行：整行淡底 + 行内片段强高亮，和 VS Code 的观感一致 */
+.launcher-mod-del {
+  background: color-mix(in oklab, var(--launcher-del-bg) 45%, transparent);
+}
+
+.launcher-mod-add {
+  background: color-mix(in oklab, var(--launcher-add-bg) 45%, transparent);
+}
+
+.launcher-row-skip {
+  background: var(--launcher-panel-2);
+  color: var(--launcher-faint);
+}
+
+textarea.launcher-textarea {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 20px;
+  padding: 8px 10px;
+}

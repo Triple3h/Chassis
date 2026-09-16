@@ -84,6 +84,7 @@ export class HistoryStore {
       existing.subtitle = entry.subtitle
       existing.icon = entry.icon
       existing.args = entry.args
+      existing.action = entry.action
       this.historyWriter.schedule()
       return existing
     }

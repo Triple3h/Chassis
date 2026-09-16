@@ -3,107 +3,70 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ActionsMenu from './components/ActionsMenu.vue'
 import DetailPanel from './components/DetailPanel.vue'
 import FooterBar from './components/FooterBar.vue'
+import IconGlyph from './components/IconGlyph.vue'
 import PluginView from './components/PluginView.vue'
-import ResultList from './components/ResultList.vue'
+import ResultGrid from './components/ResultGrid.vue'
 import SearchBox from './components/SearchBox.vue'
 import { api, subscribeEvents } from './lib/api'
+import {
+  FOOTER_HEIGHT,
+  GRID_METRICS,
+  MAX_WINDOW_HEIGHT,
+  MIN_WINDOW_HEIGHT,
+  SEARCH_BAR_HEIGHT,
+  buildGridRows,
+  buildSections,
+  columnsFor,
+  flattenItems,
+  moveItem,
+  moveVertical,
+  rowHeightOf,
+  type GridMetrics,
+  type ResultGroup,
+} from './lib/grid'
 import { formatKeys, matchChord } from './lib/keys'
 import { useDataStore } from './stores/data'
 import { useUiStore, type FooterButtonView, type PluginViewState } from './stores/ui'
 import type { ActionResult, ResultItem } from '@launcher/plugin-manifest'
-import type { RankedResult, Row } from './lib/types'
+import type { RankedResult } from './lib/types'
 
 const data = useDataStore()
 const ui = useUiStore()
 
 const searchBox = ref<InstanceType<typeof SearchBox> | null>(null)
 const pluginRef = ref<InstanceType<typeof PluginView> | null>(null)
-const listRef = ref<InstanceType<typeof ResultList> | null>(null)
 const viewportHeight = ref(420)
+/** 网格容器实测宽度 → 列数（窗口固定 720，通常恒为 7 列） */
+const containerWidth = ref(720)
 let disposeEvents: (() => void) | null = null
 
-const rowHeight = computed(() => (data.config?.density === 'compact' ? 44 : 52))
-const pinnedCollapseOver = 8
-const recentCollapseOver = 6
+const metrics = computed<GridMetrics>(() => GRID_METRICS[data.config?.density === 'compact' ? 'compact' : 'comfortable'])
+const columns = computed(() => columnsFor(containerWidth.value))
 
-/** 扁平行：pinned → best → recent（selected 跨分组连续，requirements §3.2） */
-const rows = computed<Row[]>(() => {
-  const out: Row[] = []
-  const query = ui.query.trim()
-  const pinned = data.pinnedResults
-  const best = data.results
-  const recent = data.recentResults
-
-  const pushItems = (list: RankedResult[], group: Row['group']) => {
-    for (const item of list) {
-      out.push({ kind: 'item', key: `${group}:${item.itemKey}`, group, result: item, index: out.length })
-    }
-  }
-
-  if (!query) {
-    if (pinned.length > 0) {
-      const collapsed = !ui.expandedPinned && pinned.length > pinnedCollapseOver
-      out.push({
-        kind: 'header',
-        key: 'h:pinned',
-        label: collapsed ? `已固定 (${pinned.length})` : '已固定',
-        count: collapsed ? undefined : pinned.length,
-        group: 'pinned',
-        collapsed,
-      })
-      pushItems(collapsed ? pinned.slice(0, pinnedCollapseOver) : pinned, 'pinned')
-    }
-    if (recent.length > 0) {
-      const collapsed = !ui.expandedRecent && recent.length > recentCollapseOver
-      out.push({
-        kind: 'header',
-        key: 'h:recent',
-        label: collapsed ? `最近使用 (${recent.length})` : '最近使用',
-        count: collapsed ? undefined : recent.length,
-        group: 'recent',
-        collapsed,
-      })
-      pushItems(collapsed ? recent.slice(0, recentCollapseOver) : recent, 'recent')
-    }
-    if (out.length === 0) out.push({ kind: 'header', key: 'h:empty', label: '还没有任何记录' })
-    return out
-  }
-
-  if (pinned.length > 0) {
-    out.push({ kind: 'header', key: 'h:pinned', label: '已固定', count: pinned.length, group: 'pinned' })
-    pushItems(pinned, 'pinned')
-  }
-  if (best.length > 0) {
-    out.push({ kind: 'header', key: 'h:best', label: '最佳匹配', count: best.length, group: 'best' })
-    pushItems(best, 'best')
-  }
-  if (recent.length > 0) {
-    const collapsed = !ui.expandedRecent && recent.length > recentCollapseOver
-    out.push({
-      kind: 'header',
-      key: 'h:recent',
-      label: collapsed ? `最近使用 (${recent.length})` : '最近使用',
-      count: collapsed ? undefined : recent.length,
-      group: 'recent',
-      collapsed,
-    })
-    pushItems(collapsed ? recent.slice(0, recentCollapseOver) : recent, 'recent')
-  }
-  if (best.length === 0 && pinned.length === 0 && recent.length === 0) {
-    out.push({ kind: 'header', key: 'h:none', label: `没有匹配「${query}」的结果` })
-  }
-  return out
-})
-
-const itemRows = computed(() => rows.value.filter((r) => r.kind === 'item'))
-const selectedRow = computed(() => rows.value[ui.selected])
-const selectedResult = computed(() => selectedRow.value?.result ?? null)
+const sections = computed(() =>
+  buildSections({
+    query: ui.query.trim(),
+    pinned: data.pinnedResults,
+    best: data.results,
+    recent: data.recentResults,
+    columns: columns.value,
+    expanded: ui.expandedGroups,
+  }),
+)
+const rows = computed(() => buildGridRows(sections.value, columns.value))
+const items = computed(() => flattenItems(rows.value))
+const selectedResult = computed<RankedResult | null>(() => items.value[ui.selected] ?? null)
+const pinnedSection = computed(() => sections.value.find((section) => section.group === 'pinned'))
+/** 固定项拖拽重排：只在「空输入 + 已展开 + 不止一条」时开放 */
+const pinDraggable = computed(
+  () => !ui.query.trim() && pinnedSection.value?.expanded === true && data.pinnedResults.length > 1,
+)
 
 const desiredHeight = computed(() => {
   if (ui.inPluginView) return 560
-  const content = rows.value.reduce((sum, row) => sum + (row.kind === 'header' ? 30 : rowHeight.value), 0)
-  const chrome = 54 + (itemRows.value.length > 0 ? 36 : 0) + 12
-  return Math.min(640, Math.max(320, content + chrome))
+  const content = rows.value.reduce((sum, row) => sum + rowHeightOf(row, metrics.value), 0)
+  const chrome = SEARCH_BAR_HEIGHT + (items.value.length > 0 ? FOOTER_HEIGHT : 0) + 18
+  return Math.min(MAX_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, content + chrome))
 })
 
 // ── 初始化 ───────────────────────────────────────────────────
@@ -129,7 +92,7 @@ onUnmounted(() => {
 })
 
 function measure(): void {
-  viewportHeight.value = Math.max(120, window.innerHeight - 54 - 36 - 16)
+  viewportHeight.value = Math.max(120, window.innerHeight - SEARCH_BAR_HEIGHT - FOOTER_HEIGHT - 18)
 }
 
 watch(desiredHeight, (height) => {
@@ -149,9 +112,9 @@ watch(
 )
 
 watch(
-  () => rows.value.length,
-  () => {
-    ui.clampSelection(rows.value.length)
+  () => items.value.length,
+  (count) => {
+    ui.clampSelection(count)
   },
 )
 
@@ -226,19 +189,36 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
+  // 方向键按「格子」移动（ZTools 的聚合视图同款）：↑↓ 同列换行，←→ 逐格
   if (matchChord(event, 'ArrowDown')) {
     event.preventDefault()
-    move(1)
+    ui.selected = moveVertical(rows.value, ui.selected, 1)
     return
   }
   if (matchChord(event, 'ArrowUp')) {
     event.preventDefault()
-    move(-1)
+    ui.selected = moveVertical(rows.value, ui.selected, -1)
     return
   }
-  if (matchChord(event, 'Enter')) {
+  if (matchChord(event, 'ArrowRight')) {
     event.preventDefault()
-    if (event.shiftKey) void runSecondary()
+    ui.selected = moveItem(rows.value, ui.selected, 1)
+    return
+  }
+  if (matchChord(event, 'ArrowLeft')) {
+    event.preventDefault()
+    ui.selected = moveItem(rows.value, ui.selected, -1)
+    return
+  }
+  if (matchChord(event, 'Tab')) {
+    event.preventDefault()
+    ui.selected = moveItem(rows.value, ui.selected, event.shiftKey ? -1 : 1)
+    return
+  }
+  if (event.key === 'Enter') {
+    // 这里不用 matchChord：⇧/⌘ + Enter 要能命中同一分支
+    event.preventDefault()
+    if (event.shiftKey || event.metaKey || event.ctrlKey) void runSecondary()
     else void activate(ui.selected)
     return
   }
@@ -252,41 +232,31 @@ function onKeydown(event: KeyboardEvent): void {
     void openSettings()
     return
   }
-  if (matchChord(event, 'ArrowRight')) {
+  if (matchChord(event, 'Mod+I')) {
     if (selectedResult.value?.item.detail) {
       event.preventDefault()
-      ui.detailOpen = true
-    }
-    return
-  }
-  if (matchChord(event, 'ArrowLeft')) {
-    if (ui.detailOpen) {
-      event.preventDefault()
-      ui.detailOpen = false
+      ui.detailOpen = !ui.detailOpen
     }
     return
   }
   if (matchChord(event, 'Escape')) {
     event.preventDefault()
-    if (ui.detailOpen) ui.detailOpen = false
-    else void api.hideWindow().catch(() => undefined)
-    return
-  }
-  if (matchChord(event, 'Tab')) {
-    // v2：把选中项作为作用对象传给下一次搜索
-    event.preventDefault()
+    stepwiseEscape()
   }
 }
 
-function move(delta: number): void {
-  const list = itemRows.value
-  if (list.length === 0) return
-  const currentRow = rows.value[ui.selected]
-  const currentItemIndex = currentRow?.kind === 'item' ? itemRows.value.indexOf(currentRow) : -1
-  const nextItemIndex = Math.min(list.length - 1, Math.max(0, currentItemIndex + delta))
-  const target = list[nextItemIndex]
-  const targetIndex = target ? rows.value.indexOf(target) : 0
-  ui.selected = targetIndex
+/** Esc 分步退出（ZTools 同款）：收起二级面板 → 清空输入 → 隐藏窗口 */
+function stepwiseEscape(): void {
+  if (ui.detailOpen) {
+    ui.detailOpen = false
+    return
+  }
+  if (ui.query) {
+    ui.setQuery('')
+    searchBox.value?.focus()
+    return
+  }
+  void api.hideWindow().catch(() => undefined)
 }
 
 function openActionsFromKeyboard(): void {
@@ -300,9 +270,8 @@ function openActionsFromKeyboard(): void {
 
 // ── 执行 ─────────────────────────────────────────────────────
 async function activate(index: number): Promise<void> {
-  const row = rows.value[index]
-  if (!row || row.kind !== 'item' || !row.result) return
-  const result = row.result
+  const result = items.value[index]
+  if (!result) return
   if (result.stale) {
     ui.showToast('该插件已不可用')
     return
@@ -353,6 +322,36 @@ function onContext(index: number, event: MouseEvent): void {
   ui.selected = index
   ui.actionsAnchor = { x: event.clientX, y: event.clientY }
   ui.actionsOpen = true
+}
+
+function onToggleGroup(group: string): void {
+  ui.toggleGroup(group as ResultGroup)
+  ui.clampSelection(items.value.length)
+}
+
+function focusSearch(): void {
+  searchBox.value?.focus()
+}
+
+function onMeasure(width: number): void {
+  if (width > 0) containerWidth.value = width
+}
+
+/** 固定项拖拽重排（ZTools 的已固定网格支持拖动排序） */
+async function onReorder(payload: { from: RankedResult; to: RankedResult }): Promise<void> {
+  const keys = data.pinnedResults.map((result) => result.itemKey)
+  const from = keys.indexOf(payload.from.itemKey)
+  const to = keys.indexOf(payload.to.itemKey)
+  if (from < 0 || to < 0 || from === to) return
+  keys.splice(to, 0, ...keys.splice(from, 1))
+  try {
+    await api.reorderPinned(keys)
+    await data.refreshLists()
+    await data.runSearch(ui.query)
+    ui.selected = to
+  } catch (err) {
+    ui.showToast(err instanceof Error ? err.message : '排序失败')
+  }
 }
 
 async function togglePin(): Promise<void> {
@@ -454,11 +453,11 @@ const defaultHints = computed(() => {
     ]
   }
   const hints = [
-    { keys: ['↑', '↓'], label: '选择' },
+    { keys: ['↑', '↓', '←', '→'], label: '选择' },
     { keys: ['↵'], label: '执行' },
   ]
-  if (selectedResult.value?.item.detail) hints.push({ keys: ['→'], label: '详情' })
-  if (selectedResult.value?.item.actions?.length) hints.push({ keys: formatKeys(['Mod+Shift+Enter']), label: '次动作' })
+  if (selectedResult.value?.item.detail) hints.push({ keys: formatKeys(['Mod+I']), label: '详情' })
+  if (selectedResult.value?.item.actions?.length) hints.push({ keys: formatKeys(['Shift+Enter']), label: '次动作' })
   hints.push({ keys: formatKeys(['Mod+K']), label: '更多' })
   return hints
 })
@@ -484,24 +483,32 @@ const defaultHints = computed(() => {
         :model-value="ui.query"
         :busy="data.searching"
         @update:model-value="ui.setQuery"
+        @settings="openSettings"
       />
-      <div class="flex flex-1 min-h-0">
-        <ResultList
-          ref="listRef"
+      <div class="relative flex-1 min-h-0 flex">
+        <ResultGrid
+          v-if="items.length > 0"
           :rows="rows"
           :selected-index="ui.selected"
-          :row-height="rowHeight"
+          :metrics="metrics"
+          :columns="columns"
           :viewport-height="viewportHeight"
+          :pin-draggable="pinDraggable"
           @hover="(index) => (ui.selected = index)"
           @activate="activate"
           @context="onContext"
-          @toggle-group="
-            (group) => {
-              if (group === 'pinned') ui.expandedPinned = !ui.expandedPinned
-              if (group === 'recent') ui.expandedRecent = !ui.expandedRecent
-            }
-          "
+          @toggle="onToggleGroup"
+          @reorder="onReorder"
+          @measure="onMeasure"
+          @background="focusSearch"
         />
+        <div v-else class="flex-1 flex flex-col items-center justify-center gap-1.5 text-[var(--fg-muted)]">
+          <IconGlyph name="search" :size="22" />
+          <span class="text-[12.5px]">{{
+            ui.query ? `没有匹配「${ui.query}」的结果` : '还没有任何记录'
+          }}</span>
+        </div>
+
         <DetailPanel
           v-if="ui.detailOpen && selectedResult?.item.detail"
           :title="selectedResult.item.title"
@@ -509,7 +516,7 @@ const defaultHints = computed(() => {
           @close="ui.detailOpen = false"
         />
       </div>
-      <FooterBar :buttons="ui.footer" :default-hints="defaultHints" @action="onFooterAction" />
+      <FooterBar v-if="items.length > 0" :buttons="ui.footer" :default-hints="defaultHints" @action="onFooterAction" />
     </template>
 
     <ActionsMenu

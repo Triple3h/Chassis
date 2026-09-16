@@ -23,16 +23,8 @@ const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'launcher-smoke-'))
 const queries = process.argv.slice(2)
 if (queries.length === 0) queries.push('safari', '百度.com', 'notes')
 
-// 出厂 bundle = 内置插件（plugins/）+ 预置插件（presets/）；预置插件没构建就只冒烟内置的
+// 出厂 bundle = plugins/ 下全部插件；未构建的插件没有 dist/package.json，内核会自行跳过
 const builtinRoots = [path.join(repoRoot, 'plugins')]
-const presetsRoot = path.join(repoRoot, 'presets')
-const presetsBuilt =
-  fs.existsSync(presetsRoot) &&
-  fs
-    .readdirSync(presetsRoot)
-    .some((name) => fs.existsSync(path.join(presetsRoot, name, 'dist', 'package.json')))
-if (presetsBuilt) builtinRoots.push(presetsRoot)
-else console.log('· 预置插件未构建，本次只冒烟内置插件（npm run build:presets）')
 
 const child = spawn(
   process.execPath,

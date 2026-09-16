@@ -11,7 +11,7 @@ const repoRoot = process.env.LAUNCHER_REPO_ROOT ?? path.resolve(process.cwd())
 export interface HarnessOptions {
   /** 要装进 extensions/ 的 fixture 插件目录名（位于 tests/fixtures/） */
   fixtures?: string[]
-  /** 出厂插件根目录（默认空目录；可传多个，如同时要 `plugins/` 与 `presets/`） */
+  /** 出厂插件根目录（默认空目录；可传多个） */
   builtinRoots?: string[]
   label?: string
   /** 接一个假壳（见 FakeShell）。默认关，因为接上后内核会认为壳已连接 */

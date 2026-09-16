@@ -10,9 +10,16 @@ import { createHarness } from '../helpers/harness'
 
 const h = await createHarness({ label: 'smoke' })
 
+interface SearchHit {
+  itemKey: string
+  command: string
+  stale?: boolean
+  item: { title: string; action: unknown }
+}
+
 interface SearchResponse {
   groups: {
-    pinned: unknown[]
+    pinned: SearchHit[]
     best: Array<{ itemKey: string; item: { title: string }; stale?: boolean }>
     recent: Array<{ itemKey: string; item: { title: string }; stale?: boolean }>
   }
@@ -127,6 +134,34 @@ test('固定项可持久化，且搜索时置顶', async () => {
 
   const hit = await search('Ping')
   assert(hit.groups.pinned.length >= 1, '命中时固定项应当置顶')
+})
+
+test('固定「非命令结果项」：不置灰，且能按动作快照再次执行', async () => {
+  // 应用 / 文件 / 网址这类结果项的 command 其实是结果项 id（pluginKeyOf），
+  // 不是命令声明 —— 既不该被判成「插件不可用」，也不能丢掉动作快照。
+  const key = 'third-party-demo:item:/tmp/demo.txt:seed'
+  await h.api('/api/pinned/toggle', {
+    method: 'POST',
+    body: JSON.stringify({
+      key,
+      pluginId: 'third-party-demo',
+      command: 'item:/tmp/demo.txt',
+      title: '示例文件',
+      action: { type: 'host', method: 'hostUi.setSearchContent' },
+    }),
+  })
+
+  const hit = await search('示例文件')
+  const pinned = hit.groups.pinned[0]
+  assert(pinned, '固定项应当出现在搜索结果里')
+  assert(pinned.stale !== true, 'command 是结果项 id 时不该判成插件不可用')
+  assertEqual((pinned.item.action as { type?: string } | undefined)?.type, 'host', '固定项应当带回动作快照')
+
+  const exec = await h.api<{ result: { ok: boolean; error?: { code: string } } }>('/api/exec', {
+    method: 'POST',
+    body: JSON.stringify({ pluginId: 'third-party-demo', command: pinned.command, item: pinned.item }),
+  })
+  assert(exec.result.ok, `固定项应当按动作快照执行：${JSON.stringify(exec.result.error)}`)
 })
 
 test('禁用插件：命令消失、历史项置灰（不是被删）', async () => {

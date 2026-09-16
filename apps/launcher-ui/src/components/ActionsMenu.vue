@@ -50,7 +50,8 @@ function onOutside(event: MouseEvent): void {
 
 function onKey(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
-    event.stopPropagation()
+    // 菜单吃掉这次 Esc：否则 App 的全局 Esc 会顺手清空输入 / 隐藏窗口
+    event.stopImmediatePropagation()
     emit('close')
   }
 }

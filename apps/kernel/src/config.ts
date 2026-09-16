@@ -39,13 +39,10 @@ export function defaultDataRoot(appName = 'Launcher'): string {
 /**
  * 出厂 bundle 目录（只读、可禁用不可卸载）。
  *
- * 可能是**多个**目录，源码分两处管理、运行时一视同仁：
- *  - `plugins/`  内置插件（官方，与底座同版本发布）
- *  - `presets/`  预置插件（第三方来源移植，出厂预装）
- *
- * 打包后两者都会被 `scripts/lib/resources.mjs` 拷进同一个 `builtin-plugins/`，
- * 这里返回多目录主要是为了开发态（`node apps/kernel/dist/kernel.mjs` 从仓库根起）。
- * 覆盖方式：`LAUNCHER_BUILTIN_PLUGINS=/a,/b`（逗号分隔）。
+ * 开发态默认就是仓库根的 `plugins/`（全部出厂插件都在这里，工具链分两套、产物形态一致）；
+ * 打包后由 `scripts/lib/resources.mjs` 拷进 `Resources/builtin-plugins/`，壳用
+ * `--builtin-plugins` 指给内核。
+ * 覆盖方式：`LAUNCHER_BUILTIN_PLUGINS=/a,/b`（逗号分隔，仍支持多目录）。
  */
 export function defaultBuiltinPluginsRoots(): string[] {
   const override = process.env.LAUNCHER_BUILTIN_PLUGINS
@@ -56,7 +53,7 @@ export function defaultBuiltinPluginsRoots(): string[] {
       .filter(Boolean)
       .map((item) => path.resolve(item))
   }
-  return [path.resolve(process.cwd(), 'plugins'), path.resolve(process.cwd(), 'presets')]
+  return [path.resolve(process.cwd(), 'plugins')]
 }
 
 export class ConfigStore {
