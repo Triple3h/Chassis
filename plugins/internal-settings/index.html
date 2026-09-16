@@ -6,16 +6,14 @@
     <style>
       :root {
         --bg: #ffffff;
+        --panel: #ffffff;
         --fg: #151a24;
         --muted: #6b7488;
         --border: rgba(15, 23, 42, 0.1);
         --hover: rgba(15, 23, 42, 0.05);
         --accent: #4f8cff;
-        /* UA 自绘控件（下拉开合列表、取色器、原生焦点环…）的明暗由它决定：
-           不跟着主题走的话，深色主题里会弹出一个纯白的原生下拉列表 */
+        /* UA 自绘控件的明暗（原生焦点环、取色器、滚动条…）由它决定 */
         color-scheme: light;
-        /* 下拉箭头：原生箭头是系统色，剥掉外观后用它自绘（色值取自 --muted，深色主题另给一份） */
-        --select-arrow: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%20viewBox='0%200%2010%206'%3E%3Cpath%20d='M1%201l4%204%204-4'%20fill='none'%20stroke='%236b7488'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E");
         /* 滚动条滑块：只由前景色调出来，深浅主题各自动取值 */
         --scroll-thumb: color-mix(in srgb, var(--fg) 16%, transparent);
         --scroll-thumb-hover: color-mix(in srgb, var(--fg) 34%, transparent);
@@ -23,12 +21,12 @@
       }
       [data-theme='dark'] {
         --bg: #151a24;
+        --panel: #1e2430;
         --fg: #f7f8fa;
         --muted: #8c95a8;
         --border: rgba(255, 255, 255, 0.1);
         --hover: rgba(255, 255, 255, 0.06);
         color-scheme: dark;
-        --select-arrow: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%20viewBox='0%200%2010%206'%3E%3Cpath%20d='M1%201l4%204%204-4'%20fill='none'%20stroke='%238c95a8'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E");
       }
       * { box-sizing: border-box; }
       /* 滚动条：与宿主 apps/launcher-ui 和 @launcher/ui 同一套设计，改参数请三处一起改。
@@ -78,29 +76,68 @@
       .row .label { flex: 1; min-width: 0; }
       .row .hint { color: var(--muted); font-size: 11.5px; }
       /* ── 表单控件：一套「全局样式」，页内所有输入框 / 下拉框直接复用 ──
-         与插件套件 packages/ui/styles/theme.css 的 .launcher-input / .launcher-select
+         与插件套件 packages/ui/styles/theme.css 的 .launcher-input / .launcher-select*
          同源（滚动条也是这么约定的），改参数请两处一起改。 */
-      input[type='text'], input[type='number'], select {
+      input[type='text'], input[type='number'] {
         background: var(--hover); border: 1px solid var(--border); color: var(--fg);
         border-radius: 7px; padding: 4px 8px; font: inherit; min-width: 160px;
         transition: border-color 0.15s, box-shadow 0.15s;
       }
-      input[type='text']:hover, input[type='number']:hover, select:hover {
+      input[type='text']:hover, input[type='number']:hover {
         border-color: color-mix(in srgb, var(--fg) 22%, transparent);
       }
       /* focus 环一律用主题色：原生的系统蓝不跟 --accent，改主题色时会残留 */
-      input[type='text']:focus, input[type='number']:focus, select:focus {
+      input[type='text']:focus, input[type='number']:focus {
         outline: none; border-color: var(--accent);
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
       }
-      /* 下拉框：剥掉系统外观（原生箭头 / 圆角 / 高亮都是系统绘制，不跟主题色），箭头自绘 */
-      select {
-        appearance: none; -webkit-appearance: none;
-        padding-right: 26px; cursor: pointer;
-        background-image: var(--select-arrow);
-        background-repeat: no-repeat;
-        background-position: right 8px center;
+      /* ── 自绘下拉（对应 @launcher/ui 的 UiSelect.vue）────────────────
+         原生 <select> 的**弹出菜单**是 macOS 系统绘制（NSMenu）：不跟主题、
+         不跟主题色，color-scheme 也改不动它 —— 要菜单也同款只能自己画。
+         结构：.lselect[data-lselect=id] > .lselect-trigger + .lselect-menu[hidden] */
+      .lselect { position: relative; min-width: 160px; }
+      .lselect-trigger {
+        display: flex; align-items: center; gap: 8px; width: 100%;
+        background: var(--hover); border: 1px solid var(--border); color: var(--fg);
+        border-radius: 7px; padding: 4px 8px; font: inherit; text-align: left; cursor: pointer;
+        transition: border-color 0.15s, box-shadow 0.15s;
       }
+      .lselect-trigger:hover { border-color: color-mix(in srgb, var(--fg) 22%, transparent); }
+      .lselect-trigger:focus-visible, .lselect.open > .lselect-trigger {
+        outline: none; border-color: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+      }
+      .lselect-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* 箭头用 clip-path 画三角：颜色直接吃 --muted，深浅主题自动跟 */
+      .lselect-caret {
+        width: 9px; height: 6px; flex: none; background: var(--muted);
+        clip-path: polygon(0 0, 100% 0, 50% 100%);
+        transition: transform 0.15s;
+      }
+      .lselect.open .lselect-caret { transform: rotate(180deg); }
+      .lselect-menu {
+        position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
+        padding: 4px; display: flex; flex-direction: column; gap: 2px;
+        background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
+        animation: lselect-pop 0.12s ease-out;
+      }
+      /* 必须显式声明：[hidden] 的 UA 样式是 display:none，会被上面的 display:flex 覆盖掉 */
+      .lselect-menu[hidden] { display: none; }
+      .lselect-menu.up { top: auto; bottom: calc(100% + 4px); } /* 下方放不下时翻到上方 */
+      @keyframes lselect-pop { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+      .lselect-option {
+        display: flex; align-items: center; gap: 6px; width: 100%;
+        border: 0; border-radius: 6px; background: transparent; color: var(--fg);
+        font: inherit; font-size: 12.5px; text-align: left; padding: 5px 8px; cursor: pointer;
+      }
+      .lselect-option:hover, .lselect-option:focus { background: var(--hover); outline: none; }
+      .lselect-option.is-on {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent); font-weight: 600;
+      }
+      .lselect-check { margin-left: auto; font-size: 11px; opacity: 0; }
+      .lselect-option.is-on .lselect-check { opacity: 1; }
       input[type='color'] {
         width: 42px; height: 24px; padding: 2px; border: 1px solid var(--border);
         border-radius: 6px; background: var(--hover); cursor: pointer;

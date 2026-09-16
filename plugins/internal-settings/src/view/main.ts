@@ -165,6 +165,36 @@ function stateBadge(plugin: PluginLike): string {
 }
 
 // ── 各页渲染 ───────────────────────────────────────────────────
+interface SelectOption {
+  value: string
+  label: string
+}
+
+/**
+ * 自绘下拉的 HTML。
+ *
+ * 原生 `<select>` 的**弹出菜单**由 macOS 系统绘制（NSMenu）—— 不跟主题、不跟主题色，
+ * `color-scheme` 也改不动它 ⇒ 页里一律用它，交互在事件委托区（openSelectMenu 等）。
+ * 与插件套件 `@launcher/ui` 的 `UiSelect.vue` 同款设计。
+ */
+function selectHtml(id: string, value: string, options: SelectOption[]): string {
+  const current = options.find((option) => option.value === value) ?? options[0]
+  const items = options
+    .map((option) => {
+      const on = option.value === current?.value
+      return `<button type="button" class="lselect-option${on ? ' is-on' : ''}" role="option" aria-selected="${on}" data-value="${escapeHtml(option.value)}"><span>${escapeHtml(option.label)}</span><span class="lselect-check">✓</span></button>`
+    })
+    .join('')
+  return `
+    <div class="lselect" data-lselect="${id}">
+      <button type="button" class="lselect-trigger" aria-haspopup="listbox" aria-expanded="false">
+        <span class="lselect-value">${escapeHtml(current?.label ?? '')}</span>
+        <span class="lselect-caret"></span>
+      </button>
+      <div class="lselect-menu" role="listbox" hidden>${items}</div>
+    </div>`
+}
+
 function renderGeneral(): string {
   const c = config
   if (!c) return '<p class="muted">加载中…</p>'
@@ -189,10 +219,10 @@ function renderGeneral(): string {
     </div>
     <div class="row">
       <div class="label">语言</div>
-      <select id="language">
-        <option value="zh-CN" ${c.language === 'zh-CN' ? 'selected' : ''}>简体中文</option>
-        <option value="en-US" ${c.language === 'en-US' ? 'selected' : ''}>English</option>
-      </select>
+      ${selectHtml('language', c.language, [
+        { value: 'zh-CN', label: '简体中文' },
+        { value: 'en-US', label: 'English' },
+      ])}
     </div>
   `
 }
@@ -204,11 +234,11 @@ function renderAppearance(): string {
     <h2>外观</h2>
     <div class="row">
       <div class="label">主题</div>
-      <select id="theme">
-        <option value="system" ${c.theme === 'system' ? 'selected' : ''}>跟随系统</option>
-        <option value="light" ${c.theme === 'light' ? 'selected' : ''}>浅色</option>
-        <option value="dark" ${c.theme === 'dark' ? 'selected' : ''}>深色</option>
-      </select>
+      ${selectHtml('theme', c.theme, [
+        { value: 'system', label: '跟随系统' },
+        { value: 'light', label: '浅色' },
+        { value: 'dark', label: '深色' },
+      ])}
     </div>
     <div class="row">
       <div class="label">主题色</div>
@@ -216,10 +246,10 @@ function renderAppearance(): string {
     </div>
     <div class="row">
       <div class="label">结果密度</div>
-      <select id="density">
-        <option value="comfortable" ${c.density === 'comfortable' ? 'selected' : ''}>宽松</option>
-        <option value="compact" ${c.density === 'compact' ? 'selected' : ''}>紧凑</option>
-      </select>
+      ${selectHtml('density', c.density, [
+        { value: 'comfortable', label: '宽松' },
+        { value: 'compact', label: '紧凑' },
+      ])}
     </div>
   `
 }
@@ -658,15 +688,13 @@ function bind(): void {
   on('autostart', 'change', (el) => void patch({ autostart: (el as HTMLInputElement).checked }))
   on('hideOnBlur', 'change', (el) => void patch({ hideOnBlur: (el as HTMLInputElement).checked }))
   on('keepQuery', 'change', (el) => void patch({ keepQuery: (el as HTMLInputElement).checked }))
-  on('language', 'change', (el) => void patch({ language: (el as HTMLSelectElement).value }))
+  // 语言 / 主题 / 结果密度是自绘下拉（selectHtml），值变化走 SELECT_PATCH 表
 
-  on('theme', 'change', (el) => void patch({ theme: (el as HTMLSelectElement).value }))
   // 取色器面板里每挪一下都落盘太吵：拖动只做预览，change（松手 / 关面板）才写配置
   on('accent', 'input', (el) => {
     document.documentElement.style.setProperty('--accent', (el as HTMLInputElement).value)
   })
   on('accent', 'change', (el) => void patch({ accent: (el as HTMLInputElement).value }))
-  on('density', 'change', (el) => void patch({ density: (el as HTMLSelectElement).value }))
 
   on('historyInSearch', 'change', (el) => void patch({ historyInSearch: (el as HTMLInputElement).checked }))
   on('apply-limit', 'click', () => {
@@ -899,8 +927,99 @@ function isEditing(): boolean {
   return keywordEdits.size > 0 || keywordTimers.size > 0
 }
 
+// ── 自绘下拉：开合 / 键盘 / 落值（DOM 由 selectHtml 生成）────────
+/** 值变化后的落盘行为（key = data-lselect） */
+const SELECT_PATCH: Record<string, (value: string) => void> = {
+  language: (value) => void patch({ language: value }),
+  theme: (value) => void patch({ theme: value }),
+  density: (value) => void patch({ density: value }),
+}
+
+/** 当前展开的那个下拉（同一时刻只允许一个） */
+let openSelect: HTMLElement | null = null
+
+function closeSelect(focusTrigger = false): void {
+  const root = openSelect
+  if (!root) return
+  openSelect = null
+  root.classList.remove('open')
+  root.querySelector('.lselect-menu')?.setAttribute('hidden', '')
+  root.querySelector('.lselect-trigger')?.setAttribute('aria-expanded', 'false')
+  if (focusTrigger) root.querySelector<HTMLElement>('.lselect-trigger')?.focus()
+}
+
+function openSelectMenu(root: HTMLElement): void {
+  closeSelect()
+  const menu = root.querySelector<HTMLElement>('.lselect-menu')
+  if (!menu) return
+  openSelect = root
+  root.classList.add('open')
+  root.querySelector('.lselect-trigger')?.setAttribute('aria-expanded', 'true')
+  menu.removeAttribute('hidden')
+  // 面板是滚动容器：下方放不下就翻到上方，别被裁掉
+  const rect = root.getBoundingClientRect()
+  const need = menu.offsetHeight + 8
+  menu.classList.toggle('up', rect.bottom + need > window.innerHeight && rect.top > need)
+  const active =
+    menu.querySelector<HTMLElement>('.lselect-option.is-on') ?? menu.querySelector<HTMLElement>('.lselect-option')
+  active?.focus()
+}
+
+function pickSelectOption(root: HTMLElement, option: HTMLElement): void {
+  const label = option.querySelector('span')?.textContent ?? ''
+  for (const item of root.querySelectorAll<HTMLElement>('.lselect-option')) {
+    const on = item === option
+    item.classList.toggle('is-on', on)
+    item.setAttribute('aria-selected', String(on))
+  }
+  const valueEl = root.querySelector('.lselect-value')
+  if (valueEl) valueEl.textContent = label
+  const id = root.dataset.lselect ?? ''
+  const value = option.dataset.value ?? ''
+  closeSelect(true)
+  SELECT_PATCH[id]?.(value)
+}
+
+/** 菜单内的方向键 / Esc / Tab（Enter 与空格交给按钮自身的点击） */
+function onSelectMenuKey(event: KeyboardEvent, menu: HTMLElement): void {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    const items = [...menu.querySelectorAll<HTMLElement>('.lselect-option')]
+    if (items.length === 0) return
+    const index = items.findIndex((item) => item === document.activeElement)
+    const delta = event.key === 'ArrowDown' ? 1 : -1
+    const next = index < 0 ? (delta > 0 ? 0 : items.length - 1) : (index + delta + items.length) % items.length
+    items[next]?.focus()
+    return
+  }
+  if (event.key === 'Escape') {
+    // 只关菜单：别让宿主把它当成「退出插件页」
+    event.preventDefault()
+    event.stopPropagation()
+    closeSelect(true)
+    return
+  }
+  if (event.key === 'Tab') closeSelect()
+}
+
 function onPanelClick(event: Event): void {
   const node = event.target as HTMLElement
+  // 自绘下拉的开合与落值（触发器不在列表项里，放最前面最保险）
+  const lselectTrigger = node.closest<HTMLElement>('.lselect-trigger')
+  if (lselectTrigger) {
+    const root = lselectTrigger.closest<HTMLElement>('.lselect')
+    if (root) {
+      if (openSelect === root) closeSelect()
+      else openSelectMenu(root)
+    }
+    return
+  }
+  const lselectOption = node.closest<HTMLElement>('.lselect-option')
+  if (lselectOption) {
+    const root = lselectOption.closest<HTMLElement>('.lselect')
+    if (root) pickSelectOption(root, lselectOption)
+    return
+  }
   // 开关必须排在「选中」之前：它长在列表项里面（点击会同时命中 data-select）
   const toggle = node.closest<HTMLElement>('[data-toggle]')
   if (toggle?.dataset.toggle) {
@@ -954,6 +1073,24 @@ function onPanelClick(event: Event): void {
 }
 
 function onPanelKeydown(event: KeyboardEvent): void {
+  // 自绘下拉：菜单内导航 / 触发器上按方向键或回车打开
+  const target = event.target as HTMLElement
+  const menu = target.closest<HTMLElement>('.lselect-menu')
+  if (menu) {
+    onSelectMenuKey(event, menu)
+    return
+  }
+  const lselectTrigger = target.closest<HTMLElement>('.lselect-trigger')
+  if (
+    lselectTrigger &&
+    (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ')
+  ) {
+    event.preventDefault() // 空格别滚页面、回车别触发两次 click
+    const root = lselectTrigger.closest<HTMLElement>('.lselect')
+    if (root) openSelectMenu(root)
+    return
+  }
+
   // 列表开关（role=switch）用 Enter / 空格切换 —— 别让它落到外层列表项的默认行为上
   const switchEl = (event.target as HTMLElement).closest<HTMLElement>('[data-toggle]')
   if (switchEl) {
@@ -1063,5 +1200,13 @@ panelEl.addEventListener('click', onPanelClick)
 panelEl.addEventListener('keydown', onPanelKeydown)
 panelEl.addEventListener('input', onPanelInput)
 panelEl.addEventListener('focusout', onPanelFocusOut)
+
+// 自绘下拉的外围收口：点面板外任意处、任意容器滚动时都关掉菜单
+document.addEventListener('click', (event) => {
+  if (!openSelect) return
+  if (openSelect.contains(event.target as Node)) return
+  closeSelect()
+})
+document.addEventListener('scroll', () => closeSelect(), true)
 
 void boot()

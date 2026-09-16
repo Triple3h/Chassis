@@ -8,6 +8,7 @@
     "./AppShell.vue": "./ui/AppShell.vue",
     "./UiDialog.vue": "./ui/UiDialog.vue",
     "./UiIcon.vue": "./ui/UiIcon.vue",
+    "./UiSelect.vue": "./ui/UiSelect.vue",
     "./clipboard": "./lib/clipboard.ts",
     "./keys": "./lib/keys.ts",
     "./theme": "./lib/theme.ts",
