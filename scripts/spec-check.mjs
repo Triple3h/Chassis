@@ -4,6 +4,7 @@ import { builtinModules } from 'node:module'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { MANIFEST_KEYS } from './lib/manifest-keys.mjs'
 
 /**
  * 规范自检（plugin-spec v1 的可执行化）—— 面向 `plugins/` 下的全部出厂插件。
@@ -45,21 +46,12 @@ const CAPABILITIES = [
   'screenshot',
   'quicklink',
 ]
-/** dist/package.json 允许出现的字段（§2.2 / §3.1） */
-const DIST_MANIFEST_FIELDS = [
-  'name',
-  'title',
-  'version',
-  'type',
-  'apiVersion',
-  'capabilities',
-  'commands',
-  'description',
-  'author',
-  'icon',
-  'keywords',
-  'categories',
-]
+/**
+ * dist/package.json 允许出现的字段（§2.2 / §3.1）。
+ * 与构建侧的裁剪白名单**共用一份**（`scripts/lib/manifest-keys.mjs`），外加产物固定带的 `type` ——
+ * 三处各写一份的代价就是加字段必漏（`essential` 就是这么被抓出来的）。
+ */
+const DIST_MANIFEST_FIELDS = [...MANIFEST_KEYS, 'type']
 
 /** 底座 SDK：插件页（`@launcher/api`）与脚本侧（`@launcher/api-node`） */
 const LAUNCHER_SDK_RE = /^@launcher\/api(-node)?(\/.*)?$/

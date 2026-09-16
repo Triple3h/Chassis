@@ -11,6 +11,7 @@ import { build } from 'esbuild'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
+import { MANIFEST_KEYS } from './lib/manifest-keys.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const target = process.argv[2]
@@ -36,21 +37,6 @@ const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
 const dist = path.join(dir, 'dist')
 fs.rmSync(dist, { recursive: true, force: true })
 fs.mkdirSync(dist, { recursive: true })
-
-const MANIFEST_FIELDS = [
-  'name',
-  'title',
-  'version',
-  'type',
-  'apiVersion',
-  'capabilities',
-  'commands',
-  'description',
-  'author',
-  'icon',
-  'keywords',
-  'categories',
-]
 
 const commands = pkg.commands ?? []
 const scriptCommands = commands.filter((c) => c.mode !== 'view')
@@ -139,12 +125,11 @@ for (const assetDir of ['assets', 'public']) {
   fs.cpSync(from, to, { recursive: true })
 }
 
-// 4) 裁剪后的清单
-const manifest = {}
-for (const field of MANIFEST_FIELDS) {
+// 4) 裁剪后的清单（字段白名单与 Vite 侧共用 scripts/lib/manifest-keys.mjs）
+const manifest = { type: 'module' }
+for (const field of MANIFEST_KEYS) {
   if (pkg[field] !== undefined) manifest[field] = pkg[field]
 }
-manifest.type = 'module'
 fs.writeFileSync(path.join(dist, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 
 console.log(`✓ ${pkg.name} → dist/（${scriptCommands.length} 个脚本入口，${viewCommands.length} 个 view）`)

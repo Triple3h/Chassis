@@ -1,26 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-
-/**
- * 发布到 dist 的清单字段，只保留宿主运行需要的部分。
- * `apiVersion` / `capabilities` 是启动台的硬要求（plugin-spec §3.1）：
- * 少一个就 `MANIFEST_INVALID`、少声明能力就 `CAPABILITY_UNKNOWN`。
- */
-const MANIFEST_KEYS = [
-  'name',
-  'title',
-  'author',
-  'version',
-  'description',
-  'categories',
-  'commands',
-  'icon',
-  'homepage',
-  'license',
-  'keywords',
-  'apiVersion',
-  'capabilities',
-]
+import { MANIFEST_KEYS } from './manifest-keys.mjs'
 
 /**
  * 构建后把精简过的 package.json 写进 dist，
