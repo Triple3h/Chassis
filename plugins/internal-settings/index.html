@@ -91,6 +91,26 @@
       .badge.ok { color: #10b981; }
       .badge.err { color: #ef4444; }
       .badge.warn { color: #f59e0b; }
+      .badge.accent { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
+      /* ── 最近审计：主行 = 插件 → 内核方法（域高亮）+ 所需能力 + 结果 ── */
+      .audit-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .badge.plugin {
+        color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent);
+        font-weight: 600;
+      }
+      .audit-arrow { color: var(--muted); }
+      .audit-method {
+        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+        font-size: 12px; font-weight: 600;
+      }
+      .audit-method .am-prefix { color: var(--muted); font-weight: 400; }
+      .audit-method .am-domain { color: var(--accent); }
+      .audit-method.plain { color: var(--muted); font-weight: 400; }
+      .badge.cap {
+        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+        background: transparent; border: 1px dashed var(--border);
+      }
       pre { white-space: pre-wrap; word-break: break-all; font-size: 11.5px; color: var(--muted); margin: 4px 0 0; }
       .toast {
         position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);

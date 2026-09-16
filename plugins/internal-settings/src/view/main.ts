@@ -515,23 +515,65 @@ function renderData(): string {
       <button class="btn" id="open-data">打开</button>
     </div>
     <h2 style="margin-top:20px">最近审计（${audit.length}）</h2>
-    ${audit
-      .slice(0, 60)
-      .map(
-        (record) => `
-      <div class="row">
-        <div class="label">
-          <div>${escapeHtml(record.method)} <span class="badge">${escapeHtml(record.pluginId)}</span>
+    <div class="hint" style="margin:-6px 0 4px">每条 = 一次「插件 → 内核 API」调用</div>
+    ${audit.slice(0, 60).map(renderAuditRow).join('') || '<p class="muted">暂无记录</p>'}
+  `
+}
+
+/** method 第二段（如 ctx.clipboard.writeText 的 clipboard）的中文注解 */
+const DOMAIN_LABEL: Record<string, string> = {
+  settings: '管理设置',
+  host: '宿主信息',
+  hostUi: '宿主界面',
+  storage: '插件数据',
+  clipboard: '剪贴板',
+  shell: '系统打开',
+  exec: '执行命令',
+  notify: '系统通知',
+  screenshot: '屏幕截图',
+  quicklink: '快捷链接',
+  log: '插件日志',
+}
+
+/**
+ * `ctx.hostUi.setSearchContent` → 拆成 `ctx.` + 域名 + 其余（分隔符随其余保留）；
+ * 非 `ctx.*` 形态返回 null（如 bridge 层失败记录的 `bridge:ctx.host.info`），原样展示。
+ */
+function splitMethod(method: string): { domain: string; sep: string; rest: string } | null {
+  const match = /^ctx\.([A-Za-z][\w-]*)([.:])?([\s\S]*)$/.exec(method)
+  if (!match) return null
+  return { domain: match[1] ?? '', sep: match[2] ?? '', rest: match[3] ?? '' }
+}
+
+/** 审计行：插件（可读名）→ 内核方法（域高亮）+ 所需能力 + 结果 */
+function renderAuditRow(record: AuditLike): string {
+  const plugin = pluginById(record.pluginId)
+  const label = plugin?.title || record.pluginId
+  const parts = splitMethod(record.method)
+  const domainLabel = parts ? (DOMAIN_LABEL[parts.domain] ?? parts.domain) : ''
+  return `
+    <div class="row audit">
+      <div class="label">
+        <div class="audit-head">
+          <span class="badge plugin" title="${escapeHtml(record.pluginId)}">${escapeHtml(label)}</span>
+          <span class="audit-arrow">→</span>
+          ${
+            parts
+              ? `<code class="audit-method"><span class="am-prefix">ctx.</span><span class="am-domain">${escapeHtml(parts.domain)}</span><span class="am-rest">${escapeHtml(parts.sep + parts.rest)}</span></code>`
+              : `<code class="audit-method plain">${escapeHtml(record.method)}</code>`
+          }
+          ${
+            record.capability
+              ? `<span class="badge cap" title="调用该 API 需要声明的能力">${escapeHtml(record.capability)}</span>`
+              : ''
+          }
           ${record.ok ? '<span class="badge ok">ok</span>' : `<span class="badge err">${escapeHtml(record.error?.code ?? 'ERR')}</span>`}
-          </div>
-          <div class="hint">${new Date(record.ts).toLocaleTimeString()} ｜ ${record.ms}ms${
-            record.capability ? ` ｜ ${escapeHtml(record.capability)}` : ''
-          }${record.error ? ` ｜ ${escapeHtml(record.error.message)}` : ''}</div>
         </div>
+        <div class="hint">${new Date(record.ts).toLocaleTimeString()} ｜ ${record.ms}ms${
+          domainLabel ? ` ｜ ${escapeHtml(domainLabel)}` : ''
+        }${record.error ? ` ｜ ${escapeHtml(record.error.message)}` : ''}</div>
       </div>
-    `,
-      )
-      .join('') || '<p class="muted">暂无记录</p>'}
+    </div>
   `
 }
 
@@ -603,6 +645,8 @@ function bind(): void {
     button.addEventListener('click', () => {
       activeTab = (button.dataset.tab as TabId) ?? 'general'
       render()
+      // 审计只在 boot 时拉过一次，切进来时刷新，别让用户盯着过期记录
+      if (activeTab === 'data') void refreshAudit()
     })
   }
 
@@ -967,10 +1011,16 @@ async function loadAudit(): Promise<void> {
   }
 }
 
+/** 切到数据页时重新拉审计（用户可能已切走，拉回来就别再渲染了） */
+async function refreshAudit(): Promise<void> {
+  await loadAudit()
+  if (activeTab === 'data') render()
+}
+
 async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search)
-  const theme = params.get('theme')
-  document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark'
+  urlTheme = params.get('theme')
+  document.documentElement.dataset.theme = urlTheme === 'light' ? 'light' : 'dark'
   activeTab = params.get('cmd') === 'manage' ? 'plugins' : 'general'
 
   const info = await guard(() => host.info(), null)
