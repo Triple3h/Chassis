@@ -654,6 +654,34 @@ export class Kernel {
     }
   }
 
+  /**
+   * 配置写入的**唯一收口**：落盘 → 副作用（历史上限 / 自启 / 热键）→ 广播 `config/changed`。
+   *
+   * 谁写配置都得走这里。主题 / 主题色 / 密度只有启动台 UI 知道怎么落到 CSS 变量上
+   * （`data-theme` / `--color-accent` / `data-density`），漏一次广播 = 用户看到「改了没反应」，
+   * 而配置文件其实早写进去了。
+   *
+   * 这条广播补过两次：第一次只补了 `POST /api/config`，用户从**设置页**改依旧没反应 ——
+   * 设置页走的是 `ctx.settings.patch`（管理面特权），当时那条路直接改 `config.patch`，绕过了广播。
+   * 所以别再在调用点上补，收在这里。
+   */
+  async patchConfig(
+    patch: Partial<Config>,
+  ): Promise<{ config: Config; hotkey?: { ok: boolean; reason?: string; accelerator?: string } }> {
+    const before = this.config.get()
+    const config = await this.config.patch(patch)
+    if (config.historyLimit !== before.historyLimit) this.history.setHistoryLimit(config.historyLimit)
+    this.bus.emit('config/changed', { config })
+    if (patch.autostart !== undefined && config.autostart !== before.autostart) {
+      await this.primitives.setAutostart(config.autostart).catch(() => undefined)
+    }
+    if (patch.hotkey && config.hotkey.accelerator !== before.hotkey.accelerator) {
+      const hotkey = await this.applyHotkey(config)
+      return { config, hotkey }
+    }
+    return { config }
+  }
+
   /** 管理面（internal 插件）特权服务的宿主实现 */
   createSettingsService(pluginId: string): SettingsService {
     return createSettingsService(this.settingsHost(), pluginId)
@@ -662,26 +690,12 @@ export class Kernel {
   private settingsHost(): SettingsHost {
     return {
       getConfig: () => this.config.get(),
-      patchConfig: async (patch) => {
-        const before = this.config.get()
-        const config = await this.config.patch(patch)
-        if (patch.historyLimit !== undefined) this.history.setHistoryLimit(config.historyLimit)
-        if (patch.autostart !== undefined && config.autostart !== before.autostart) {
-          await this.primitives.setAutostart(config.autostart).catch(() => undefined)
-        }
-        if (patch.hotkey && config.hotkey.accelerator !== before.hotkey.accelerator) {
-          const hotkey = await this.applyHotkey(config)
-          return { config, hotkey }
-        }
-        return { config }
-      },
+      patchConfig: (patch) => this.patchConfig(patch),
       setAutostart: async (enabled) => {
-        await this.config.patch({ autostart: enabled })
-        await this.primitives.setAutostart(enabled).catch(() => undefined)
+        await this.patchConfig({ autostart: enabled })
       },
       setHistoryLimit: async (limit) => {
-        await this.config.patch({ historyLimit: limit })
-        this.history.setHistoryLimit(limit)
+        await this.patchConfig({ historyLimit: limit })
       },
       listPlugins: async () => this.plugins.info(),
       pluginAction: (action, payload) => this.pluginAction(action, payload),

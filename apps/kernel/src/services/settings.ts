@@ -49,10 +49,9 @@ export function createSettingsService(host: SettingsHost, pluginId: string): Set
     },
     patch: async (patch) => {
       guard('patch')
-      const result = await host.patchConfig(patch)
-      if (patch.historyLimit !== undefined) await host.setHistoryLimit(result.config.historyLimit)
-      if (patch.autostart !== undefined) await host.setAutostart(result.config.autostart)
-      return result
+      // 副作用（历史上限 / 自启 / 热键）与 `config/changed` 广播都在宿主的 `patchConfig` 里，
+      // 这里只转发 —— 在这里再补一遍等于同一件事有两个收口，迟早分叉
+      return host.patchConfig(patch)
     },
     setAutostart: async (enabled) => {
       guard('setAutostart')

@@ -15,6 +15,7 @@ interface Appearance {
   accent?: string
   theme?: string
   density?: string
+  historyLimit?: number
 }
 
 const h = await createHarness({ label: 'config-events' })
@@ -58,6 +59,21 @@ test('改非外观项（热键）同样广播，UI 不必为此单独开一条�
 
   assertEqual(seen.length, 1, '热键分支会提前 return，广播必须排在它前面')
   assertEqual(seen[0]?.accent, h.kernel.config.get().accent, 'payload 是完整配置，不是只挑了改动字段')
+})
+
+test('设置页那条路径（ctx.settings.patch）同样广播 —— 它不走 /api/config', async () => {
+  const { seen, stop } = record()
+  // 设置页在插件页里调 `ctx.settings.patch`，经 bridge 落到管理面服务：
+  // 上次只补了 `POST /api/config` 的广播，用户从设置页改主题依旧没反应，就是漏了这条
+  const settings = h.kernel.createSettingsService('internal-probe')
+  await settings.patch({ theme: 'dark', accent: '#00d084' })
+  await settings.setHistoryLimit(300)
+  stop()
+
+  assertEqual(seen.length, 2, `两次写入应当各广播一次，实际 ${seen.length} 次`)
+  assertEqual(seen[0]?.theme, 'dark', '主题要带出来')
+  assertEqual(seen[0]?.accent, '#00d084')
+  assertEqual(seen[1]?.historyLimit, 300, '历史上限这类也在同一收口里')
 })
 
 const failed = await run('配置变更广播')

@@ -1,4 +1,4 @@
-import type { ActionDecl, ResultItem } from '@launcher/plugin-manifest'
+import type { ActionDecl, Config, ResultItem } from '@launcher/plugin-manifest'
 import { LauncherError } from '@launcher/plugin-manifest'
 import type { Kernel } from './kernel'
 import type { HttpRequestContext } from './http/server'
@@ -134,20 +134,9 @@ export function registerApi(kernel: Kernel): void {
 
   server.post('/api/config', async (ctx) => {
     const patch = body<Record<string, unknown>>(ctx)
-    const before = kernel.config.get()
-    const next = await kernel.config.patch(patch as never)
-    if (next.historyLimit !== before.historyLimit) kernel.history.setHistoryLimit(next.historyLimit)
-    // 配置变了一律广播：主题 / 主题色 / 密度只有 UI 知道怎么落到 CSS 变量上，
-    // 不广播就只能等下一次 `plugin/state`（改插件）或重启才生效 —— 表现出来就是「改了主题色没反应」。
-    kernel.emit('config/changed', { config: next })
-    if (next.hotkey.accelerator !== before.hotkey.accelerator) {
-      const result = await kernel.applyHotkey(next)
-      return { ok: true, config: next, hotkey: result }
-    }
-    if (next.autostart !== before.autostart) {
-      await kernel.primitives.setAutostart(next.autostart).catch(() => undefined)
-    }
-    return { ok: true, config: next }
+    // 写入收口在 `Kernel.patchConfig`（落盘 + 副作用 + 广播 `config/changed`），这里只负责转发
+    const result = await kernel.patchConfig(patch as Partial<Config>)
+    return { ok: true, ...result }
   })
 
   server.post('/api/ui/theme', async (ctx) => {
