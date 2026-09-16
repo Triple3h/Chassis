@@ -1,9 +1,9 @@
 # 启动台底座 · 需求与实现文档
 
-> 版本：v1.0 ｜ 状态：待开工 ｜ 日期：2026-09-14
-> 读者：实现者（自己）+ 后续参与的人
+> 版本：v1.0 ｜ 状态：已实施（进度见 `README.md` 的「当前状态」）｜ 日期：2026-09-14，最后更新：2026-09-16
+> 读者：实现者 / 评审者 / 后续参与的人
 > 用法：本文件是**唯一的需求源**。开工时按 §13 的里程碑推进；遇到本文件没写的行为，先补文档再写代码。
-> 移植说明：本文件不依赖任何现有仓库路径。把它放到新仓库的 `docs/REQUIREMENTS.md` 即可，§5 的目录树就是新仓库要建的目录。
+> 说明：本文件就是本仓库的需求源（文件名 `docs/launcher-requirements.md`）。早期它是"另起新仓库"的移植稿，因此 §5 的目录树与少数行文保留了当时的规划口径 —— **实际落地的结构以 `README.md` 的「目录结构」为准**。
 
 ---
 
@@ -248,11 +248,14 @@ launcher/
 │   ├── fixtures/echo-plugin/         # 覆盖全部宿主 API 的契约测试插件
 │   └── e2e/
 └── docs/
-    ├── REQUIREMENTS.md               # 本文件
+    ├── launcher-requirements.md      # 本文件（需求源）
     ├── plugin-spec.md                # 第三方插件开发文档（面向插件作者）
-    ├── architecture.md               # 内核实现细节（可由本文件 §7 拆出）
-    └── decisions/ADR-0001-*.md
+    ├── architecture.md               # 内核实现细节
+    ├── plugin-dev-guide.md           # 插件开发手册（Vue 工程实操）
+    └── decisions/ADR-0001~0003.md
 ```
+
+> 这棵树是 §5 的**规划口径**；实际落地的目录（含 `packages/ui` 与构建脚本分布）见 `README.md` 的「目录结构」。
 
 ---
 
@@ -600,15 +603,16 @@ type ActionDecl =
 ### 8.9 插件开发流程
 
 ```bash
-npm create launcher-plugin       # 脚手架（Vue / React / 纯 HTML）
-cd my-plugin && npm i
-npm run dev                      # 起 vite dev server，并把 dev 地址注册到运行中的内核
-npm run build                    # 产出 dist/（含 index.html + assets + <name>.mjs + package.json）
-npm run pack                     # 打 zip 供安装
+# 插件是 pnpm workspace 成员，命令在仓库根执行
+pnpm install
+pnpm --filter <name> dev                   # 起 vite dev server，并把 dev 地址注册到运行中的内核
+pnpm --filter <name> build                 # 产出 dist/（含 index.html + assets + <name>.mjs + package.json）
+pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 供安装
 ```
-- dev 注册：Cli 通过内核的本地 control 端口（仅 127.0.0.1 + 一次性 token）把 `devUrl` 挂上，内核把插件页指向 vite dev server ⇒ **热更新免重启**
+- dev 注册：dev server 通过内核的本地 control 端口（仅 127.0.0.1 + 一次性 token）把 `devUrl` 挂上，内核把插件页指向 vite dev server ⇒ **热更新免重启**
 - 调试：设置里有"打开插件 DevTools"（macOS WKWebView 用 `isInspectable` + Safari 开发者菜单；开发构建可用）
-- 自测：`npm run test`（本地 harness）+ 用 `tests/fixtures/echo-plugin` 的协议自检工具
+- 自测：`pnpm test`（含各插件 core·script 用例）+ `pnpm spec-check`（清单 / 产物 / 能力 / 数据目录）+ `tests/fixtures/echo-plugin` 的协议自检
+- 新建插件：暂无脚手架包（`packages/plugin-cli` 属待办），照抄 `plugins/totp` / `plugins/hosts` 最快；配置模板见 `docs/plugin-dev-guide.md` §4
 
 ---
 
@@ -671,6 +675,8 @@ npm run pack                     # 打 zip 供安装
 
 ## 13. 里程碑与验收
 
+> 进度快照见 `README.md` 的「当前状态」。本节保留**计划口径**（交付物与验收标准），不随实现改动。
+
 ### M0 — 壳 + 启动台 UI（1–1.5 周）
 **交付**：`apps/shell`（窗口/热键/托盘）、`apps/launcher-ui`（搜索框 + 结果网格 + 键盘导航 + 固定的假数据）、`history.ts` 落盘。
 **验收**：
@@ -710,7 +716,7 @@ npm run pack                     # 打 zip 供安装
 
 | # | 问题 | 默认取值 |
 |---|---|---|
-| 1 | 代码放哪 | **独立新仓库**，本文件作为 `docs/REQUIREMENTS.md`；`plugins/` 下的出厂插件与底座同仓库维护 |
+| 1 | 代码放哪 | **单仓库**（本仓库）：底座 + 出厂插件 + 插件 SDK（`packages/*`）一起维护；需求源就是 `docs/launcher-requirements.md` |
 | 2 | 是否兼容第三方旧协议 | **否**（2026-09-16 起）：底座只认原生协议 `@launcher/api` |
 | 3 | 存储后端 | **JSON 文件 + 原子写**；历史 > 2000 条再评估 SQLite |
 | 4 | 平台 | **先 macOS（arm64）**，Windows 在 M4 之后单独立项 |

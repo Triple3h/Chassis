@@ -1,6 +1,6 @@
 # 启动台插件接入规范 v1
 
-> 状态：v1 定稿待评审 ｜ 日期：2026-09-14 ｜ 配套：`docs/launcher-requirements.md`（底座需求）
+> 状态：v1（已落地：8 个出厂插件按此实现）｜ 日期：2026-09-14，最后更新：2026-09-16 ｜ 配套：`docs/launcher-requirements.md`（底座需求）
 > 读者：插件作者（含我们自己）、内核实现者、评审者
 > 本文是**对外契约**。内核实现必须能逐条对应到 §14 的校验矩阵；本文没写的字段与行为，插件不得依赖。
 
@@ -383,7 +383,7 @@ type ActionDecl =
 
 ### 10.1 视觉
 
-- **应当**引 `@launcher/ui`（设计令牌 `theme.css` + 图标组件），保证与启动台一致
+- **应当**引 `@launcher/ui`（工作区包 `packages/ui`：设计令牌 `theme.css` + `AppShell` / `UiIcon` / `UiDialog` + `virtual` / `clipboard` / `keys` / `theme` / `toast`），保证与启动台一致
 - 深浅色**必须**都可用；不要在白色背景上写死深色文本
 - 字号：正文 13px / 次要 12px；圆角与间距用令牌变量
 
@@ -432,19 +432,23 @@ v1 只要求：所有面向用户的字符串集中在 `src/locales/zh-CN.ts`（
 
 ## 12. 开发与调试
 
+本仓库的插件都是 pnpm workspace 成员，命令在**仓库根**执行（插件自己的脚本用 `--filter`）：
+
 ```bash
-npm create launcher-plugin        # 脚手架（Vue / React / 纯 HTML + TS）
-cd my-plugin && npm i
-npm run dev                       # vite dev server + 向运行中的底座注册 dev 地址（热更新）
-npm run build                     # 产出 dist/（含 index.html + assets + <name>.mjs + 裁剪后的 package.json）
-npm run pack                      # 打 zip
-npm run spec-check                # 规范自检（清单、产物、能力声明、数据目录、N1/N2/N3）
-npm test                          # 本地 harness（core 纯函数）
+pnpm install
+pnpm --filter <name> dev        # vite dev server（浏览器直接调 UI；宿主能力走降级分支）
+pnpm --filter <name> build      # 产出 dist/（index.html + assets + <name>.mjs + 裁剪后的 package.json）
+pnpm --filter <name> typecheck
+pnpm build:plugins              # 构建全部出厂插件
+pnpm spec-check [name]          # 规范自检（清单 / 产物 / 能力 / 数据目录 / N1 / N2 / N3）
+pnpm pack:plugins               # 打 zip 到 plugins/release/
+pnpm test                       # 全量测试（含各插件的 core·script 用例）
 ```
 
-- **dev 注册**：内核监听本机 control 端口（127.0.0.1 + 一次性 token），`npm run dev` 把 `devUrl` 挂上，插件页直接指向 vite ⇒ 免重启热更新
+- **dev 注册**：`pnpm dev:kernel` 起内核（本机 control 端口 + 一次性 token），插件 dev server 把 `devUrl` 挂上去，插件页直接指向 vite ⇒ 免重启热更新
 - **DevTools**：设置 → 插件 → 打开 DevTools（开发构建可用）
 - **调试日志**：`host.log('info', '...')` 会进审计日志，设置页可实时查看
+- **新建插件**：暂无脚手架包（`packages/plugin-cli` 是待办）—— **照抄现有插件**最快：Vue 工程看 `plugins/totp`（view + script + 对话框）与 `plugins/hosts`（提权写系统文件），配置模板见 `docs/plugin-dev-guide.md` §4 与 `.codebuddy/skills/chassis-plugin-dev/references/scaffold-templates.md`
 
 ---
 
@@ -525,7 +529,7 @@ hello/
 import { host, hostUi, storage, onCleanup, LauncherError } from '@launcher/api'
 
 if (host.isLauncher()) {
-  const { cmd } = await host.info()
+  const { command } = await host.info()
   const name = await storage.get<string>('lastName')
   await hostUi.setSearchContent(name ?? '')
   const off = hostUi.watchSearchContent((v) => { void storage.set('lastName', v) })

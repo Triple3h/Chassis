@@ -1,6 +1,7 @@
 # 内核实现细节与差异记录
 
 > 读者：实现者、评审者 ｜ 需求源：`docs/launcher-requirements.md`（本文件不复制需求，只写"怎么实现"与"哪里不一样"）
+> 最后更新：2026-09-16
 > 约定：**遇到需求没写的行为，先补本文件再写代码。**
 
 ---
@@ -52,7 +53,8 @@
 | `http/server.ts` | `http/server.ts` + `http/pluginServers.ts` | UI 宿主服务与插件 listener 池分开 |
 | `jsonrpc.ts` | 同 | `ShellLink` |
 
-> 需求 §5 里 `services/` 列了 10 个文件；本实现合并为 9 个（`bridge/hostUi/shell/clipboard/exec/notify/storage/screenshot/quicklink` 中，`screenshot` 与 `notify` 合入 `shell.ts`，`hostUi` 独立）。
+> 需求 §5 的 `services/` 是功能清单，本实现按文件合并落位：`bridge` / `hostUi` / `shell` / `clipboard` / `exec` / `storage` / `quicklink` / `settings` 各一个文件；
+> `notify` 与 `screenshot` 合入 `shell.ts`（底层走 `primitives.ts` 与壳原语）；另有 `audited.ts`（审计包装）与 `kernel.ts`（内核服务）。
 
 ---
 
@@ -191,7 +193,7 @@ active → degraded（脚本连续失败 3 次）
 | 插件 | 工具链 | 说明 |
 |---|---|---|
 | 内置（app-launcher / file-search / web-open / internal-settings） | esbuild，无框架 | 与底座同一套发布节奏 |
-| Vue 插件（totp / hosts / text-diff / json-tools） | Vite + Vue + Tailwind，共享 `packages/ui/`（UI 积木 + 构建配置） | 2026-09-16 起与内置插件同目录维护、直连底座 SDK；见 `plugins/README.md` |
+| Vue 插件（totp / hosts / text-diff / json-tools） | Vite + Vue + Tailwind，共用工作区包 `@launcher/ui`（`packages/ui`：UI 积木 + 前端工具） | 2026-09-16 起与内置插件同目录维护、直连底座 SDK；见 `plugins/README.md` |
 
 开发态从仓库根加载：内核 `--builtin-plugins` 接受**逗号分隔的多个目录**（默认 `plugins/`），
 壳的开发态回退指向同一处；打包时 `scripts/lib/resources.mjs` 把各插件的 `dist/` 拷进 `builtin-plugins/`。
@@ -214,12 +216,12 @@ active → degraded（脚本连续失败 3 次）
 | D8 | §3.1「输入框内容保留上次的选中状态但默认清空（可配置）」 | `config.keepQuery`；当前实现是"UI 唤出时清空，插件可通过 `hostUi.setSearchContent` 回填" | UI 无法感知"唤出"事件（内核/壳才知道），已在 `ui/searchContent` 事件上留好通道 |
 | D9 | §11 契约测试用 `echo-plugin` | 已实现（`tests/fixtures/echo-plugin` + `tests/contract/*.test.ts`，真 HTTP） | — |
 | D10 | §10「主线程 > 50ms 的必须进 Worker」（拼音索引构建、大文件解析） | 拼音索引规模小（命令级），暂未进 Worker；历史文件 ≤ 2000 条，读取在毫秒级 | 记为待办：命令数量破千或历史破万时迁移 |
-| D11 | §6.3 打包体积/冷启动指标 | 未测（M4 待做）；`scripts/build-shell.mjs` 已就绪 | 需要真机 `tauri build` 后才能测 |
+| D11 | §6.3 打包体积/冷启动指标 | 未做基准；自用版（`pnpm app:local`）已实机运行 | 需要真机 `tauri build` 才能量体积；自用不分发，暂不阻塞 |
 | D12 | §8.10 与第三方旧宿主的兼容层 | **不做兼容**（2026-09-16 起）：桥只认原生信封 `__launcher: 1`，清单校验不放过 `apiVersion` / `capabilities` 缺省，旧布局数据迁移一并移除 | 半兼容的代价是长期维护两套语义，还会把"未实现的能力"伪装成"能用"；底座与插件同仓库，没有历史包袱要背 |
-| D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
 | D13 | §7.5 「拼音匹配」 | 用 `pinyin-pro`（ZTools 同选型） | 需求 §12 风险对策明确要求"用成熟库" |
 | D14 | 未规定 plist 读取方式 | 自研 `plugins/app-launcher/src/core/plist.ts`（binary + XML 只读） | `simple-plist` 内部是运行时 `require`，打不进自包含产物（违反 N1）；`build-plugin.mjs` 现在会校验产物只含 `node:*` 依赖 |
 | D15 | §7.6「插件在 200ms 内回结果」 | 插件激活后**延迟 800ms 预热**贡献型搜索 worker | 否则用户第一次输入必然吃一次 worker 冷启动 + 索引加载而超时（体验上就是"第一次搜不到"） |
+| D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
 
 ---
 
@@ -238,10 +240,18 @@ active → degraded（脚本连续失败 3 次）
 ## 10. 测试与验收
 
 ```bash
-npm run typecheck      # 10 个包（含插件与测试）
-npm run test           # 单元 22 + 契约 11 + 验收 7
-npm run build          # kernel + ui + plugins
-npm run build:shell    # 打包 .app / .dmg（M4）
+pnpm typecheck       # 15 个工作区包（含 packages/ui 与各插件，vue 工程走自己的 vue-tsc）
+pnpm test            # 15 个测试文件：内核单元 / 契约 / 验收 + 插件 core·script 用例
+pnpm build           # kernel + ui + 全部出厂插件
+pnpm spec-check      # 出厂插件规范自检（清单 / N1 / N2 / N3 / 产物 / 远程资源）
+pnpm app:local       # 打包自用 .app（M4 的自用形态；公证 / updater 未接）
+```
+
+出厂插件在真底座上另有两条端到端冒烟：
+
+```bash
+node scripts/smoke-real.mjs          # 真内核 + 8 个出厂插件
+node scripts/smoke-first-batch.mjs   # 四个 Vue 插件端到端（HTTP 驱动，不起壳）
 ```
 
 | 层 | 位置 | 覆盖 |
@@ -249,3 +259,7 @@ npm run build:shell    # 打包 .app / .dmg（M4）
 | 单元 | `tests/unit/` | 清单校验矩阵、历史排序/淘汰/原子写、路径穿越、审计打码、拼音匹配、Context 装配期裁剪（含 disposer 逆序） |
 | 契约 | `tests/contract/` | `echo-plugin` 覆盖 §8.6 全表（含 `exec.run` / token 校验 / 未授权 / 管理面 `FORBIDDEN`） |
 | 验收 | `tests/smoke/` | §1.3 口径：零插件可启动可搜索、装插件后立刻可搜、执行写历史、固定项持久化、禁用后命令消失而历史置灰、卸载后目录消失 |
+| 插件用例 | `plugins/*/test/`、`packages/*` | 各插件的 core 纯函数与 script 胶水；`packages/ui` 等公共库（`pnpm test` 一并收集） |
+
+**人工验收（自动化覆盖不到的部分）**：自动化已覆盖「会话能开、生产资源可达、桥与脚本正确、能力越权被拒、数据落点正确」；
+下面这些在发版/大改后仍需人点一遍：粘贴→格式化→树视图（json-tools）、footer 按键与 `Esc` 分级退出、截图→粘贴导入（totp）、hosts 提权写入与回读校验、拖拽重排后的固定顺序落库。

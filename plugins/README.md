@@ -24,7 +24,7 @@
 | 共享代码 | 无（各自独立） | `@launcher/ui`（工作区包，`packages/ui/`）：UI 积木 + 前端工具（构建期打进各自产物） |
 | 构建驱动 | 根 `scripts/build-all.mjs` 按 `package.json` 的 `build:view` / `build:scripts` 驱动 | 同左 |
 
-> 4 个 Vue 插件 2026-09-16 搬进本目录（见 `docs/first-batch-plugins.md`）：与内置插件同出厂流程，
+> 4 个 Vue 插件 2026-09-16 搬进本目录：与内置插件同出厂流程，
 > 但保留自己的 Vite + Vue 工具链，并直连底座 SDK（`@launcher/api` / `@launcher/api-node`）。
 > 插件 id 简化为 `totp` / `hosts` / `text-diff` / `json-tools`，旧数据目录由内核首次加载时接手
 > （映射见 `apps/kernel/src/plugin.ts` 的 `LEGACY_PLUGIN_IDS`）。
@@ -146,3 +146,4 @@ CSP 或老 WebView 下 Worker 可能创建失败，降级分支不是可选项�
 - 这里的「预置」指**出厂预装**，用户仍可在设置里禁用/卸载；只有 `internal-*` 不可卸载。
 - 插件不享受底座内部特权：`ctx.settings` 只注入 `internal-*` 插件。
 - 规范真源在仓库根的 `docs/plugin-spec.md`；`spec-check` 是它 §13 检查清单的可执行化。
+- **hosts 旧备份未迁移**：历史版本把备份放在安装目录的 `data/backups`；只有「手工把旧插件目录拷进底座」才会两者共存 —— 旧备份仍留在磁盘、不再列出。迁移涉及可提权写路径，留待单独处理。

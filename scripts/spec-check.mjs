@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
  *   node scripts/spec-check.mjs              # 检查 plugins/ 下全部插件
  *   node scripts/spec-check.mjs totp  # 只检查某个插件（目录名或路径）
  *
- * 对应关系（docs/first-batch-plugins.md §6）：
+ * 对应关系（docs/plugin-spec.md §13 检查清单）：
  *   G1 清单字段完整性 / N1 产物名一致 / N2 数据目录 / N3 能力声明 / 产物齐备 / 远程资源
  *
  * 注：插件一律直连 `@launcher/api`，静态推不出精确能力集 ——

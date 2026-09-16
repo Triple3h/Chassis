@@ -3,7 +3,7 @@
 > 面向本仓库 `plugins/{totp,hosts,text-diff,json-tools}` 四个 Vite + Vue 插件：宿主调用直连
 > `@launcher/api`（view 侧）/ `@launcher/api-node`（script 侧）。
 > **平台模型（命令形态、产物契约、脚本协议、踩坑）适用于任何底座插件。**
-> 最后更新：2026-09-16
+> 状态：现行（与 `plugins/` 下的 Vue 插件同步维护）｜ 最后更新：2026-09-16
 > 快速上手看 [`../.codebuddy/skills/chassis-plugin-dev/SKILL.md`](../.codebuddy/skills/chassis-plugin-dev/SKILL.md)，硬约束看 [`../.codebuddy/rules/chassis-plugin/RULE.mdc`](../.codebuddy/rules/chassis-plugin/RULE.mdc)
 
 ---
@@ -77,9 +77,9 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 
 - **iframe 会话**：宿主按命令起一个会话，加载 `index.html?sid=<sessionId>&cmd=<command>`。
   需要时读 `new URLSearchParams(location.search)`。
-- **主题**：宿主可能透传 `?theme=` 或在文档上设 `data-theme`；否则跟随 `prefers-color-scheme`。建议三级探测（见 `packages/ui/lib/theme.ts`）。
+- **主题**：宿主可能透传 `?theme=` 或在文档上设 `data-theme`；否则跟随 `prefers-color-scheme`。建议三级探测（见 `@launcher/ui/theme`）。
 - **本地存储**：插件私有的键值存储，落盘在 `<dataRoot>/plugins/<id>/storage.json`（P7：数据与代码分离），**明文 JSON**，只支持可序列化值。
-- **网络**：插件是本地静态页，可以联网，但把密钥类数据发出去等于自曝——本项目三个插件都刻意不联网。
+- **网络**：插件是本地静态页，可以联网，但把密钥类数据发出去等于自曝 —— 本仓库四个插件都不联网（totp 的扫码识别用随包 wasm，不请求 CDN）。
 
 ---
 
@@ -205,7 +205,7 @@ export default defineConfig({
 
 - **`base: './'`**：绝对路径 `/assets/x.js` 在宿主托管下大概率 404。
 - **不要开 `manualChunks`**：产物被切成多个 chunk 时，宿主托管路径容易对不上。
-- **构建后把 `package.json` 写进 dist**（本仓库 `scripts/manifest-plugin.mjs` 会自动剔除无关字段）。
+- **构建后把 `package.json` 写进 dist**（本仓库 `scripts/lib/manifest-plugin.mjs` 会自动剔除无关字段）。
 - 「一个命令一个 JS 入口」的 lib 模式是**旧模板**的玩法，新 API 不需要。
 
 ### 3.3 No-View / Script 的构建
@@ -237,7 +237,7 @@ build: {
 
 - 安装：`dist/` → `<dataRoot>/extensions/<插件名>`（或设置页「插件管理」安装），内核启动时扫描该目录。
 - 开发：`pnpm dev` 起 Vite 服务器，浏览器直接访问即可调 UI；宿主相关能力走降级分支。
-- 多插件共存：每个插件是独立目录，互不共享 `node_modules`（本仓库的设计选择，避免工作区提升带来的解析问题）。
+- 多插件共存：每个插件是独立工程，彼此的 `node_modules` 不互相提升；**要复用的代码走工作区包**（`@launcher/api` / `@launcher/api-node` / `@launcher/ui`），别用相对路径跨插件 import。
 
 ---
 
@@ -393,7 +393,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **风险**：宿主只把 `dist/<name>.mjs` 当 Worker 入口拉起。这条跨文件相对 import 一旦因为「用户只拷了单个 `.mjs`」「打包时漏了 `assets/`」「宿主换了加载方式」而断掉，命令直接失效——而且报错发生在宿主侧，插件里根本看不见。单入口插件（只一个 script 命令）不会触发，所以很容易到第二个入口才踩到。
 - **对策**：**逐入口各跑一次构建**，每个产物自包含。本仓库做法（`plugins/hosts`）：
   - `vite.worker.config.ts` 用 `build.lib.entry` 指向**单个**入口，输出名由 `fileName` 固定，入口由环境变量 `PLUGIN_WORKER_ENTRY` 选择；
-  - `scripts/build-no-view.mjs` 扫一遍 `src/no-view/*.ts`，逐个 `execFileSync(vite, ['build', '--config', 'vite.worker.config.ts'])`，每次带上不同的环境变量；
+  - `plugins/hosts/scripts/build-no-view.mjs` 扫一遍 `src/no-view/*.ts`，逐个 `execFileSync(vite, ['build', '--config', 'vite.worker.config.ts'])`，每次带上不同的环境变量；
   - `package.json` 的 `build` 末段改成 `node scripts/build-no-view.mjs`。
 - **顺带**：Vite 的 `defineConfig` **不接受配置数组**，CLI 会直接报 `config must export or return an object`，所以「多配置」只能自己在脚本里循环调用。
 

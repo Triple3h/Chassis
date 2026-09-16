@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 /**
  * Vue 四件套（`plugins/{totp,hosts,text-diff,json-tools}`）在**真底座**上的冒烟：
- * 覆盖 docs/first-batch-plugins.md §4 阶段 1 / 阶段 2 里能自动化的部分。
+ * 覆盖「首批 4 个插件」验收里能自动化的部分（规范 §6 / §8 / §9 的运行时行为）。
  *
  * 做法：把 4 个插件的 dist 拷成临时「已安装插件」，起真内核（standalone），
  * 然后完全走 HTTP（/api/invoke、/api/bridge、/api/search）模拟启动台 UI 的转发 —— 不起壳、不用浏览器。
