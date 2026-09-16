@@ -183,8 +183,12 @@ http://127.0.0.1:<port>/index.html?sid=<uuid>&cmd=<command>&theme=dark|light&tok
 
 ### 5.3 主题
 
-- 宿主通过 `?theme=` 传入，并在文档根设 `data-theme="dark|light"`
-- **应当**三级探测：`?theme=` → `data-theme` → `prefers-color-scheme`，并在宿主系统主题变化时响应
+- 宿主通过 `?theme=` 传入（**每次开会话都重新带**，代表宿主当前的主题），并在文档根设 `data-theme="dark|light"`
+- **应当**按四级探测，`@launcher/ui/theme` 的 `useTheme()` 已实现，直接用即可：
+  插件内**手动选过**的主题 → `?theme=` → `data-theme` → `prefers-color-scheme`
+- 只有**手动切换**（`toggle()` / `set()`）才把主题记进 `localStorage`。自动判定出来的值**一律不落盘** ——
+  否则「第一次打开这个插件页时恰好是什么主题」会被永久钉死，宿主之后换了主题也跟不上
+- 宿主给了主题、或用户手动选过时**不要**跟随系统主题变化，否则插件页会和宿主界面不一致
 - 推荐直接引 `@launcher/ui` 的设计令牌（`theme.css`），不要自造色板
 
 ### 5.4 网络
