@@ -19,8 +19,8 @@ import { fileURLToPath } from 'node:url'
  * 对应关系（docs/first-batch-plugins.md §6）：
  *   G1 清单字段完整性 / N1 产物名一致 / N2 数据目录 / N3 能力声明 / 产物齐备 / 远程资源
  *
- * 注：N3 的能力静态比对只对经 `@shared/lib/platform` 适配层调用的插件生效 ——
- * 内置插件直连 `@launcher/api`（适配层是为双宿主存在的），推不出精确能力集，跳过比对。
+ * 注：插件一律直连 `@launcher/api`，静态推不出精确能力集 ——
+ * 声明了 capabilities 的插件只给一句「发布前人工核对」提示，不判失败。
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -335,8 +335,8 @@ function createReport(name) {
   }
 }
 
-/** plugins/ 下不是插件的目录（shared 共享层、发布产物） */
-const NON_PLUGIN_DIRS = new Set(['shared', 'release', 'node_modules'])
+/** plugins/ 下不是插件的目录（发布产物、依赖） */
+const NON_PLUGIN_DIRS = new Set(['release', 'node_modules'])
 
 function resolveTargets(args) {
   const isPlugin = (dir) => existsSync(path.join(dir, 'package.json'))

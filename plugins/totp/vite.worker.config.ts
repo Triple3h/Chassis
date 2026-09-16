@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
-import { sharedAliases } from '../shared/build/vite-shared.mjs'
+import { pluginAliases } from '../../scripts/lib/vite-plugin-vue.mjs'
 
 /**
  * No-View / Script 命令的构建配置：把 src/no-view/*.ts 各自打成 dist/<name>.mjs，
@@ -40,7 +40,7 @@ function discoverInputs(): Record<string, string> {
 
 export default defineConfig({
   root,
-  resolve: { alias: sharedAliases(root) },
+  resolve: { alias: pluginAliases(root) },
   build: {
     outDir: path.resolve(root, 'dist'),
     emptyOutDir: false,

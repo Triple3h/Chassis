@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import UiIcon from '@shared/ui/UiIcon.vue'
-import { useVirtualList } from '@shared/lib/virtual'
-import { useToast } from '@shared/lib/toast'
-import { copyText } from '@shared/lib/clipboard'
+import UiIcon from '@launcher/ui/UiIcon.vue'
+import { useVirtualList } from '@launcher/ui/virtual'
+import { useToast } from '@launcher/ui/toast'
+import { copyText } from '@launcher/ui/clipboard'
 import { KIND, isContainerKind, matchNodes, projectRows, type FlatTree } from '../core/tree'
 
 const props = defineProps<{ tree: FlatTree | null }>()

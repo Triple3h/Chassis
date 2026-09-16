@@ -1,13 +1,22 @@
 {
-  "extends": "../shared/tsconfig.base.json",
+  "extends": "../../tsconfig.vue-plugin.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["../shared/*"],
-      "vue": ["./node_modules/vue"],
-      "@launcher/api": ["./node_modules/@launcher/api"],
-      "zxing-wasm/reader": ["./node_modules/zxing-wasm/dist/es/reader/index.d.ts"]
+      "vue": [
+        "./node_modules/vue"
+      ],
+      "@launcher/api": [
+        "./node_modules/@launcher/api"
+      ],
+      "zxing-wasm/reader": [
+        "./node_modules/zxing-wasm/dist/es/reader/index.d.ts"
+      ]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "../shared/**/*.ts", "../shared/**/*.vue"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.vue"
+  ]
 }

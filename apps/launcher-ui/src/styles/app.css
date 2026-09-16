@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 @source '../';
 
-/* 设计令牌（packages/shared-ui 与插件页共用同一套变量） */
+/* 设计令牌（与插件页 packages/ui/styles/theme.css 共用同一套变量） */
 @theme {
   --color-ink-50: #f7f8fa;
   --color-ink-100: #eceef2;

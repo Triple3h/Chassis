@@ -19,9 +19,9 @@
 | | 内置（esbuild 工具链） | Vue 插件 |
 |---|---|---|
 | 工具链 | `scripts/build-plugin.mjs`（esbuild，无框架） | 各自的 Vite + Vue 3 + Tailwind v4 工程 |
-| 清单 | 手写 `package.json` 精简字段 | 构建期由 `shared/build/manifest-plugin.mjs` 裁剪写入 `dist/package.json` |
+| 清单 | 手写 `package.json` 精简字段 | 构建期由 `scripts/lib/manifest-plugin.mjs` 裁剪写入 `dist/package.json` |
 | 宿主调用 | 直连 `@launcher/api` / `@launcher/api-node` | 同左 |
-| 共享代码 | 无（各自独立） | `plugins/shared/`：UI 积木 + 构建配置（构建期打进各自产物） |
+| 共享代码 | 无（各自独立） | `@launcher/ui`（工作区包，`packages/ui/`）：UI 积木 + 前端工具（构建期打进各自产物） |
 | 构建驱动 | 根 `scripts/build-all.mjs` 按 `package.json` 的 `build:view` / `build:scripts` 驱动 | 同左 |
 
 > 4 个 Vue 插件 2026-09-16 搬进本目录（见 `docs/first-batch-plugins.md`）：与内置插件同出厂流程，
@@ -33,14 +33,17 @@
 
 ```
 plugins/
-├── shared/                   四个 Vue 插件共用（构建期打进各自产物）
-│   ├── build/                构建期工具：vite-shared.mjs（别名）/ manifest-plugin.mjs（清单裁剪）
-│   ├── lib/                  公共工具：virtual（定高虚拟滚动）/ clipboard / keys / theme / toast
-│   ├── ui/                   AppShell / UiIcon / UiDialog
-│   ├── styles/theme.css      设计令牌（Tailwind v4 `@theme` 桥接）
-│   └── tsconfig.base.json
-└── <name>/                   每个插件一个独立工程（package.json / vite.config / tsconfig / src / test）
+├── <name>/                   每个插件一个独立工程（package.json / vite.config / tsconfig / src / test）
+└── release/                  打包产物（pnpm pack:plugins）
 ```
+
+Vue 插件共用的东西**不在本目录**，而是工作区包与根脚本：
+
+| 位置 | 内容 |
+|---|---|
+| `packages/ui`（`@launcher/ui`） | 设计令牌 + `AppShell` / `UiIcon` / `UiDialog` + `virtual` / `clipboard` / `keys` / `theme` / `toast`；插件按 `"@launcher/ui": "workspace:*"` 依赖，构建期打进各自产物 |
+| `scripts/lib/` | 构建期工具：`vite-plugin-vue.mjs`（vue 去重别名 + dev fs.allow）/ `manifest-plugin.mjs`（清单裁剪） |
+| `tsconfig.vue-plugin.json` | Vue 插件工程的 tsconfig 基座（各插件与 `packages/ui` 继承它） |
 
 ## 常用命令（都在仓库根执行）
 
@@ -91,7 +94,7 @@ pnpm --filter totp run dev        # 浏览器里调试 UI（宿主 API 会以「
 3. 有 script 命令的插件再跑 worker 构建（**`emptyOutDir: false`**，否则会把第 2 步的产物连 `index.html` 一起删掉；
    `external: ['worker_threads', /^node:.*/]`，`entryFileNames: '[name].mjs'`）。
 
-`shared/build/manifest-plugin.mjs` 挂在 `writeBundle`，把 `package.json` 裁剪成宿主需要的字段写进
+`scripts/lib/manifest-plugin.mjs` 挂在 `writeBundle`，把 `package.json` 裁剪成宿主需要的字段写进
 `dist/package.json` —— 于是 **`dist/` 本身就是一个可直接安装的插件目录**。
 
 ### 宿主调用：直连 SDK
@@ -124,10 +127,10 @@ CSP 或老 WebView 下 Worker 可能创建失败，降级分支不是可选项�
   共用模块拆成 `dist/assets/*.mjs`，入口里只剩一条相对 import，宿主只认 `dist/<name>.mjs`。
   构建后 `grep -h '^import' dist/*.mjs` 应只见 `node:*` 与 `worker_threads`。
 - `vite.config.ts` 必须 `base: './'`，**不要开 `manualChunks`**。
-- `shared/` 在插件目录之外，三处必须同时配：Vite `resolve.alias`（`shared/build/vite-shared.mjs`）、
-  TS `tsconfig.paths`、dev server `server.fs.allow`。
-- Tailwind v4 不会跨界扫描：每个插件的 `src/styles/app.css` 要用 `@source` 显式声明插件 `src` 与 `shared` 两个范围。
-- 可能超 200 行的列表用虚拟滚动（`shared/lib/virtual.ts`）；敏感数据（密钥、验证码）默认不落明文。
+- `@launcher/ui` 是工作区包，走标准解析 —— **不需要**再配 Vite alias / TS paths。`vite.config.ts` 里
+  `pluginAliases(root)` 只为 `vue` 去重（保证 SFC 与插件代码共用一个运行时），`devFsAllow(root)` 让 dev server 能读 `packages/ui`。
+- Tailwind v4 不会跨界扫描：每个插件的 `src/styles/app.css` 要用 `@source` 显式声明插件 `src` 与 `../../packages/ui` 两个范围。
+- 可能超 200 行的列表用虚拟滚动（`@launcher/ui/virtual`）；敏感数据（密钥、验证码）默认不落明文。
 - 危险操作（写系统文件 / 提权）**不接受调用方传入的目标路径**（参考 `hosts/src/no-view/_hosts-file.ts`）。
 
 ## 知识资产

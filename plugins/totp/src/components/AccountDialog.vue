@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import UiDialog from '@shared/ui/UiDialog.vue'
-import UiIcon from '@shared/ui/UiIcon.vue'
+import UiDialog from '@launcher/ui/UiDialog.vue'
+import UiIcon from '@launcher/ui/UiIcon.vue'
 import { formatSecret, validateSecret } from '../core/base32'
 import { ALGORITHMS, normalizeAccount, type Account } from '../core/types'
 

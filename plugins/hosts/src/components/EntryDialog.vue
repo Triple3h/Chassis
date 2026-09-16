@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import UiDialog from '@shared/ui/UiDialog.vue'
+import UiDialog from '@launcher/ui/UiDialog.vue'
 import { ipWarning, isValidHostname, type EntryFields, type EntryLine } from '../core/hosts'
 
 /** 新建 / 编辑单条 host 记录 */

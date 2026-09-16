@@ -25,7 +25,7 @@ import { ensureDir, listDirSafe, pathExists } from './util/fsx'
 import type { PluginServerPool } from './http/pluginServers'
 
 /**
- * 插件改过 id 的历史映射（2026-09-16：四个 Vue 插件去掉 `sofast-` 前缀）。
+ * 插件改名后的数据目录映射（2026-09-16：四个 Vue 插件简化 id，去掉历史前缀）。
  * 加载时若新数据目录不存在、旧目录还在 ⇒ 整体复制过来（只复制不删除）。
  * 映射是单向、一次性的；旧目录留由用户自行清理。
  */

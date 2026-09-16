@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useVirtualList } from '@shared/lib/virtual'
+import { useVirtualList } from '@launcher/ui/virtual'
 import type { Row, Seg } from '../core/diff'
 
 const props = defineProps<{

@@ -32,8 +32,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.5.42",
-    "@launcher/api": "workspace:*"
+    "@launcher/ui": "workspace:*",
+    "@launcher/api": "workspace:*",
+    "vue": "^3.5.42"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

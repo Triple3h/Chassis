@@ -1,12 +1,19 @@
 {
-  "extends": "../shared/tsconfig.base.json",
+  "extends": "../../tsconfig.vue-plugin.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["../shared/*"],
-      "vue": ["./node_modules/vue"],
-      "@launcher/api": ["./node_modules/@launcher/api"],
+      "vue": [
+        "./node_modules/vue"
+      ],
+      "@launcher/api": [
+        "./node_modules/@launcher/api"
+      ]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "../shared/**/*.ts", "../shared/**/*.vue"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.vue"
+  ]
 }

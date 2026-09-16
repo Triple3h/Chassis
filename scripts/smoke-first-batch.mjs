@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * sofast 四件套（`plugins/sofast-*`）在**真底座**上的冒烟：
+ * Vue 四件套（`plugins/{totp,hosts,text-diff,json-tools}`）在**真底座**上的冒烟：
  * 覆盖 docs/first-batch-plugins.md §4 阶段 1 / 阶段 2 里能自动化的部分。
  *
  * 做法：把 4 个插件的 dist 拷成临时「已安装插件」，起真内核（standalone），

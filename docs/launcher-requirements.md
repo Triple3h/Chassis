@@ -227,13 +227,13 @@ launcher/
 │   │       ├── lib/grid.ts           # 结果网格：列数/度量/分区/导航
 │   │       ├── lib/virtual.ts        # 虚拟滚动
 │   │       ├── lib/keys.ts           # ⌘/Ctrl 归一化、快捷键表
-│   │       └── styles/app.css        # @source 声明本包 src 与 shared-ui
+│   │       └── styles/app.css        # @source 声明本包 src 与 packages/ui
 │   └── ...
 ├── packages/
 │   ├── plugin-api/                   # npm: @launcher/api（UI 侧 SDK，postMessage 客户端）
 │   ├── plugin-api-node/              # npm: @launcher/api-node（ctx/log/progress/done/fail）
 │   ├── plugin-manifest/              # 清单 TS 类型 + zod 校验（内核与 CLI 共用）
-│   ├── shared-ui/                    # 设计令牌 theme.css + 图标 + 虚拟滚动（插件也可用）
+│   ├── ui/                           # npm: @launcher/ui（设计令牌 + AppShell / UiIcon / UiDialog + 前端工具）
 │   └── plugin-cli/                   # 脚手架 + 打包（create-plugin / pack）
 ├── plugins/                          # 出厂 bundle（机制与第三方完全相同）
 │   ├── app-launcher/                 # 应用扫描 + 启动（第一个做）
@@ -711,7 +711,7 @@ npm run pack                     # 打 zip 供安装
 | # | 问题 | 默认取值 |
 |---|---|---|
 | 1 | 代码放哪 | **独立新仓库**，本文件作为 `docs/REQUIREMENTS.md`；`plugins/` 下的出厂插件与底座同仓库维护 |
-| 2 | 是否兼容第三方旧协议（`@sofastapp/api`） | **否**（2026-09-16 起）：底座只认原生协议 `@launcher/api` |
+| 2 | 是否兼容第三方旧协议 | **否**（2026-09-16 起）：底座只认原生协议 `@launcher/api` |
 | 3 | 存储后端 | **JSON 文件 + 原子写**；历史 > 2000 条再评估 SQLite |
 | 4 | 平台 | **先 macOS（arm64）**，Windows 在 M4 之后单独立项 |
 | 5 | Node sidecar | **接受体积代价**；构建期把 Node 运行时裁到最小 |

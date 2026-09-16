@@ -1,0 +1,30 @@
+{
+  "name": "@launcher/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "插件 UI 套件：设计令牌 + AppShell / UiIcon / UiDialog + 宿主无关的前端工具（构建期被插件打进各自产物，无需发布）",
+  "exports": {
+    "./AppShell.vue": "./ui/AppShell.vue",
+    "./UiDialog.vue": "./ui/UiDialog.vue",
+    "./UiIcon.vue": "./ui/UiIcon.vue",
+    "./clipboard": "./lib/clipboard.ts",
+    "./keys": "./lib/keys.ts",
+    "./theme": "./lib/theme.ts",
+    "./toast": "./lib/toast.ts",
+    "./virtual": "./lib/virtual.ts",
+    "./styles/theme.css": "./styles/theme.css"
+  },
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue": "^3.5.42",
+    "vue-tsc": "^3.3.11"
+  }
+}

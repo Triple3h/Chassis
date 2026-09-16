@@ -4,7 +4,7 @@
  *
  * 两种编译器：
  *  - 普通 TS 包（含 esbuild 工具链的插件）：根目录的 `tsc -p`;
- *  - **vue 工程**（`plugins/sofast-*`）：它们有自己的 `vue-tsc`（`tsc` 认不了 `.vue`），
+ *  - **vue 工程**（`plugins/{totp,hosts,text-diff,json-tools}`）：它们有自己的 `vue-tsc`（`tsc` 认不了 `.vue`），
  *    所以走包自己的 `typecheck` 脚本 —— 判定依据是源码里有 `.vue` 文件。
  */
 import { spawnSync } from 'node:child_process'
@@ -38,12 +38,15 @@ function readPackage(dir) {
   }
 }
 
-/** 源码里有没有 .vue —— 有的话只能用 vue-tsc */
+/** 源码里有没有 .vue —— 有的话只能用 vue-tsc（扫包内任意位置，跳过产物与依赖） */
 function hasVueSource(dir) {
-  const src = path.join(dir, 'src')
-  if (!fs.existsSync(src)) return false
+  const skip = new Set(['node_modules', 'dist', '.git'])
   try {
-    return fs.readdirSync(src, { recursive: true }).some((entry) => String(entry).endsWith('.vue'))
+    return fs.readdirSync(dir, { recursive: true }).some((entry) => {
+      const name = String(entry)
+      if (!name.endsWith('.vue')) return false
+      return !name.split(path.sep).some((segment) => skip.has(segment))
+    })
   } catch {
     return false
   }

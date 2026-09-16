@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.vue-plugin.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["lib/**/*.ts", "ui/**/*.vue"]
+}

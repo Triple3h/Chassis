@@ -33,7 +33,7 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 | 出现在命令面板 | ✅ | ✅ | ❌（只能被 `Backend.run` 调用） |
 | 入口 | 插件根目录 `index.html`（固定，无需声明） | `dist/<name>.mjs` | 同左 |
 | 典型用途 | UI 交互 | 用户主动触发的后台任务 | 「View 的后端函数」，读写文件、调 SDK |
-| 依赖包 | `@sofastapp/api` | `@sofastapp/api/node` | 同左 |
+| 依赖包 | `@launcher/api` | `@launcher/api-node` | 同左 |
 
 宿主查找 Node 入口的顺序：`<pluginRoot>/<command>.mjs` → `<command>.js` → `workers/<command>.mjs` → `workers/<command>.js`。
 **`commands[].name` 必须与产物文件名一致。**
@@ -77,7 +77,7 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 
 - **iframe 会话**：宿主按命令起一个会话，加载 `index.html?sid=<sessionId>&cmd=<command>`。
   需要时读 `new URLSearchParams(location.search)`。
-- **主题**：宿主可能透传 `?theme=` 或在文档上设 `data-theme`；否则跟随 `prefers-color-scheme`。建议三级探测（见 `shared/lib/theme.ts`）。
+- **主题**：宿主可能透传 `?theme=` 或在文档上设 `data-theme`；否则跟随 `prefers-color-scheme`。建议三级探测（见 `packages/ui/lib/theme.ts`）。
 - **本地存储**：插件私有的键值存储，落盘在 `<dataRoot>/plugins/<id>/storage.json`（P7：数据与代码分离），**明文 JSON**，只支持可序列化值。
 - **网络**：插件是本地静态页，可以联网，但把密钥类数据发出去等于自曝——本项目三个插件都刻意不联网。
 
@@ -231,7 +231,7 @@ build: {
 "build": "vue-tsc --noEmit && vite build && vite build --config vite.worker.config.ts"
 ```
 
-> 实测：`@sofastapp/api/node` 会被**完整内联**进 `.mjs`（它内部 import 的 `worker_threads` 才是 external 的），所以产物 ~9KB，不依赖宿主提供 node_modules。
+> 实测：`@launcher/api-node` 会被**完整内联**进 `.mjs`（它内部 import 的 `worker_threads` 才是 external 的），所以产物 ~9KB，不依赖宿主提供 node_modules。
 
 ### 3.4 安装与调试
 
@@ -247,53 +247,54 @@ build: {
 
 ```
 <底座仓库>/plugins/
-├── shared/       设计令牌 + lib + ui（构建期被打进各插件产物，发布时不需要带）
-│   ├── build/    vite-shared.mjs（构建别名）+ manifest-plugin.mjs（清单裁剪）
-│   └── tests/    公共库单测
 ├── <name>/       各自独立 Vite 工程（package.json / vite.config / tsconfig / index.html / src / test）
 └── README.md     目录约定与发布流程
 
-<底座仓库>/scripts/   build-all.mjs / spec-check.mjs / pack-plugins.mjs（跨插件工具）
+<底座仓库>/packages/ui/          @launcher/ui：设计令牌 + AppShell / UiIcon / UiDialog + lib 工具
+<底座仓库>/scripts/              build-all.mjs / spec-check.mjs / pack-plugins.mjs（跨插件工具）
+<底座仓库>/scripts/lib/          vite-plugin-vue.mjs（vue 去重别名）/ manifest-plugin.mjs（清单裁剪）
+<底座仓库>/tsconfig.vue-plugin.json   Vue 插件工程的 tsconfig 基座
 ```
 
 出厂插件都是底座仓库的 pnpm workspace 成员，依赖由仓库根的 `pnpm install` 统一装。
 
-### 4.2 `shared/` 的依赖解析（关键坑）
+### 4.2 `@launcher/ui` 的解析
 
-`shared/` 在插件的 `node_modules` 之外，Node 解析裸模块会一路向上找不到 `vue`。解决：
+`@launcher/ui` 是工作区包（`packages/ui`），插件按 `"@launcher/ui": "workspace:*"` 依赖它 ——
+Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两点仍要注意：
 
-- **Vite**：`resolve.alias` 显式指向插件自己的 `node_modules`（`shared/build/vite-shared.mjs` 的 `sharedAliases()`）
-- **TS**：`tsconfig.paths` 同步映射 `vue` / `@shared` / `@launcher/api`
-- **dev server**：`server.fs.allow` 放开到 `plugins/`，否则读取 `shared/` 会被拦
+- **vue 去重**：包内 SFC 的 `import 'vue'` 必须解析到插件自己的 `node_modules/vue`（否则两份运行时）。
+  `vite.config.ts` 里 `pluginAliases(root)` 就是干这个的，别删。
+- **dev server**：`devFsAllow(root)` 把 `server.fs.allow` 放开到仓库根，dev 下才能读 `packages/ui`。
 
 ### 4.3 Tailwind v4 不会跨界扫描
 
-用 `@source` 显式声明扫描范围，否则 `shared/` 里的 class 不会生成：
+用 `@source` 显式声明扫描范围，否则 `packages/ui` 里的 class 不会生成：
 
 ```css
 @import "tailwindcss";
-@import "../../../shared/styles/theme.css";
+@import "../../../../packages/ui/styles/theme.css";
 @source "../";
-@source "../../../shared";
+@source "../../../../packages/ui";
 ```
 
 ### 4.4 主题与设计令牌
 
-`shared/styles/theme.css`：`:root` / `[data-theme="dark"]` 两套 CSS 变量 → `@theme inline` 桥接成 Tailwind 工具类（`bg-panel` / `text-muted` / `border-line` …）。
+`packages/ui/styles/theme.css`：`:root` / `[data-theme="dark"]` 两套 CSS 变量 → `@theme inline` 桥接成 Tailwind 工具类（`bg-panel` / `text-muted` / `border-line` …）。
 视觉基调对齐宿主：8px 圆角、低饱和描边、`padding: 10px` 的行高、14px 正文。
 
 ### 4.5 复用件
 
-| 文件 | 作用 |
+| 引用 | 作用 |
 |---|---|
-| `shared/lib/virtual.ts` | 定高虚拟滚动（diff 行 / JSON 树 / 账户列表共用） |
-| `shared/lib/clipboard.ts` | 复制三级兜底、剪贴板读图、文件选择、拖拽取文件、下载 |
-| `shared/lib/keys.ts` | `Mod` 跨平台判断、`isTypingTarget` |
-| `shared/lib/theme.ts` | 主题三级探测 + 切换 |
-| `shared/lib/toast.ts` | 轻提示（L1 反馈） |
-| `shared/ui/UiIcon.vue` | 自绘图标集（零依赖，避免为 20 个图标引入整个图标库） |
-| `shared/ui/UiDialog.vue` | 弹窗骨架（Esc 关闭、尺寸档位） |
-| `shared/ui/AppShell.vue` | 页面骨架 + 轻提示 + 主题应用 |
+| `@launcher/ui/virtual` | 定高虚拟滚动（diff 行 / JSON 树 / 账户列表共用） |
+| `@launcher/ui/clipboard` | 复制三级兜底、剪贴板读图、文件选择、拖拽取文件、下载 |
+| `@launcher/ui/keys` | `Mod` 跨平台判断、`isTypingTarget` |
+| `@launcher/ui/theme` | 主题三级探测 + 切换 |
+| `@launcher/ui/toast` | 轻提示（L1 反馈） |
+| `@launcher/ui/UiIcon.vue` | 自绘图标集（零依赖，避免为 20 个图标引入整个图标库） |
+| `@launcher/ui/UiDialog.vue` | 弹窗骨架（Esc 关闭、尺寸档位） |
+| `@launcher/ui/AppShell.vue` | 页面骨架 + 轻提示 + 主题应用 |
 
 宿主调用不在这张表里：**直连 `@launcher/api` / `@launcher/api-node`**，没有中间适配层。
 
@@ -326,13 +327,14 @@ build: {
 - **原因**：① 命令名与产物文件名不一致；② worker 构建 `emptyOutDir` 默认 true，把 UI 产物连同 `.mjs` 一起删了；③ 构建顺序反了（worker 先于 UI）。
 - **对策**：`entryFileNames: '[name].mjs'` + `emptyOutDir: false` + 先 UI 后 worker。
 
-### 5.5 从 `shared/`（或任何 node_modules 之外的目录）import 报模块找不到
+### 5.5 从 `packages/ui` import 报模块找不到
 
-- **对策**：alias（Vite）+ paths（TS）+ `server.fs.allow`（dev），三处都要配。
+- **常见原因**：插件 `package.json` 忘了声明 `"@launcher/ui": "workspace:*"`（改完依赖要跑根目录 `pnpm install`）。
+- **对策**：`@launcher/ui` 走标准解析，**不要**用 alias / paths 绕；dev 下读不到则是 `server.fs.allow` 没放开到仓库根。
 
 ### 5.6 Tailwind 类名不生效
 
-- **原因**：class 写在 Tailwind 扫描范围之外（`shared/`）。
+- **原因**：class 写在 Tailwind 扫描范围之外（`packages/ui`）。
 - **对策**：`@source` 显式声明。
 
 ### 5.7 产物 404 / 白屏
@@ -347,7 +349,7 @@ build: {
 
 ### 5.9 长列表滚动掉帧
 
-- **对策**：定高虚拟滚动。行高统一时不需要测量，`scrollTop / rowHeight` 反推区间即可（见 `shared/lib/virtual.ts`）。
+- **对策**：定高虚拟滚动。行高统一时不需要测量，`scrollTop / rowHeight` 反推区间即可（见 `packages/ui/lib/virtual.ts`）。
 
 ### 5.10 `JSON.parse` + `stringify` 丢精度
 
@@ -404,8 +406,8 @@ build: {
 [ ] package.json 提供 build:view / build:scripts（根 scripts/build-all.mjs 按这两条驱动）
 [ ] vite.config.ts：base './'，outDir dist，构建后写清单
 [ ] 有 no-view/script 命令时：vite.worker.config.ts（emptyOutDir:false）+ 文件名对齐；**有 2 个以上入口时逐入口构建**（§5.17），构建后 `grep -h '^import' dist/*.mjs` 应只见 node 内置模块
-[ ] tsconfig.json：extends shared/tsconfig.base.json + paths（vue / @shared / @launcher/api）
-[ ] src/styles/app.css：@import tailwindcss + theme.css，@source 覆盖 src 与 shared
+[ ] tsconfig.json：extends `../../tsconfig.vue-plugin.json`（走工作区包标准解析，不需要额外 paths）
+[ ] src/styles/app.css：@import tailwindcss + theme.css，@source 覆盖 src 与 `../../packages/ui`
 [ ] 宿主调用直接 `@launcher/api` / `@launcher/api-node`，先用 `host.isLauncher()` 分流、调用点兜失败
 [ ] 大计算进 Worker、长列表虚拟滚动
 [ ] pnpm build:plugins && pnpm spec-check 全绿：dist 里 index.html + assets + package.json(+ .mjs)

@@ -92,15 +92,12 @@ packages/
   plugin-manifest/  清单类型 + 校验 + 契约类型（内核/UI/CLI 共用）
   plugin-api/       @launcher/api —— 插件页 SDK（postMessage 客户端）
   plugin-api-node/  @launcher/api-node —— 脚本 SDK（ctx/log/progress/done/fail/storage/onQuery）
+  ui/               @launcher/ui —— 插件 UI 套件：设计令牌 + AppShell / UiIcon / UiDialog + virtual / clipboard / keys / theme / toast
 plugins/            出厂插件（预装、机制与第三方完全相同；可禁用可卸载）
   app-launcher/     应用扫描 + 启动（macOS）｜ esbuild 工具链
   file-search/      Spotlight 文件搜索 + Finder 显示
   web-open/         网址直达 / 搜索引擎
   internal-settings/ 设置 + 插件管理（internal：不可卸载）
-  shared/           四个 Vue 插件共用（构建期打进各自产物）
-    build/          vite-shared.mjs（构建别名）+ manifest-plugin.mjs（清单裁剪）
-    lib/            virtual（虚拟滚动）/ clipboard / keys / theme / toast
-    ui/ styles/     AppShell / SofIcon / SofDialog + 设计令牌
   totp/             双重验证器（TOTP/HOTP + 扫码导入）｜ Vite + Vue
   hosts/            Hosts 管家（读写系统 hosts，含提权）
   text-diff/        文本比对（Myers 差分，Worker 内计算）

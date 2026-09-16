@@ -78,6 +78,21 @@ importers:
 
   packages/plugin-manifest: {}
 
+  packages/ui:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vite:
+        specifier: ^7.3.6
+        version: 7.3.6(@types/node@22.20.2)(jiti@2.7.0)(lightningcss@1.33.0)
+      vue:
+        specifier: ^3.5.42
+        version: 3.5.42(typescript@5.9.3)
+      vue-tsc:
+        specifier: ^3.3.11
+        version: 3.3.11(typescript@5.9.3)
+
   plugins/app-launcher:
     dependencies:
       '@launcher/api-node':
@@ -106,6 +121,9 @@ importers:
       '@launcher/api-node':
         specifier: workspace:*
         version: link:../../packages/plugin-api-node
+      '@launcher/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@5.9.3)
@@ -143,6 +161,9 @@ importers:
       '@launcher/api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
+      '@launcher/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@5.9.3)
@@ -171,6 +192,9 @@ importers:
       '@launcher/api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
+      '@launcher/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@5.9.3)
@@ -202,6 +226,9 @@ importers:
       '@launcher/api-node':
         specifier: workspace:*
         version: link:../../packages/plugin-api-node
+      '@launcher/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@5.9.3)

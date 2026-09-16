@@ -1,8 +1,8 @@
 @import "tailwindcss";
-@import "../../../shared/styles/theme.css";
+@import "../../../../packages/ui/styles/theme.css";
 
 @source "../";
-@source "../../../shared";
+@source "../../../../packages/ui";
 
 .launcher-code {
   font-family: var(--font-mono);

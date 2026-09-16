@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import UiDialog from '@shared/ui/UiDialog.vue'
-import UiIcon from '@shared/ui/UiIcon.vue'
-import { copyText, readClipboardText } from '@shared/lib/clipboard'
-import { useToast } from '@shared/lib/toast'
+import UiDialog from '@launcher/ui/UiDialog.vue'
+import UiIcon from '@launcher/ui/UiIcon.vue'
+import { copyText, readClipboardText } from '@launcher/ui/clipboard'
+import { useToast } from '@launcher/ui/toast'
 import { parseImportText, type EntryFields } from '../core/hosts'
 
 /**

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import UiDialog from '@shared/ui/UiDialog.vue'
-import UiIcon from '@shared/ui/UiIcon.vue'
-import { useToast } from '@shared/lib/toast'
-import { fileFromDataTransfer, pickFile, readClipboardImage, textFromDataTransfer } from '@shared/lib/clipboard'
+import UiDialog from '@launcher/ui/UiDialog.vue'
+import UiIcon from '@launcher/ui/UiIcon.vue'
+import { useToast } from '@launcher/ui/toast'
+import { fileFromDataTransfer, pickFile, readClipboardImage, textFromDataTransfer } from '@launcher/ui/clipboard'
 import { exec, host, screenshot } from '@launcher/api'
 import { decodeQrFromBlob, decodeQrFromVideo, warmupQr } from '../core/qr'
 import { isMigrationUri, isOtpAuthUri, parseOtpAuthUri } from '../core/otpauth'

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useVirtualList } from '@shared/lib/virtual'
+import { useVirtualList } from '@launcher/ui/virtual'
 import { highlightJsonLine } from '../core/highlight'
 import { indexLines, lineAt } from '../core/lineIndex'
 

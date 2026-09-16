@@ -1,9 +1,9 @@
 @import "tailwindcss";
-@import "../../../shared/styles/theme.css";
+@import "../../../../packages/ui/styles/theme.css";
 
 /* Tailwind v4 不会自动跨目录扫描，必须显式声明 */
 @source "../";
-@source "../../../shared";
+@source "../../../../packages/ui";
 
 .launcher-mono {
   font-family: var(--font-mono);

@@ -3,8 +3,8 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
-import { manifestPlugin } from '../shared/build/manifest-plugin.mjs'
-import { devFsAllow, sharedAliases } from '../shared/build/vite-shared.mjs'
+import { manifestPlugin } from '../../scripts/lib/manifest-plugin.mjs'
+import { devFsAllow, pluginAliases } from '../../scripts/lib/vite-plugin-vue.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 
@@ -13,7 +13,7 @@ export default defineConfig({
   // 宿主用本地 HTTP 服务托管插件目录，相对路径最稳
   base: './',
   plugins: [vue(), tailwindcss(), manifestPlugin({ root })],
-  resolve: { alias: sharedAliases(root) },
+  resolve: { alias: pluginAliases(root) },
   server: {
     fs: { allow: devFsAllow(root) },
   },

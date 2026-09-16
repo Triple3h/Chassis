@@ -41,9 +41,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.5.42",
+    "@launcher/ui": "workspace:*",
     "@launcher/api": "workspace:*",
     "@launcher/api-node": "workspace:*",
+    "vue": "^3.5.42",
     "zxing-wasm": "^3.1.4"
   },
   "devDependencies": {

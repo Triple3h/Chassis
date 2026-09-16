@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import UiIcon from '@shared/ui/UiIcon.vue'
+import UiIcon from '@launcher/ui/UiIcon.vue'
 import { ipWarning, isProtectedEntry, type EntryLine } from '../core/hosts'
 
 /**

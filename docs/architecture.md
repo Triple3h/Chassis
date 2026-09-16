@@ -191,7 +191,7 @@ active → degraded（脚本连续失败 3 次）
 | 插件 | 工具链 | 说明 |
 |---|---|---|
 | 内置（app-launcher / file-search / web-open / internal-settings） | esbuild，无框架 | 与底座同一套发布节奏 |
-| Vue 插件（totp / hosts / text-diff / json-tools） | Vite + Vue + Tailwind，共享 `plugins/shared/`（UI 积木 + 构建配置） | 2026-09-16 起与内置插件同目录维护、直连底座 SDK；见 `plugins/README.md` |
+| Vue 插件（totp / hosts / text-diff / json-tools） | Vite + Vue + Tailwind，共享 `packages/ui/`（UI 积木 + 构建配置） | 2026-09-16 起与内置插件同目录维护、直连底座 SDK；见 `plugins/README.md` |
 
 开发态从仓库根加载：内核 `--builtin-plugins` 接受**逗号分隔的多个目录**（默认 `plugins/`），
 壳的开发态回退指向同一处；打包时 `scripts/lib/resources.mjs` 把各插件的 `dist/` 拷进 `builtin-plugins/`。
@@ -215,7 +215,7 @@ active → degraded（脚本连续失败 3 次）
 | D9 | §11 契约测试用 `echo-plugin` | 已实现（`tests/fixtures/echo-plugin` + `tests/contract/*.test.ts`，真 HTTP） | — |
 | D10 | §10「主线程 > 50ms 的必须进 Worker」（拼音索引构建、大文件解析） | 拼音索引规模小（命令级），暂未进 Worker；历史文件 ≤ 2000 条，读取在毫秒级 | 记为待办：命令数量破千或历史破万时迁移 |
 | D11 | §6.3 打包体积/冷启动指标 | 未测（M4 待做）；`scripts/build-shell.mjs` 已就绪 | 需要真机 `tauri build` 后才能测 |
-| D12 | §8.10 与第三方旧宿主（Sofast）的兼容层 | **不做兼容**（2026-09-16 起）：桥只认原生信封 `__launcher: 1`，清单校验不再为旧前缀放行 `apiVersion` / `capabilities` 缺省，旧布局数据迁移一并移除 | 半兼容的代价是长期维护两套语义，还会把"未实现的能力"伪装成"能用"；底座与插件同仓库，没有历史包袱要背 |
+| D12 | §8.10 与第三方旧宿主的兼容层 | **不做兼容**（2026-09-16 起）：桥只认原生信封 `__launcher: 1`，清单校验不放过 `apiVersion` / `capabilities` 缺省，旧布局数据迁移一并移除 | 半兼容的代价是长期维护两套语义，还会把"未实现的能力"伪装成"能用"；底座与插件同仓库，没有历史包袱要背 |
 | D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
 | D13 | §7.5 「拼音匹配」 | 用 `pinyin-pro`（ZTools 同选型） | 需求 §12 风险对策明确要求"用成熟库" |
 | D14 | 未规定 plist 读取方式 | 自研 `plugins/app-launcher/src/core/plist.ts`（binary + XML 只读） | `simple-plist` 内部是运行时 `require`，打不进自包含产物（违反 N1）；`build-plugin.mjs` 现在会校验产物只含 `node:*` 依赖 |

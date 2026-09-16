@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import UiDialog from '@shared/ui/UiDialog.vue'
-import UiIcon from '@shared/ui/UiIcon.vue'
+import UiDialog from '@launcher/ui/UiDialog.vue'
+import UiIcon from '@launcher/ui/UiIcon.vue'
 import type { Snapshot } from '../core/snapshots'
 
 /**

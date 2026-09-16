@@ -1,9 +1,9 @@
 @import "tailwindcss";
-@import "../../../shared/styles/theme.css";
+@import "../../../../packages/ui/styles/theme.css";
 
-/* 显式声明扫描范围：插件自身 src 与 shared 组件（Tailwind v4 不会自动跨界扫描） */
+/* 显式声明扫描范围：插件自身 src 与 @launcher/ui 组件（Tailwind v4 不会自动跨界扫描） */
 @source "../";
-@source "../../../shared";
+@source "../../../../packages/ui";
 
 /* JSON 语法高亮配色（跟随主题变量） */
 .launcher-hl-key {
