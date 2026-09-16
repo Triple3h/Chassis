@@ -79,6 +79,8 @@ let config: ConfigLike | null = null
 let plugins: PluginLike[] = []
 let audit: AuditLike[] = []
 let activeTab: TabId = 'general'
+/** 会话 URL 带来的宿主主题，`config` 还没拉回来时先用它兜底 */
+let urlTheme: string | null = null
 
 // ── 插件页（主从两栏）状态 ──────────────────────────────────────
 type PluginFilter = 'all' | 'active' | 'disabled' | 'error'
@@ -127,6 +129,26 @@ async function guard<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
     toast(err instanceof Error ? err.message : '操作失败')
     return fallback
   }
+}
+
+function prefersDark(): boolean {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 外观就地生效：主题 / 主题色都是在本页改的，改完不反映到本页就会被当成「没生效」。
+ *
+ * 其它插件页不跟随主题色 —— 会话 URL 只带 `theme`（plugin-spec §5.3）；
+ * 这一页能跟是因为新配置就在 patch 的返回值里，不必再问宿主。
+ */
+function applyAppearance(): void {
+  const wanted = config?.theme && config.theme !== 'system' ? config.theme : urlTheme
+  document.documentElement.dataset.theme = wanted === 'light' || wanted === 'dark' ? wanted : prefersDark() ? 'dark' : 'light'
+  if (config?.accent) document.documentElement.style.setProperty('--accent', config.accent)
 }
 
 function stateBadge(plugin: PluginLike): string {
@@ -570,6 +592,7 @@ async function patch(patchValue: Record<string, unknown>, message = '已保存')
   const result = await guard(() => settings.patch(patchValue), null)
   if (!result) return
   config = result.config as ConfigLike
+  applyAppearance()
   if (result.hotkey && !result.hotkey.ok) toast(`热键注册失败：${result.hotkey.reason ?? '可能被占用'}`)
   else toast(message)
   render()
@@ -959,6 +982,7 @@ async function boot(): Promise<void> {
   }
   const cfg = await guard(() => settings.get(), null)
   config = cfg as ConfigLike | null
+  applyAppearance()
   const hostInfo = await guard(() => settings.info(), null)
   if (hostInfo) aboutInfo = { ...aboutInfo, ...hostInfo }
 

@@ -142,11 +142,11 @@ active → degraded（脚本连续失败 3 次）
 | POST | `/api/search` | `{ query }` → `{ token, groups, pending }` |
 | POST | `/api/exec` | 执行结果项 / 指定命令 / ActionDecl |
 | POST | `/api/invoke` | 按全局命令 id 执行（托盘、测试用） |
-| GET | `/api/events` | SSE：`registry/changed`、`plugin/state`、`plugin/reloaded`、`session/closed`、`history/changed`、`search/query`、`ui/*`、`shell/visibility`… |
+| GET | `/api/events` | SSE：`registry/changed`、`config/changed`、`plugin/state`、`plugin/reloaded`、`session/closed`、`history/changed`、`search/query`、`ui/*`、`shell/visibility`… |
 | POST | `/api/bridge` | 插件页调用转发（token 校验 + 审计） |
 | POST | `/api/session/close`、`/api/session/crashed` | 会话回收 / 崩溃上报 |
 | POST | `/api/pinned/toggle`、`/api/pinned/reorder`、`/api/history/*` | 固定与历史 |
-| POST | `/api/config`、`/api/ui/theme` | 配置与主题 |
+| POST | `/api/config`、`/api/ui/theme` | 配置与主题（配置写成功后广播 `config/changed`，UI 据此即时重设主题 / 主题色 / 密度） |
 | POST | `/api/plugins/action` | 插件管理（与托盘、设置面板共用 `Kernel.pluginAction`） |
 | POST | `/api/dev/register` | 开发模式把 devUrl 挂到内核 |
 | POST | `/api/window/*`、`/api/app/*`、`/api/data/openDir` | 转发壳原语 |

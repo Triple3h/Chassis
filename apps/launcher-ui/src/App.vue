@@ -281,8 +281,10 @@ function measure(): void {
 
 watch(desiredHeight, (height) => setWindowHeight(height))
 
+// 外观三项都要盯住：设置页改主题色 / 密度后内核会广播 `config/changed`，
+// 只监听 theme 的话另外两项要等下次重载才生效（用户看到的就是「改了没反应」）。
 watch(
-  () => data.config?.theme,
+  () => [data.config?.theme, data.config?.accent, data.config?.density],
   () => applyTheme(),
 )
 

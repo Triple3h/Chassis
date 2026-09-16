@@ -4,6 +4,7 @@ export type Disposer = () => void
 
 export type KernelEvent =
   | 'registry/changed'
+  | 'config/changed'
   | 'plugin/state'
   | 'plugin/reloaded'
   | 'session/closed'

@@ -161,6 +161,7 @@ export function subscribeEvents(
     }
     for (const name of [
       'registry/changed',
+      'config/changed',
       'plugin/state',
       'plugin/reloaded',
       'session/closed',

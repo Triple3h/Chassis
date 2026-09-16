@@ -137,6 +137,9 @@ export function registerApi(kernel: Kernel): void {
     const before = kernel.config.get()
     const next = await kernel.config.patch(patch as never)
     if (next.historyLimit !== before.historyLimit) kernel.history.setHistoryLimit(next.historyLimit)
+    // 配置变了一律广播：主题 / 主题色 / 密度只有 UI 知道怎么落到 CSS 变量上，
+    // 不广播就只能等下一次 `plugin/state`（改插件）或重启才生效 —— 表现出来就是「改了主题色没反应」。
+    kernel.emit('config/changed', { config: next })
     if (next.hotkey.accelerator !== before.hotkey.accelerator) {
       const result = await kernel.applyHotkey(next)
       return { ok: true, config: next, hotkey: result }

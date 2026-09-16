@@ -78,6 +78,10 @@ export const useDataStore = defineStore('data', () => {
     if (event === 'registry/changed' || event === 'plugin/state') {
       void loadConfig().catch(() => undefined)
       void runSearch(lastQuery).catch(() => undefined)
+    } else if (event === 'config/changed') {
+      // 设置页改外观时走这条：payload 直接带新配置，不必再往返一次 /api/bootstrap
+      const cfg = (payload as { config?: Config } | null)?.config
+      if (cfg) config.value = cfg
     } else if (event === 'history/changed' || event === 'pinned/changed') {
       void refreshLists().catch(() => undefined)
       void runSearch(lastQuery).catch(() => undefined)
