@@ -24,6 +24,18 @@ import { createSettingsService, type SettingsHost, type SettingsService } from '
 import type { ExecContext, KernelEvent } from './types'
 import { itemKey } from './util/text'
 
+/**
+ * 窗口「演完再走」的时长（ms）。
+ *
+ * 透明无边框窗口的弹出感全靠这段时间：内核先把 `shell/visibility(false)` 广播出去，
+ * UI 拿到后播 scale + 淡出，等它收干净了内核才真正调壳隐藏窗口。
+ * 取 130ms 是为了比 CSS 的离场时长（140ms 令牌里的 `--motion-fast`）**略短**：
+ * 宁可提前几毫秒落地（动画被打断时几乎看不出），也不要让用户多等。
+ */
+export const HIDE_ANIMATION_MS = 130
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
 export interface KernelOptions {
   dataRoot: string
   /** 出厂插件根目录（可多个；开发态默认就是仓库根的 `plugins/`） */
@@ -79,6 +91,10 @@ export class Kernel {
   private binder!: ReturnType<typeof createKernelServices>['binder']
   private started = false
   private readyFlag = false
+  /** 正在「演离场」的那次隐藏（同一时刻只允许一次） */
+  private pendingHide: Promise<void> | null = null
+  /** 撤销令牌：唤出时 +1，让已经排队的隐藏落地前自己失效 */
+  private hideToken = 0
 
   constructor(private readonly opts: KernelOptions) {
     this.config = new ConfigStore(opts.dataRoot)
@@ -87,10 +103,7 @@ export class Kernel {
     this.storage = new PluginStorage(opts.dataRoot, this.audit)
     this.quicklinks = new QuicklinkStore(opts.dataRoot, this.audit)
     this.primitives = new Primitives(this.link, this.audit)
-    this.hostUi = new HostUiBridge(this.bus, this.audit, async () => {
-      await this.primitives.hideWindow()
-      this.bus.emit('shell/visibility', { visible: false })
-    })
+    this.hostUi = new HostUiBridge(this.bus, this.audit, () => this.hideWindowAnimated())
 
     this.exec = new ScriptRuntime({
       resolvePluginDir: (pluginId) => this.plugins?.dirOf(pluginId),
@@ -234,6 +247,8 @@ export class Kernel {
   }
 
   async stop(): Promise<void> {
+    // 收尾时把还没落地的隐藏丢掉：否则定时器会在 UI 服务停掉之后再去敲壳
+    this.cancelPendingHide()
     await this.plugins.dispose()
     await this.exec.shutdown()
     await this.servers.stopAll()
@@ -284,7 +299,7 @@ export class Kernel {
   async handleTrayMenu(id: string): Promise<void> {
     switch (id) {
       case 'show':
-        await this.primitives.showWindow(true)
+        await this.showWindowAnimated(true)
         break
       case 'settings':
         await this.invoke('internal-settings:settings', undefined, 'host')
@@ -308,6 +323,49 @@ export class Kernel {
     await this.stop()
     await this.primitives.quit().catch(() => undefined)
     process.exit(0)
+  }
+
+  // ── 窗口显隐的唯一收口（与壳的分工见 tests/contract/shell-link.test.ts）──
+  //
+  // 壳仍然独占「什么时候该显、什么时候该隐」的裁决权，内核只负责**让这次显隐好看一点**：
+  // 把广播和真正落地拆成两步，中间留给 UI 播动画的时间。所有跨进程路径都必须走这两个方法，
+  // 否则就会出现「有的入口有动画、有的入口啪一下」这种最难查的不一致。
+
+  /** 显示窗口：先落地再广播（用户已经看到窗口了，广播只是让 UI 决定要不要补入场动画） */
+  async showWindowAnimated(focus = true): Promise<void> {
+    this.cancelPendingHide()
+    await this.primitives.showWindow(focus)
+    this.bus.emit('shell/visibility', { visible: true })
+  }
+
+  /**
+   * 隐藏窗口：先广播、等 UI 演完、再真正隐藏。
+   *
+   * 重复调用会搭同一班车（一次 `ctx.hostUi.hide` 会同时从内核和 UI 两条路走回来，
+   * 重启计时器只会让窗口多赖 130ms）。
+   */
+  async hideWindowAnimated(): Promise<void> {
+    if (this.pendingHide) return this.pendingHide
+    this.bus.emit('shell/visibility', { visible: false })
+    const token = ++this.hideToken
+    const pending = (async () => {
+      await delay(HIDE_ANIMATION_MS)
+      // 令牌被换过 = 这次已经作废（被唤出撤销、或已排了新的一次），
+      // 什么都不动直接退场：状态归当前那一次管
+      if (token !== this.hideToken) return
+      this.pendingHide = null
+      // 只有**明确知道**已经被藏掉了才跳过；问不到（壳没连上）就照常走，隐藏本身会失败并静默
+      if ((await this.primitives.isVisible()) === false) return
+      await this.primitives.hideWindow().catch(() => undefined)
+    })()
+    this.pendingHide = pending
+    return pending
+  }
+
+  /** 撤销尚在排队的隐藏（热键连按不能被上一次隐藏偷走窗口） */
+  cancelPendingHide(): void {
+    this.hideToken += 1
+    this.pendingHide = null
   }
 
   /** 执行命令（入口：UI / 插件 / 宿主） */
@@ -445,8 +503,7 @@ export class Kernel {
           return { ok: true, kind: 'host' }
         }
         if (action.method === 'hostUi.hide') {
-          await this.primitives.hideWindow()
-          this.bus.emit('shell/visibility', { visible: false })
+          await this.hideWindowAnimated()
           return { ok: true, kind: 'host', hideLauncher: true }
         }
         return { ok: false, kind: 'host', error: { code: 'NOT_FOUND', message: `未知 host 方法：${String(action.method)}` } }

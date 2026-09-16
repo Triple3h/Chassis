@@ -25,6 +25,7 @@ import {
   type ResultGroup,
 } from './lib/grid'
 import { formatKeys, matchChord } from './lib/keys'
+import { setWindowHeight } from './lib/windowMotion'
 import { useDataStore } from './stores/data'
 import { useUiStore, type FooterButtonView, type PluginViewState } from './stores/ui'
 import type { ActionResult, ResultItem } from '@launcher/plugin-manifest'
@@ -39,6 +40,28 @@ const viewportHeight = ref(420)
 /** 网格容器实测宽度 → 列数（窗口固定 720，通常恒为 7 列） */
 const containerWidth = ref(720)
 let disposeEvents: (() => void) | null = null
+
+/**
+ * 窗口是否已被壳藏起来 —— 整个「弹窗动效」的总开关。
+ *
+ * 初值取 `false`（当作可见）是刻意的：万一可见性事件因为任何原因没到，
+ * 最坏结果只是少一次入场动画，而反过来（默认不可见）会让整个启动台变成一片透明。
+ * 挂载时再问内核一次，把「用户提前按了热键」这种情况校正回来。
+ */
+const windowHidden = ref(false)
+/** 是否已经收到过 shell/visibility；事件永远比启动时的查询新，收到过就不再采纳查询结果 */
+let sawVisibilityEvent = false
+
+/**
+ * 兜底：窗口自己拿到焦点 ⇒ 它不可能是隐藏的。
+ *
+ * 兜的是「事件丢了」这一类意外（SSE 还没连上 / 断线重连期间刚好唤出）。
+ * 一旦漏掉那次广播，界面会停在 opacity 0 —— 窗口是出来了，但用户看到的是一片透明，
+ * 比少一次动画严重得多。焦点事件在宿主、webview、UI 三处都不需要额外协议，代价为零。
+ */
+function clearHiddenByFocus(): void {
+  windowHidden.value = false
+}
 
 const metrics = computed<GridMetrics>(() => GRID_METRICS[data.config?.density === 'compact' ? 'compact' : 'comfortable'])
 const columns = computed(() => columnsFor(containerWidth.value))
@@ -81,23 +104,32 @@ onMounted(async () => {
   disposeEvents = subscribeAll()
   window.addEventListener('keydown', onKeydown, true)
   window.addEventListener('resize', measure)
+  window.addEventListener('focus', clearHiddenByFocus)
   measure()
   searchBox.value?.focus()
+  // 触发点可能是「壳在 UI 加载完之前就显示过窗口」：只有问内核才知道当前该不该播入场动画。
+  // 只在**明确**回答 false 时收起界面 —— null 表示内核问不到壳（standalone / `pnpm dev`），
+  // 那种情况下根本没有"窗口隐藏"这回事，当成隐藏就是把自己藏没了。
+  void api
+    .windowVisible()
+    .then((res) => {
+      if (!sawVisibilityEvent && res.visible === false) windowHidden.value = true
+    })
+    .catch(() => undefined)
 })
 
 onUnmounted(() => {
   disposeEvents?.()
   window.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('resize', measure)
+  window.removeEventListener('focus', clearHiddenByFocus)
 })
 
 function measure(): void {
   viewportHeight.value = Math.max(120, window.innerHeight - SEARCH_BAR_HEIGHT - FOOTER_HEIGHT - 18)
 }
 
-watch(desiredHeight, (height) => {
-  void api.setWindowHeight(height).catch(() => undefined)
-})
+watch(desiredHeight, (height) => setWindowHeight(height))
 
 watch(
   () => data.config?.theme,
@@ -157,6 +189,11 @@ function handleKernelEvent(event: string, payload: unknown): void {
   if (event === 'ui/searchContent') {
     const value = (payload as { value?: string })?.value ?? ''
     ui.setQuery(value)
+    return
+  }
+  if (event === 'shell/visibility') {
+    sawVisibilityEvent = true
+    windowHidden.value = (payload as { visible?: boolean })?.visible === false
     return
   }
   if (event === 'ui/hide') {
@@ -520,7 +557,7 @@ const defaultHints = computed(() => {
 </script>
 
 <template>
-  <div class="shell">
+  <div class="shell" :class="{ 'is-window-hidden': windowHidden }">
     <!-- 插件视图 -->
     <template v-if="ui.inPluginView && ui.pluginView">
       <PluginView
@@ -565,42 +602,48 @@ const defaultHints = computed(() => {
           }}</span>
         </div>
 
-        <DetailPanel
-          v-if="ui.detailOpen && selectedResult?.item.detail"
-          :title="selectedResult.item.title"
-          :text="selectedResult.item.detail"
-          @close="ui.detailOpen = false"
-        />
+        <Transition name="motion-slide-right" :duration="{ enter: 200, leave: 140 }">
+          <DetailPanel
+            v-if="ui.detailOpen && selectedResult?.item.detail"
+            :title="selectedResult.item.title"
+            :text="selectedResult.item.detail"
+            @close="ui.detailOpen = false"
+          />
+        </Transition>
       </div>
       <FooterBar v-if="items.length > 0" :buttons="ui.footer" :default-hints="defaultHints" @action="onFooterAction" />
     </template>
 
-    <ActionsMenu
-      v-if="ui.actionsOpen && selectedResult"
-      :x="ui.actionsAnchor.x"
-      :y="ui.actionsAnchor.y"
-      :pinned="Boolean(selectedResult.pinned)"
-      :from-history="Boolean(selectedResult.fromHistory)"
-      :can-reveal="!selectedResult.stale"
-      :can-disable="!selectedResult.stale"
-      :plugin-id="selectedResult.pluginId"
-      :plugin-title="selectedResult.pluginTitle"
-      :extra="extraActions"
-      @close="ui.actionsOpen = false"
-      @toggle-pin="togglePin"
-      @copy-title="copyTitle"
-      @remove-history="removeFromHistory"
-      @reveal="revealPlugin"
-      @disable="disablePlugin"
-      @uninstall="uninstallPlugin"
-      @run-extra="runExtraAction"
-    />
+    <Transition name="motion-menu" :duration="{ enter: 140, leave: 90 }">
+      <ActionsMenu
+        v-if="ui.actionsOpen && selectedResult"
+        :x="ui.actionsAnchor.x"
+        :y="ui.actionsAnchor.y"
+        :pinned="Boolean(selectedResult.pinned)"
+        :from-history="Boolean(selectedResult.fromHistory)"
+        :can-reveal="!selectedResult.stale"
+        :can-disable="!selectedResult.stale"
+        :plugin-id="selectedResult.pluginId"
+        :plugin-title="selectedResult.pluginTitle"
+        :extra="extraActions"
+        @close="ui.actionsOpen = false"
+        @toggle-pin="togglePin"
+        @copy-title="copyTitle"
+        @remove-history="removeFromHistory"
+        @reveal="revealPlugin"
+        @disable="disablePlugin"
+        @uninstall="uninstallPlugin"
+        @run-extra="runExtraAction"
+      />
+    </Transition>
 
-    <div
-      v-if="ui.toast"
-      class="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-[12px] shadow-lg"
-    >
-      {{ ui.toast }}
-    </div>
+    <Transition name="motion-toast" :duration="{ enter: 200, leave: 140 }">
+      <div
+        v-if="ui.toast"
+        class="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-[12px] shadow-lg"
+      >
+        {{ ui.toast }}
+      </div>
+    </Transition>
   </div>
 </template>

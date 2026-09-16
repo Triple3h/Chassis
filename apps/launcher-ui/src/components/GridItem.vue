@@ -113,15 +113,27 @@ const nameStyle = computed(() => {
   cursor: default;
   user-select: none;
   overflow: hidden;
-  transition: background-color 0.12s ease;
+  /* 四个状态的过渡一次写全：选中、置灰、拖起、落点。
+     以前只有背景色有过渡，其余三个是瞬跳，一起用才像同一套手感。 */
+  transition:
+    background-color var(--motion-instant) var(--motion-ease-move),
+    opacity var(--motion-instant) var(--motion-ease-move),
+    box-shadow var(--motion-instant) var(--motion-ease-move),
+    transform var(--motion-instant) var(--motion-ease-move);
 }
 
 .grid-item.is-selected {
   background: var(--sel);
 }
 
+/* 按下去「陷」一下：结果项点下去就执行，这是唯一能给的触感 */
+.grid-item:active:not(.is-dragging) {
+  transform: scale(0.97);
+}
+
 .grid-item.is-dragging {
   opacity: 0.4;
+  transform: scale(0.94);
 }
 
 .grid-item.is-drop-target {

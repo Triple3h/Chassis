@@ -31,6 +31,38 @@
   --sel: color-mix(in srgb, var(--color-accent) 14%, transparent);
   --panel: rgba(248, 250, 252, 0.96);
   --shadow: 0 24px 60px rgba(15, 23, 42, 0.22), 0 2px 8px rgba(15, 23, 42, 0.08);
+
+  /* ── 动效令牌 ────────────────────────────────────────────────
+     全仓库动效的唯一来源（插件侧同名镜像见 packages/ui/styles/theme.css）。
+     刻意不叫 --ease-* / --duration-*：那是 Tailwind 的命名空间，同名会被覆盖。
+     时长只留四档、曲线只留四条 —— 想加第五档之前先问「现有的哪一档不够用」。 */
+  --motion-instant: 90ms; /* 按压反馈、hover */
+  --motion-fast: 140ms; /* 离场、小元件 */
+  --motion-base: 200ms; /* 进场、面板 */
+  --motion-slow: 320ms; /* 大块内容（骨架淡出） */
+
+  --motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1); /* 强减速：进场「落到位」 */
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1); /* 加速：离场「果断走」 */
+  --motion-ease-move: cubic-bezier(0.4, 0, 0.2, 1); /* 位移 / 颜色变化 */
+  --motion-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1); /* 轻微过冲：只给「弹出」用 */
+
+  /* 窗口弹出：起点缩放与位移，改这两个值即可整体调整弹窗手感 */
+  --motion-pop-scale: 0.97;
+  --motion-pop-shift: -6px;
+}
+
+/* 降级开关只动令牌本身：所有消费者自动跟随，不需要在组件里再写一遍媒体查询。
+   保留透明度变化（属于「淡入淡出」而非位移，无障碍规范普遍接受），只压掉位移/缩放。 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 1ms;
+    --motion-fast: 1ms;
+    --motion-base: 1ms;
+    --motion-slow: 1ms;
+    --motion-pop-scale: 1;
+    --motion-pop-shift: 0px;
+    --motion-ease-spring: linear;
+  }
 }
 
 [data-theme='dark'] {
@@ -61,6 +93,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── 窗口弹入 / 弹出（对标 macOS 面板：从略小略高处落下，走强减速曲线）──────
+   用「两个稳定态之间做 transition」而不是 keyframes 动画：
+   隐藏态本身就是一个静止态（opacity 0），所以唤出时不需要「重启动画」那套 hack，
+   而且窗口被壳提前隐藏、webview 暂停渲染时也不会把元素卡在动画中途。 */
 .shell {
   background: var(--bg);
   backdrop-filter: blur(24px) saturate(180%);
@@ -71,6 +107,20 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  transform-origin: 50% 38%;
+  transition:
+    opacity var(--motion-base) var(--motion-ease-enter),
+    transform var(--motion-base) var(--motion-ease-enter);
+}
+
+/* 窗口已被壳隐藏（或正在隐藏）：收得更快、用加速曲线，不拖泥带水 */
+.shell.is-window-hidden {
+  opacity: 0;
+  transform: scale(var(--motion-pop-scale)) translateY(var(--motion-pop-shift));
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
+  pointer-events: none;
 }
 
 .hairline {
@@ -99,6 +149,92 @@ body {
   color: var(--fg-muted);
   font-size: 10.5px;
   font-family: inherit;
+}
+
+/* ── 共享过渡（Vue <Transition name="...">）────────────────────────
+   进场一律「更快到位」、离场一律「比进场短」：离场是用户已经在等结果的动作，
+   拖长时间只会让人觉得卡，而不是优雅。
+   组件里请同时传 :duration，让收尾走定时器而不是 transitionend ——
+   窗口一旦被隐藏，webview 会暂停渲染，靠事件的收尾可能永远等不到。 */
+.motion-fade-enter-active {
+  transition: opacity var(--motion-base) var(--motion-ease-enter);
+}
+.motion-fade-leave-active {
+  transition: opacity var(--motion-fast) var(--motion-ease-exit);
+}
+.motion-fade-enter-from,
+.motion-fade-leave-to {
+  opacity: 0;
+}
+
+/* 居中的弹出层：对话框、插件视图 */
+.motion-pop-enter-active {
+  transition:
+    opacity var(--motion-base) var(--motion-ease-enter),
+    transform var(--motion-base) var(--motion-ease-spring);
+}
+.motion-pop-leave-active {
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
+}
+.motion-pop-enter-from,
+.motion-pop-leave-to {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+/* 贴边滑出的二级面板（详情）：沿 X 轴走，别用缩放 —— 它贴着窗口右边 */
+.motion-slide-right-enter-active {
+  transition:
+    opacity var(--motion-base) var(--motion-ease-enter),
+    transform var(--motion-base) var(--motion-ease-enter);
+}
+.motion-slide-right-leave-active {
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
+}
+.motion-slide-right-enter-from,
+.motion-slide-right-leave-to {
+  opacity: 0;
+  transform: translateX(18px);
+}
+
+/* 锚点弹出（右键菜单）：从鼠标 / 格子那一侧长出来，用 --motion-origin 指定原点 */
+.motion-menu-enter-active {
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-enter),
+    transform var(--motion-fast) var(--motion-ease-spring);
+  transform-origin: var(--motion-origin, top left);
+}
+.motion-menu-leave-active {
+  transition:
+    opacity var(--motion-instant) var(--motion-ease-exit),
+    transform var(--motion-instant) var(--motion-ease-exit);
+  transform-origin: var(--motion-origin, top left);
+}
+.motion-menu-enter-from,
+.motion-menu-leave-to {
+  opacity: 0;
+  transform: scale(0.94);
+}
+
+/* 底部轻提示：上滑一小段，位移要小到「感觉到」而不是「看到」 */
+.motion-toast-enter-active {
+  transition:
+    opacity var(--motion-base) var(--motion-ease-enter),
+    transform var(--motion-base) var(--motion-ease-spring);
+}
+.motion-toast-leave-active {
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
+}
+.motion-toast-enter-from,
+.motion-toast-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.97);
 }
 
 ::-webkit-scrollbar {

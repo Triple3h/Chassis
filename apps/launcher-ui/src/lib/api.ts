@@ -116,6 +116,8 @@ export const api = {
     request<{ ok: boolean }>('/api/window/setHeight', { method: 'POST', body: JSON.stringify({ height }) }),
   hideWindow: () => request<{ ok: boolean }>('/api/window/hide', { method: 'POST' }),
   showWindow: () => request<{ ok: boolean }>('/api/window/show', { method: 'POST' }),
+  /** `visible` 为 `null` = 内核问不到壳（standalone / 浏览器开发），此时一律当可见处理 */
+  windowVisible: () => request<{ ok: boolean; visible: boolean | null }>('/api/window/visible'),
   reportTheme: (theme: 'light' | 'dark') =>
     request<{ ok: boolean }>('/api/ui/theme', { method: 'POST', body: JSON.stringify({ theme }) }),
   audit: (limit = 200) => request<{ ok: boolean; records: AuditRecord[] }>(`/api/audit?limit=${limit}`),

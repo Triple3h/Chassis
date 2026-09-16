@@ -283,6 +283,19 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 `packages/ui/styles/theme.css`：`:root` / `[data-theme="dark"]` 两套 CSS 变量 → `@theme inline` 桥接成 Tailwind 工具类（`bg-panel` / `text-muted` / `border-line` …）。
 视觉基调对齐宿主：8px 圆角、低饱和描边、`padding: 10px` 的行高、14px 正文。
 
+动效同样有令牌，**不要自己写死时长和缓动**（与宿主 `apps/launcher-ui/src/styles/app.css` 同值同档，见 ADR-0004）：
+
+| 令牌 | 用途 |
+|---|---|
+| `--launcher-motion-instant` / `-fast` / `-base` / `-slow` | 90 / 140 / 200 / 320ms 四档 |
+| `--launcher-ease-enter` | 进场（强减速） |
+| `--launcher-ease-exit` | 离场（加速，**一律比进场短**） |
+| `--launcher-ease-move` | 位移与颜色 |
+| `--launcher-ease-spring` | 只给"弹出"用（轻微过冲） |
+
+`prefers-reduced-motion` 已在这套令牌里统一降级，插件侧不需要再写媒体查询。
+现成可用的过渡类：`launcher-fade`（纯淡入淡出）、`launcher-toast`（上浮）、`launcher-mask` + `.launcher-dialog-pop`（模态遮罩与面板）。
+
 ### 4.5 复用件
 
 | 引用 | 作用 |

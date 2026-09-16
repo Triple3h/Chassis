@@ -27,9 +27,9 @@ defineExpose({ toggleTheme: toggle })
   <div class="relative h-full w-full flex flex-col bg-bg text-fg overflow-hidden">
     <slot />
 
-    <!-- 轻提示 -->
+    <!-- 轻提示：显式给 duration，收尾走定时器而不是 transitionend（宿主隐藏窗口会暂停渲染） -->
     <div class="pointer-events-none fixed inset-x-0 bottom-14 z-50 flex flex-col items-center gap-1.5">
-      <TransitionGroup name="launcher-fade">
+      <TransitionGroup name="launcher-toast" :duration="{ enter: 200, leave: 140 }">
         <div
           v-for="t in items"
           :key="t.id"

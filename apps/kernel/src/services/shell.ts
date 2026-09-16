@@ -93,11 +93,19 @@ export class Primitives {
     await this.link.request('window.hide')
   }
 
-  async isVisible(): Promise<boolean> {
+  /**
+   * 窗口当前是否可见。**问不到就返回 `null`，绝不退化成 `false`。**
+   *
+   * 「壳没连上（standalone / `pnpm dev`）」和「窗口确实被藏起来了」是两件完全不同的事。
+   * 混成一个 `false` 的后果不是少一次动画，而是 UI 把整个界面调成透明
+   * —— 浏览器里开发启动台时会直接白屏，且现象完全不指向根因。
+   */
+  async isVisible(): Promise<boolean | null> {
+    if (!this.link.connected) return null
     try {
       return Boolean(await this.link.request<boolean>('window.isVisible'))
     } catch {
-      return false
+      return null
     }
   }
 

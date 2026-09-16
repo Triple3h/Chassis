@@ -28,6 +28,8 @@ pub fn run() {
         // 单实例：第二次启动只唤起已运行实例
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             let _ = primitives::window::show(app, &json!({ "focus": true }));
+            // 这条路径以前只 show 不回报：UI 若停在"已隐藏"的透明态，窗口唤出来会是空的
+            primitives::window::notify_toggled(app, true);
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
@@ -156,6 +158,8 @@ pub fn run() {
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.hide();
+                    // 与热键 / 托盘同一条规矩：谁真正改了显隐，谁就把结果报给内核
+                    primitives::window::notify_toggled(window.app_handle(), false);
                 }
                 _ => {}
             }

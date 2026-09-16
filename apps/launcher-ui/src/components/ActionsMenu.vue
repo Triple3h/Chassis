@@ -28,13 +28,21 @@ const emit = defineEmits<{
 
 const el = ref<HTMLElement | null>(null)
 const pos = ref({ left: props.x, top: props.y })
+/** 缩放原点：从锚点那一侧长出来（--motion-origin 由 .motion-menu-* 消费） */
+const origin = ref('top left')
 
 onMounted(() => {
   const rect = el.value?.getBoundingClientRect()
   if (!rect) return
   const maxX = window.innerWidth - rect.width - 8
   const maxY = window.innerHeight - rect.height - 8
-  pos.value = { left: Math.max(8, Math.min(props.x, maxX)), top: Math.max(8, Math.min(props.y, maxY)) }
+  const left = Math.max(8, Math.min(props.x, maxX))
+  const top = Math.max(8, Math.min(props.y, maxY))
+  pos.value = { left, top }
+  // 锚点换算成菜单内的相对坐标，再夹进菜单盒子 —— 贴边被推回来时原点也不会跑到菜单外
+  const ox = Math.max(0, Math.min(props.x - left, rect.width))
+  const oy = Math.max(0, Math.min(props.y - top, rect.height))
+  origin.value = `${Math.round(ox)}px ${Math.round(oy)}px`
   window.addEventListener('mousedown', onOutside, true)
   window.addEventListener('keydown', onKey, true)
 })
@@ -90,15 +98,15 @@ const items = computed(() => {
 <template>
   <div
     ref="el"
-    class="fixed z-50 min-w-[220px] rounded-[10px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur-xl py-1 shadow-[0_16px_40px_rgba(0,0,0,0.35)]"
-    :style="{ left: `${pos.left}px`, top: `${pos.top}px` }"
+    class="menu fixed z-50 min-w-[220px] rounded-[10px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur-xl py-1 shadow-[0_16px_40px_rgba(0,0,0,0.35)]"
+    :style="{ left: `${pos.left}px`, top: `${pos.top}px`, '--motion-origin': origin }"
   >
     <div class="px-3 py-1 text-[10.5px] text-[var(--fg-muted)] uppercase tracking-wider">{{ pluginTitle }}</div>
     <button
       v-for="item in items"
       :key="item.id"
       type="button"
-      class="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-[var(--hover)]"
+      class="menu-item w-full flex items-center gap-2.5 px-3 py-1.5 text-left"
       :class="item.danger ? 'text-red-400' : ''"
       @click="
         () => {
@@ -112,3 +120,20 @@ const items = computed(() => {
     </button>
   </div>
 </template>
+
+<style scoped>
+.menu-item {
+  transition:
+    background-color var(--motion-instant) var(--motion-ease-move),
+    color var(--motion-instant) var(--motion-ease-move);
+}
+
+.menu-item:hover {
+  background: var(--hover);
+}
+
+/* 按压反馈：菜单点下去的那一下要有回应，否则点了没反应会觉得是没点上 */
+.menu-item:active {
+  background: var(--sel);
+}
+</style>

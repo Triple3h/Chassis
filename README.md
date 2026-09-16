@@ -167,7 +167,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | [`docs/architecture.md`](docs/architecture.md) | 内核实现细节 + 与需求的差异清单 + 已知边界 + 测试与验收 |
 | [`AGENTS.md`](AGENTS.md) | 仓库指南（给 AI 与新贡献者）：结构、命令、风格、提交规范 |
 
-**历史与合规**：[`docs/decisions/`](docs/decisions)（ADR-0001~0003）｜ [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) ｜ [`LICENSE`](LICENSE)
+**历史与合规**：[`docs/decisions/`](docs/decisions)（ADR-0001~0004）｜ [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) ｜ [`LICENSE`](LICENSE)
 
 ## 当前状态
 

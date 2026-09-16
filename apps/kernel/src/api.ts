@@ -203,13 +203,16 @@ export function registerApi(kernel: Kernel): void {
 
   // ── 窗口 / 系统 ─────────────────────────────────────────────
   server.post('/api/window/show', async () => {
-    await kernel.primitives.showWindow(true)
+    await kernel.showWindowAnimated(true)
     return { ok: true }
   })
   server.post('/api/window/hide', async () => {
-    await kernel.primitives.hideWindow()
+    await kernel.hideWindowAnimated()
     return { ok: true }
   })
+  /** UI 挂载时问一次：窗口可能已经被壳显示过了（用户提前按了热键），
+   *  不知道这一点就会先闪一下满不透明的界面再补入场动画 */
+  server.get('/api/window/visible', async () => ({ ok: true, visible: await kernel.primitives.isVisible() }))
   server.post('/api/window/setHeight', async (ctx) => {
     const { height } = body<{ height?: number }>(ctx)
     const value = Number(height)
@@ -250,6 +253,8 @@ export function registerApi(kernel: Kernel): void {
   // （壳刚显示 → 内核立刻隐藏），表现为"按热键窗口闪一下就消失"；托盘正常正是因为它不经过这里。
   kernel.link.handle('window/toggled', async (params) => {
     const visible = params.visible === true
+    // 重新唤出要把还排在队里的那次隐藏作废：热键连按不能被上一次隐藏偷走窗口
+    if (visible) kernel.cancelPendingHide()
     kernel.emit('shell/visibility', { visible })
     return { ok: true }
   })
@@ -259,8 +264,7 @@ export function registerApi(kernel: Kernel): void {
   })
   kernel.link.handle('window/blurred', async () => {
     if (!kernel.config.get().hideOnBlur) return { ok: true }
-    await kernel.primitives.hideWindow()
-    kernel.emit('shell/visibility', { visible: false })
+    await kernel.hideWindowAnimated()
     return { ok: true }
   })
   kernel.link.handle('kernel/ready', async () => {

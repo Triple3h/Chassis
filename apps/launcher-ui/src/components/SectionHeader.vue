@@ -20,6 +20,7 @@ defineEmits<{ (e: 'toggle'): void }>()
 .section-header {
   padding: 0 12px;
   user-select: none;
+  transition: background-color var(--motion-instant) var(--motion-ease-move);
 }
 
 .section-title {
@@ -31,6 +32,7 @@ defineEmits<{ (e: 'toggle'): void }>()
   margin-left: auto;
   font-size: 12px;
   opacity: 0.6;
+  transition: opacity var(--motion-instant) var(--motion-ease-move);
 }
 
 .section-header:hover .section-action {

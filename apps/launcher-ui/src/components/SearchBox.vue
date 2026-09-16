@@ -39,7 +39,7 @@ defineExpose({ focus, input })
       ref="input"
       :value="modelValue"
       :placeholder="placeholderText"
-      class="flex-1 bg-transparent border-0 outline-none text-[20px] font-light placeholder:text-[var(--fg-muted)]"
+      class="flex-1 min-w-0 bg-transparent border-0 outline-none text-[20px] font-light placeholder:text-[var(--fg-muted)]"
       spellcheck="false"
       autocomplete="off"
       autocapitalize="off"
@@ -48,13 +48,34 @@ defineExpose({ focus, input })
     <div v-if="busy" class="text-[var(--fg-muted)] animate-spin shrink-0">
       <IconGlyph name="loader" :size="15" />
     </div>
-    <button
-      type="button"
-      class="shrink-0 w-[34px] h-[34px] rounded-full flex items-center justify-center text-[var(--fg-muted)] bg-[var(--hover)] hover:text-[var(--color-accent)] transition-colors"
-      title="设置 (⌘,)"
-      @click="emit('settings')"
-    >
+    <button type="button" class="settings-btn" title="设置 (⌘,)" @click="emit('settings')">
       <IconGlyph name="settings" :size="17" />
     </button>
   </div>
 </template>
+
+<style scoped>
+.settings-btn {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  background: var(--hover);
+  transition:
+    color var(--motion-instant) var(--motion-ease-move),
+    background-color var(--motion-instant) var(--motion-ease-move),
+    transform var(--motion-instant) var(--motion-ease-move);
+}
+
+.settings-btn:hover {
+  color: var(--color-accent);
+}
+
+.settings-btn:active {
+  transform: scale(0.94);
+}
+</style>

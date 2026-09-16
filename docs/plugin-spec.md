@@ -386,6 +386,7 @@ type ActionDecl =
 - **应当**引 `@launcher/ui`（工作区包 `packages/ui`：设计令牌 `theme.css` + `AppShell` / `UiIcon` / `UiDialog` + `virtual` / `clipboard` / `keys` / `theme` / `toast`），保证与启动台一致
 - 深浅色**必须**都可用；不要在白色背景上写死深色文本
 - 字号：正文 13px / 次要 12px；圆角与间距用令牌变量
+- 过渡时长与缓动**应当**用 `--launcher-motion-*` / `--launcher-ease-*` 令牌（ADR-0004），不要写死数值；离场时长**应当**短于进场
 
 ### 10.2 键盘
 

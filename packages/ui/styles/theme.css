@@ -32,6 +32,28 @@
   --launcher-number: #ea580c;
   --launcher-key: #2563eb;
   --launcher-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+
+  /* ── 动效令牌（与宿主 apps/launcher-ui/src/styles/app.css 同值同档）──
+     插件页视觉要与宿主一致，动效也得同一手感；改档位请两边一起改。 */
+  --launcher-motion-instant: 90ms;
+  --launcher-motion-fast: 140ms;
+  --launcher-motion-base: 200ms;
+  --launcher-motion-slow: 320ms;
+
+  --launcher-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --launcher-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --launcher-ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+  --launcher-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --launcher-motion-instant: 1ms;
+    --launcher-motion-fast: 1ms;
+    --launcher-motion-base: 1ms;
+    --launcher-motion-slow: 1ms;
+    --launcher-ease-spring: linear;
+  }
 }
 
 [data-theme="dark"] {
@@ -144,7 +166,9 @@ button:focus {
   border-radius: 8px;
   padding: 7px 10px;
   font-size: 13px;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color var(--launcher-motion-fast) var(--launcher-ease-move),
+    background var(--launcher-motion-fast) var(--launcher-ease-move);
 }
 .launcher-input:focus {
   border-color: var(--launcher-accent);
@@ -165,7 +189,15 @@ button:focus {
   line-height: 18px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+  transition:
+    background var(--launcher-motion-instant) var(--launcher-ease-move),
+    border-color var(--launcher-motion-instant) var(--launcher-ease-move),
+    opacity var(--launcher-motion-instant) var(--launcher-ease-move),
+    transform var(--launcher-motion-instant) var(--launcher-ease-move);
+}
+/* 按压反馈：只动 1px，够用且不会把相邻元素挤开 */
+.launcher-btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .launcher-btn:hover {
   background: var(--launcher-active);
@@ -233,11 +265,56 @@ button:focus {
   flex: none;
 }
 
-.launcher-fade-enter-active,
+.launcher-fade-enter-active {
+  transition: opacity var(--launcher-motion-base) var(--launcher-ease-enter);
+}
 .launcher-fade-leave-active {
-  transition: opacity 0.14s ease;
+  transition: opacity var(--launcher-motion-fast) var(--launcher-ease-exit);
 }
 .launcher-fade-enter-from,
 .launcher-fade-leave-to {
   opacity: 0;
+}
+
+/* 插件页轻提示：从下方浮起，比纯淡入更有「出来了」的存在感 */
+.launcher-toast-enter-active {
+  transition:
+    opacity var(--launcher-motion-base) var(--launcher-ease-enter),
+    transform var(--launcher-motion-base) var(--launcher-ease-spring);
+}
+.launcher-toast-leave-active {
+  transition:
+    opacity var(--launcher-motion-fast) var(--launcher-ease-exit),
+    transform var(--launcher-motion-fast) var(--launcher-ease-exit);
+}
+.launcher-toast-enter-from,
+.launcher-toast-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.97);
+}
+/* 模态：遮罩纯淡入淡出，面板做缩放 —— 两者分开，遮罩别跟着缩放（会露边） */
+.launcher-mask-enter-active {
+  transition: opacity var(--launcher-motion-base) var(--launcher-ease-enter);
+}
+.launcher-mask-leave-active {
+  transition: opacity var(--launcher-motion-fast) var(--launcher-ease-exit);
+}
+.launcher-mask-enter-from,
+.launcher-mask-leave-to {
+  opacity: 0;
+}
+
+.launcher-dialog-pop {
+  animation: launcher-dialog-pop var(--launcher-motion-base) var(--launcher-ease-spring) both;
+}
+
+/* 只动 transform、不动 opacity：对话框是由外层遮罩的淡入统一负责透明度的，
+   这里再淡一次会变成「两层透明相乘」，看起来像卡了半拍。 */
+@keyframes launcher-dialog-pop {
+  from {
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    transform: none;
+  }
 }

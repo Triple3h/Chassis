@@ -25,19 +25,10 @@ defineEmits<{ (e: 'close'): void }>()
 </template>
 
 <style scoped>
+/* 进出场由 App.vue 的 <Transition name="motion-slide-right"> 负责：
+   放在父组件才能拿到离场（组件自己被 v-if 卸载时，内部的动画是来不及播的）。
+   这里只留不参与动效的静态表现。 */
 .detail-panel {
-  animation: detail-slide-in 0.18s ease-out;
   box-shadow: -18px 0 36px rgba(15, 23, 42, 0.12);
-}
-
-@keyframes detail-slide-in {
-  from {
-    transform: translateX(24px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
 }
 </style>
