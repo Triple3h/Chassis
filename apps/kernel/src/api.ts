@@ -202,12 +202,32 @@ export function registerApi(kernel: Kernel): void {
   })
 
   // ── 窗口 / 系统 ─────────────────────────────────────────────
+  /** 诊断（临时）：UI 上报自己的视口与 outer 尺寸，用来对照壳记录的窗口实测尺寸 */
+  server.post('/api/ui/viewport', async (ctx) => {
+    const payload = body<{ innerW?: number; innerH?: number; outerW?: number; outerH?: number; dpr?: number; screenH?: number }>(ctx)
+    console.error(
+      `[ui-viewport] inner=${payload.innerW}x${payload.innerH} outer=${payload.outerW}x${payload.outerH} dpr=${payload.dpr} screenH=${payload.screenH}`,
+    )
+    return { ok: true }
+  })
   server.post('/api/window/show', async () => {
     await kernel.showWindowAnimated(true)
     return { ok: true }
   })
   server.post('/api/window/hide', async () => {
     await kernel.hideWindowAnimated()
+    return { ok: true }
+  })
+  /**
+   * UI 回执：离场动画的最后一帧**已经画出来了** → 现在可以真正隐藏了。
+   *
+   * 带回来的 `opacity` 是**证据**：它就是「下次唤出时会先亮出来的旧画面」的不透明度，
+   * 必须是 0。哪天它又不为 0（而回执也照样来了），说明「先演再走」的时序又被谁改坏了。
+   */
+  server.post('/api/window/hidden', async (ctx) => {
+    const payload = body<{ opacity?: number; elapsedMs?: number }>(ctx)
+    console.error(`[hide-ack] opacity=${payload.opacity ?? '-'} elapsed=${payload.elapsedMs ?? '-'}ms`)
+    kernel.finishWindowHide()
     return { ok: true }
   })
   /** UI 挂载时问一次：窗口可能已经被壳显示过了（用户提前按了热键），
@@ -253,9 +273,17 @@ export function registerApi(kernel: Kernel): void {
   // （壳刚显示 → 内核立刻隐藏），表现为"按热键窗口闪一下就消失"；托盘正常正是因为它不经过这里。
   kernel.link.handle('window/toggled', async (params) => {
     const visible = params.visible === true
-    // 重新唤出要把还排在队里的那次隐藏作废：热键连按不能被上一次隐藏偷走窗口
-    if (visible) kernel.cancelPendingHide()
-    kernel.emit('shell/visibility', { visible })
+    if (visible) {
+      // 重新唤出要把还排在队里的那次隐藏作废：热键连按不能被上一次隐藏偷走窗口
+      kernel.cancelPendingHide()
+      // 显示晚一点广播：等窗口上屏 + webview 恢复绘制，否则入场动画会被吞
+      await kernel.emitVisibleAnimated()
+    } else {
+      // 壳只报告「该隐藏了」这个意图：真正落地由内核在 UI 回执之后执行
+      // （广播 + 等回执 + 兜底都在 `hideWindowAnimated` 里）。这里刻意不等它 ——
+      // 否则热键连按时，显示那条通知会被上一次隐藏的回执拖住。
+      void kernel.hideWindowAnimated()
+    }
     return { ok: true }
   })
   kernel.link.handle('tray/menu', async (params) => {

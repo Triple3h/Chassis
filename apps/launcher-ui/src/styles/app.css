@@ -46,19 +46,21 @@
   --motion-ease-move: cubic-bezier(0.4, 0, 0.2, 1); /* 位移 / 颜色变化 */
   --motion-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1); /* 轻微过冲：只给「弹出」用 */
 
-  /* 窗口弹出：起点缩放与位移，改这两个值即可整体调整弹窗手感 */
-  --motion-pop-scale: 0.97;
-  --motion-pop-shift: -6px;
+  /* 窗口弹出：起点缩放与位移，改这两个值即可整体调整弹窗手感（对标聚焦搜索的落差） */
+  --motion-pop-scale: 0.94;
+  --motion-pop-shift: -10px;
 }
 
 /* 降级开关只动令牌本身：所有消费者自动跟随，不需要在组件里再写一遍媒体查询。
-   保留透明度变化（属于「淡入淡出」而非位移，无障碍规范普遍接受），只压掉位移/缩放。 */
+   位移与缩放一律压掉；**时长只压短、不归零** ——
+   面板类界面「从不存在到存在」必须保留一次视觉过渡，全压成 1ms 等于把动效整个丢掉
+   （旧版就是这么写的，开了「减弱动态效果」的用户看到的是硬跳）。 */
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --motion-instant: 1ms;
-    --motion-fast: 1ms;
-    --motion-base: 1ms;
-    --motion-slow: 1ms;
+    --motion-instant: 1ms; /* 按压 / hover 这类纯装饰可以直接没有 */
+    --motion-fast: 120ms; /* 离场淡出 */
+    --motion-base: 150ms; /* 进场淡入 */
+    --motion-slow: 180ms;
     --motion-pop-scale: 1;
     --motion-pop-shift: 0px;
     --motion-ease-spring: linear;
@@ -99,11 +101,22 @@ body {
    而且窗口被壳提前隐藏、webview 暂停渲染时也不会把元素卡在动画中途。 */
 .shell {
   background: var(--bg);
-  backdrop-filter: blur(24px) saturate(180%);
+  /* 这里刻意**不用** backdrop-filter。
+     它是唯一会在 border-radius 之外留下像素的东西：模糊层在元素的矩形边界内先绘制完、
+     再被事后裁剪，圆角外会漏出一圈模糊像素（WebKit 上尤其明显）。
+     而窗口的系统阴影是按「内容的 alpha 轮廓」生成的 —— 角落一旦有像素，阴影就退化成
+     矩形，表现就是底部两角出现与圆角对不齐的直角灰边。
+     底色本来就有 0.9+ 不透明度，模糊的视觉贡献几乎为零，去掉只赚不亏。 */
   border: 1px solid var(--border);
   border-radius: var(--radius-shell);
-  box-shadow: var(--shadow);
+  /* 这里**不要**加 box-shadow（`--shadow` 令牌留给将来真正的窗口留白场景）。
+     它一个像素都看不见 —— 阴影全在 .shell 之外，而 .shell 铺满窗口，等于全被 macOS 裁掉；
+     却足以让 WebKit 把元素推进「带外阴影的合成层」那条渲染路径：实测副作用是**贴住窗口底边的
+     两个圆角被画成直角**（顶部两角正常，半径只剩 2-4px），而窗口尺寸与视口完全一致、没有任何裁切。
+     窗口的投影由壳的系统阴影负责，别在这里补。 */
   overflow: hidden;
+  /* 比 overflow 更硬的圆角裁剪：贴住视口底边的元素在 WebKit 下偶尔漏画底部圆角，这条兜底。 */
+  clip-path: inset(0 round var(--radius-shell));
   display: flex;
   flex-direction: column;
   height: 100%;

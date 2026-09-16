@@ -115,6 +115,17 @@ export const api = {
   setWindowHeight: (height: number) =>
     request<{ ok: boolean }>('/api/window/setHeight', { method: 'POST', body: JSON.stringify({ height }) }),
   hideWindow: () => request<{ ok: boolean }>('/api/window/hide', { method: 'POST' }),
+  /**
+   * 离场回执：离场动画的最后一帧**已经画出来了** → 内核可以真正隐藏窗口了。
+   * 走这条路而不是「等固定时长」是刻意的：隐藏广播穿过内核 → SSE → webview 的耗时不可控，
+   * 定时落地会把淡出砍在中间，把半透明的一帧留成「下次唤出先亮的旧画面」。
+   * 带上 `opacity` 是给内核日志留证据：它不是 0 就说明时序又被改坏了。
+   */
+  confirmWindowHidden: (payload: { opacity: number; elapsedMs: number }) =>
+    request<{ ok: boolean }>('/api/window/hidden', { method: 'POST', body: JSON.stringify(payload) }),
+  /** 诊断（临时）：上报视口尺寸，内核会把它写进日志 */
+  reportViewport: (payload: { innerW: number; innerH: number; outerW: number; outerH: number; dpr: number; screenH: number }) =>
+    request<{ ok: boolean }>('/api/ui/viewport', { method: 'POST', body: JSON.stringify(payload) }),
   showWindow: () => request<{ ok: boolean }>('/api/window/show', { method: 'POST' }),
   /** `visible` 为 `null` = 内核问不到壳（standalone / 浏览器开发），此时一律当可见处理 */
   windowVisible: () => request<{ ok: boolean; visible: boolean | null }>('/api/window/visible'),

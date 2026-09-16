@@ -45,19 +45,9 @@ pub fn ensure(app: &AppHandle) -> Result<(), String> {
                 ..
             } = event
             {
-                let app = tray.app_handle();
-                let visible = app
-                    .get_webview_window("main")
-                    .and_then(|window| window.is_visible().ok())
-                    .unwrap_or(false);
-                if visible {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.hide();
-                    }
-                } else {
-                    let _ = super::window::show(app, &json!({ "focus": true }));
-                }
-                super::window::notify_toggled(app, !visible);
+                // 与热键共用同一个 toggle（含"正在演离场时按一次是取消隐藏"的判断）。
+                // 不要在这里自己写一遍显隐判断：两条路径的边界会慢慢漂开。
+                super::window::toggle(tray.app_handle());
             }
         });
 

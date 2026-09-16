@@ -157,9 +157,11 @@ pub fn run() {
                 // 关窗 = 隐藏（退出只能走托盘 / 内核指令）
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
-                    let _ = window.hide();
-                    // 与热键 / 托盘同一条规矩：谁真正改了显隐，谁就把结果报给内核
+                    // 与热键 / 托盘同一条规矩：**先报告、等 UI 演完离场，内核再落地**。
+                    // 立刻 hide 会让 webview 冻结在「半透明面板」那一帧，下次唤出先闪一下旧画面；
+                    // 同时谁真正改了显隐，谁就把结果报给内核。
                     primitives::window::notify_toggled(window.app_handle(), false);
+                    primitives::window::arm_hide_fallback(window.app_handle());
                 }
                 _ => {}
             }

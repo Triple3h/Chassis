@@ -48,10 +48,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   :root {
+    /* 时长**只压短、不归零**：面板/对话框「从不存在到存在」必须保留一次视觉过渡，
+       全压成 1ms 等于把动效整个丢掉（2026-09-16 与宿主同批修正）。 */
     --launcher-motion-instant: 1ms;
-    --launcher-motion-fast: 1ms;
-    --launcher-motion-base: 1ms;
-    --launcher-motion-slow: 1ms;
+    --launcher-motion-fast: 120ms;
+    --launcher-motion-base: 150ms;
+    --launcher-motion-slow: 180ms;
     --launcher-ease-spring: linear;
   }
 }

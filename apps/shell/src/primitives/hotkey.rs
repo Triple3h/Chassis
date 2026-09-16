@@ -6,7 +6,7 @@
 use crate::logging::log;
 use serde_json::{json, Value};
 use std::str::FromStr;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 /// 首选之后的回退顺序（越靠前越贴近用户习惯）
@@ -50,7 +50,8 @@ pub fn register(app: &AppHandle, params: &Value) -> Result<Value, String> {
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            toggle(&app_handle);
+            // 切换逻辑收在 window 原语里（托盘左键走同一个函数），这里只转发按键
+            super::window::toggle(&app_handle);
         }) {
             Ok(()) => {
                 if index == 0 {
@@ -80,27 +81,6 @@ pub fn register(app: &AppHandle, params: &Value) -> Result<Value, String> {
 pub fn unregister(app: &AppHandle) -> Result<Value, String> {
     let _ = app.global_shortcut().unregister_all();
     Ok(json!(null))
-}
-
-/// 热键按下 = 唤出/隐藏切换。
-///
-/// **显隐的裁决者只有壳这一处。** 内核只接收切换结果（`window/toggled`），
-/// 绝不能再自己 toggle 一次 —— 否则一次按键会被 toggle 两遍（壳先显示、内核随即隐藏），
-/// 表现就是"按热键窗口闪一下就消失"。托盘左键正常，正是因为那条路径完全不经过内核。
-fn toggle(app: &AppHandle) {
-    let visible = app
-        .get_webview_window("main")
-        .and_then(|window| window.is_visible().ok())
-        .unwrap_or(false);
-    if visible {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.hide();
-        }
-    } else {
-        let _ = super::window::show(app, &json!({ "focus": true }));
-    }
-    log(&format!("[hotkey] toggle → visible={}", !visible));
-    super::window::notify_toggled(app, !visible);
 }
 
 fn notify_hotkey_fallback(app: &AppHandle, requested: &str, actual: &str) {
