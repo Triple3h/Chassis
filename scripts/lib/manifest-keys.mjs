@@ -24,4 +24,6 @@ export const MANIFEST_KEYS = [
   'capabilities',
   // 底座基础能力（不可禁用）：只有出厂 bundle 会声明，但必须一起进产物
   'essential',
+  // 不计入「最近使用」（底座自身入口用）
+  'history',
 ]

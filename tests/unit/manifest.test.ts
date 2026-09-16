@@ -57,6 +57,18 @@ test('essential 只接受布尔值；不写 = 未声明（不是 false）', () =
   assertEqual(wrong.code, 'MANIFEST_INVALID')
 })
 
+test('history 只接受布尔值；不写 = 未声明（默认计入最近使用）', () => {
+  const absent = validateManifest(VALID)
+  assert(absent.ok && absent.manifest.history === undefined, '不写就是未声明')
+
+  const declared = validateManifest({ ...VALID, history: false })
+  assert(declared.ok && declared.manifest.history === false)
+
+  const wrong = validateManifest({ ...VALID, history: 'no' })
+  assert(!wrong.ok)
+  assertEqual(wrong.code, 'MANIFEST_INVALID')
+})
+
 test('未知 apiVersion 报 API_VERSION_UNSUPPORTED', () => {
   const result = validateManifest({ ...VALID, apiVersion: '2' })
   assert(!result.ok)

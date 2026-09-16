@@ -10,6 +10,7 @@
   "icon": "app-window",
   "keywords": ["app", "应用", "启动", "launch"],
   "essential": true,
+  "history": false,
   "capabilities": ["storage", "exec.spawn", "shell.open"],
   "commands": [
     {

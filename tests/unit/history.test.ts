@@ -66,6 +66,20 @@ test('重复固定幂等；pruneInvalid 清理失效项', async () => {
   await fsp.rm(dir, { recursive: true, force: true })
 })
 
+test('dropHistoryBy 只清历史、不动固定项（固定是用户的显式动作）', async () => {
+  const { store, dir } = await tmpStore()
+  store.record({ key: 'q', pluginId: 'quiet', command: 'c', title: '静默入口' })
+  store.record({ key: 'n', pluginId: 'noisy', command: 'c', title: '普通入口' })
+  store.pin({ key: 'q', pluginId: 'quiet', command: 'c', title: '静默入口' })
+
+  assertEqual(store.dropHistoryBy((pluginId) => pluginId === 'quiet'), 1)
+  assertEqual(store.allRecent().length, 1)
+  assertEqual(store.allRecent()[0]?.pluginId, 'noisy', '别的插件不受影响')
+  assertEqual(store.pinnedList().length, 1, '固定项不能被插件的一句声明抹掉')
+  assertEqual(store.dropHistoryBy((pluginId) => pluginId === 'quiet'), 0, '重复调用是幂等的')
+  await fsp.rm(dir, { recursive: true, force: true })
+})
+
 test('debounce + 原子写：flush 后落盘可重新加载', async () => {
   const { store, dir } = await tmpStore()
   store.record({ key: 'persist', pluginId: 'p', command: 'c', title: '落盘' })

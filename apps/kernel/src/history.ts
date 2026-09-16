@@ -170,6 +170,20 @@ export class HistoryStore {
     return { history, pinned }
   }
 
+  /**
+   * 按插件清掉历史条目（清单 `history: false`，如底座自身的设置 / 插件管理入口）。
+   *
+   * 只动历史、**不动固定项**：固定是用户的显式动作，不能被插件的一句声明抹掉。
+   * 调用点在启动装配期（插件加载完、还没有新写入），与 `pruneInvalid` 同一时机。
+   */
+  dropHistoryBy(exclude: (pluginId: string) => boolean): number {
+    const before = this.history.length
+    this.history = this.history.filter((h) => !exclude(h.pluginId))
+    const removed = before - this.history.length
+    if (removed > 0) this.historyWriter.schedule()
+    return removed
+  }
+
   /** 清理失效项（插件已卸载 / 命令已不存在） */
   pruneInvalid(isValid: (item: { pluginId: string; command: string }) => boolean): { history: number; pinned: number } {
     const hBefore = this.history.length

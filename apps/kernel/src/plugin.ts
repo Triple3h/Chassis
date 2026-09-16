@@ -158,6 +158,16 @@ export class PluginManager {
     return Boolean(record?.builtin && record.manifest?.essential)
   }
 
+  /**
+   * 该插件的条目是否不进「最近使用」（清单 `history: false`）。
+   *
+   * 与 `isEssential` 不同，这里**不限制**只有出厂插件能声明：把自己的条目从最近使用里摘掉，
+   * 影响面只有它自己（既不提权、也不影响别人），第三方插件有同样需求时无需改底座。
+   */
+  excludesHistory(id: string): boolean {
+    return this.records.get(id)?.manifest?.history === false
+  }
+
   isCommandAlive(pluginId: string, command: string): boolean {
     if (!this.isActive(pluginId)) return false
     const record = this.records.get(pluginId)

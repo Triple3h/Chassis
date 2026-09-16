@@ -430,6 +430,9 @@ interface PinnedItem extends Omit<HistoryItem, 'lastUsed' | 'count'> {
 - 持久化：`<dataRoot>/history.json`、`<dataRoot>/pinned.json`；写入 debounce 500ms + 原子写（临时文件 + rename）
 - 历史上限：默认 500（可配置 100–2000），超出按 `lastUsed` 淘汰
 - **只在 `execute` 成功且 `kind !== 'host'` 时写历史**（命令走 `invoke`；应用/文件/网址这类结果项走 `executeItem` 写快照，key 与搜索侧一致）
+- **清单声明 `history: false` 的插件不写历史**（`PluginManager.excludesHistory`），启动装配期还会把已有条目摘掉（`dropHistoryBy`）：
+  底座自身入口（设置 / 插件管理 / 应用启动 / 文件搜索）一用就占满「最近使用」，而它们随时搜得到。
+  只影响最近使用 —— 搜索结果与**固定项**不受影响（固定是用户的显式动作）
 - 置灰判定：`command` 是命令名（`COMMAND_NAME_RE`）时校验命令是否还在；是结果项 id 时只校验插件是否可用
 - 排序公式（内核侧）：`score = 0.55 * match + 0.30 * recency + 0.15 * frequency`
   - `match`：标题前缀命中 1.0 / 包含 0.7 / 拼音全拼 0.6 / 首字母 0.5 / 副标题与 keywords 0.4

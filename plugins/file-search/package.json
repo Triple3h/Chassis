@@ -10,6 +10,7 @@
   "icon": "file-search",
   "keywords": ["file", "文件", "搜索", "mdfind", "spotlight"],
   "essential": true,
+  "history": false,
   "capabilities": ["storage", "shell.open"],
   "commands": [
     {

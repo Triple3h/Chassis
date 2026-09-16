@@ -205,6 +205,10 @@ export function validateManifest(raw: unknown): ManifestValidation {
     if (typeof raw.essential !== 'boolean') return fail('MANIFEST_INVALID', 'essential 必须是布尔值')
     manifest.essential = raw.essential
   }
+  if (raw.history !== undefined) {
+    if (typeof raw.history !== 'boolean') return fail('MANIFEST_INVALID', 'history 必须是布尔值')
+    manifest.history = raw.history
+  }
 
   return { ok: true, manifest, warnings }
 }

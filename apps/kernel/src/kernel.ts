@@ -257,6 +257,13 @@ export class Kernel {
     await this.plugins.init()
     await this.plugins.startWatcher()
 
+    // 清单声明 `history: false` 的插件（底座自身入口：设置 / 插件管理 / 应用启动 / 文件搜索）：
+    // 光"以后不写"不够 —— 界面上那条旧记录会一直留着，看起来就是"改了没生效"。
+    const droppedHistory = this.history.dropHistoryBy((pluginId) => this.plugins.excludesHistory(pluginId))
+    if (droppedHistory > 0) {
+      this.log('info', `最近使用清理：摘掉 ${droppedHistory} 条「不计入历史」插件的条目`)
+    }
+
     // 会话回收：关闭时把理由一起广播给 UI（`reload` ⇒ 重载完成后重开页面，其余 ⇒ 卸载 iframe）
     this.sessions.on((session, kind, reason) => {
       if (kind !== 'close') return
@@ -464,7 +471,8 @@ export class Kernel {
 
     try {
       const result = await this.pipeline.run(ctx, () => this.execute(ctx))
-      if (result.ok && result.kind !== 'host') {
+      // `history: false` 的插件（底座自身入口）不进「最近使用」—— 它们一用就占满整个分区
+      if (result.ok && result.kind !== 'host' && !this.plugins.excludesHistory(entry.pluginId)) {
         const record = this.plugins.get(entry.pluginId)
         this.history.record({
           key: itemKey(entry.pluginId, entry.decl.name, args),
@@ -606,6 +614,7 @@ export class Kernel {
    */
   private rememberItemResult(pluginId: string, item: ResultItem, action: ActionDecl, result: ActionResult): void {
     if (!result.ok || result.kind === 'host') return
+    if (this.plugins.excludesHistory(pluginId)) return
     const key = itemKey(pluginId, pluginKeyOf(item), item.action)
     this.history.record({
       key,

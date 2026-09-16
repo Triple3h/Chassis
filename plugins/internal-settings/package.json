@@ -10,6 +10,7 @@
   "icon": "settings",
   "keywords": ["settings", "设置", "插件", "plugins", "偏好"],
   "essential": true,
+  "history": false,
   "capabilities": ["hostUi"],
   "commands": [
     {
