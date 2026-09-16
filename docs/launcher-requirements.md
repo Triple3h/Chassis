@@ -381,8 +381,8 @@ interface ActionResult {
 | 事件 | 行为 |
 |---|---|
 | 加载 | 读清单 → 校验 → 起 HTTP listener → 构造 Context → 装配期裁剪 → 执行 `activate(ctx)`（脚本插件）/ 注册命令（view 插件） |
-| 停用 | 逆序回滚所有 disposer → 关 listener → 清理会话 |
-| 重载（热重载） | 停用 → 重新读盘 → 加载；**保持历史与固定项不变** |
+| 停用 | 逆序回滚所有 disposer → 关 listener → 清理会话（`session/closed` 带 `reason: disable`） |
+| 重载（热重载） | 停用（`reason: reload`）→ 重新读盘 → 加载 → 广播 `plugin/reloaded { pluginId, commands, ok }`；**保持历史与固定项不变**。原来开着的插件页会话必然失效（旧 listener 端口已停），由 UI 按 `commands` 用同一命令重开（新会话 / 新端口）——插件在自己的页面里重载自己也不会把页面打死 |
 | 崩溃（view 页崩） | 标记 `crashed` → 命令置灰 + 可"重试"按钮，不影响其它插件 |
 | 崩溃（脚本异常） | 只让该次调用 `fail()`，不改变插件状态（除非连续 N 次 = 3） |
 | 目录变化 | 监听 `extensions/`（chokidar）→ 新增/更新/删除自动热重载 |
@@ -418,6 +418,7 @@ interface PinnedItem extends Omit<HistoryItem, 'lastUsed' | 'count'> {
   - 插件自评 `score` 存在时：`final = 0.6 * pluginScore + 0.4 * kernelScore`
 - 固定项恒在最前（按 `order`），不受搜索影响（但高亮命中）
 - 失效项（插件已卸载/命令已不存在）保留展示但置灰，设置里提供"清理失效项"
+- 插件改过 id（`apps/kernel/src/legacy.ts`）时，启动装配期把条目的 `pluginId` 与 key 前缀一次性迁到新 id（同 key 合并）——否则老条目会被置灰判定当成"插件不可用"
 
 ### 7.6 `search.ts` — 搜索调度
 

@@ -162,6 +162,35 @@ function handleKernelEvent(event: string, payload: unknown): void {
   if (event === 'ui/hide') {
     void api.hideWindow().catch(() => undefined)
   }
+  // 插件页会话被内核关掉：停用 / 卸载 ⇒ 直接卸载 iframe；重载 ⇒ 等 plugin/reloaded 后重开
+  if (event === 'session/closed') {
+    const info = payload as { sid?: string; reason?: string }
+    const view = ui.pluginView
+    if (!view || info?.sid !== view.sid) return
+    if (info.reason === 'reload') return
+    ui.closePluginView()
+    // `ui` 是插件页自己关自己（commands.close），安静卸载就行
+    const notice = info.reason === 'uninstall' ? '插件已卸载，页面已关闭' : info.reason === 'disable' ? '插件已停用，页面已关闭' : ''
+    if (notice) ui.showToast(notice)
+    return
+  }
+  // 插件重载完成：旧会话与旧端口都失效了，用同一命令换一个新会话重开
+  if (event === 'plugin/reloaded') {
+    const info = payload as { pluginId?: string; commands?: string[]; ok?: boolean }
+    const view = ui.pluginView
+    if (!view || !info?.pluginId || info.pluginId !== view.pluginId) return
+    if (info.ok === false) {
+      ui.closePluginView()
+      ui.showToast('插件重载失败，页面已关闭')
+      return
+    }
+    if (Array.isArray(info.commands) && !info.commands.includes(view.command)) {
+      ui.closePluginView()
+      ui.showToast('插件已重载，但该页面命令已不存在')
+      return
+    }
+    void reopenPluginView(view)
+  }
 }
 
 // ── 键盘 ─────────────────────────────────────────────────────
@@ -306,6 +335,33 @@ function handleResult(result?: ActionResult): void {
     const view = result.data as PluginViewState
     ui.openPluginView(view)
   }
+}
+
+/**
+ * 插件重载后自动重开当前插件页（例如在插件管理页点「重载」重载了它自己 / 全部重载）。
+ * 旧会话已被内核关闭、旧端口也停了，只有换新会话 + 新 URL 才能继续用。
+ */
+async function reopenPluginView(view: PluginViewState): Promise<void> {
+  let result: ActionResult | undefined
+  try {
+    result = (await api.invoke(`${view.pluginId}:${view.command}`)).result
+  } catch (err) {
+    ui.showToast(err instanceof Error ? err.message : '插件页重开失败')
+    ui.closePluginView()
+    return
+  }
+  if (ui.pluginView?.sid !== view.sid) {
+    // 等待期间用户已经离开这个页面：把刚建的会话关掉，别留孤儿
+    const fresh = result?.data as PluginViewState | undefined
+    if (fresh?.sid) void api.closeSession(fresh.sid).catch(() => undefined)
+    return
+  }
+  if (result?.ok && result.kind === 'view' && result.data) {
+    ui.openPluginView(result.data as PluginViewState)
+    return
+  }
+  ui.showToast(result?.error?.message ?? '插件页重开失败')
+  ui.closePluginView()
 }
 
 async function openSettings(): Promise<void> {

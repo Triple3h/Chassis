@@ -190,7 +190,7 @@ export function registerApi(kernel: Kernel): void {
 
   server.post('/api/session/close', async (ctx) => {
     const { sid } = body<{ sid?: string }>(ctx)
-    const closed = kernel.sessions.close(required(sid, 'sid'))
+    const closed = kernel.sessions.close(required(sid, 'sid'), 'ui')
     return { ok: closed }
   })
 

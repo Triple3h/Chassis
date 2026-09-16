@@ -147,6 +147,29 @@ export class HistoryStore {
     return this.pinnedList()
   }
 
+  /**
+   * 插件改名：把历史 / 固定项里的旧 `pluginId` 与 key 前缀一次性迁到新 id。
+   * `map` 方向是 **旧 id → 新 id**（`apps/kernel/src/legacy.ts` 的 `LEGACY_ID_TO_CURRENT`）；
+   * 只改写前缀、不动 args 哈希；迁移后同 key 的条目合并（历史取较新一条、次数相加，固定项保序）。
+   * 调用点在启动装配期（插件还没加载，不会有新写入与它竞争）。
+   */
+  migratePluginIds(map: Record<string, string>): { history: number; pinned: number } {
+    let history = 0
+    let pinned = 0
+    for (const item of this.history) if (renamePlugin(item, map)) history += 1
+    for (const item of this.pinned) if (renamePlugin(item, map)) pinned += 1
+    if (history > 0) {
+      this.history = dedupeHistory(this.history)
+      this.historyWriter.schedule()
+    }
+    if (pinned > 0) {
+      this.pinned = dedupePinned(this.pinned)
+      this.reindexPinned()
+      this.pinnedWriter.schedule()
+    }
+    return { history, pinned }
+  }
+
   /** 清理失效项（插件已卸载 / 命令已不存在） */
   pruneInvalid(isValid: (item: { pluginId: string; command: string }) => boolean): { history: number; pinned: number } {
     const hBefore = this.history.length
@@ -188,6 +211,41 @@ export class HistoryStore {
     const snapshot: PinnedFile = { version: FILE_VERSION, items: this.pinned }
     await writeJsonAtomic(this.pinnedFile, snapshot)
   }
+}
+
+/** 改写条目的 pluginId 与 key 前缀（`itemKey` 恒以 `${pluginId}:` 开头）；不是旧 id 就不动 */
+function renamePlugin<T extends { pluginId: string; key: string }>(item: T, map: Record<string, string>): boolean {
+  const next = map[item.pluginId]
+  if (!next) return false
+  const prefix = `${item.pluginId}:`
+  if (item.key.startsWith(prefix)) item.key = `${next}:${item.key.slice(prefix.length)}`
+  item.pluginId = next
+  return true
+}
+
+/** 合并同 key 的历史项（新旧 id 并存时）：保留最近使用的一条，次数相加 */
+function dedupeHistory(items: HistoryItem[]): HistoryItem[] {
+  const map = new Map<string, HistoryItem>()
+  for (const item of items) {
+    const existing = map.get(item.key)
+    if (!existing) {
+      map.set(item.key, item)
+      continue
+    }
+    const newer = item.lastUsed > existing.lastUsed ? item : existing
+    const older = newer === item ? existing : item
+    map.set(item.key, { ...newer, count: newer.count + older.count })
+  }
+  return [...map.values()]
+}
+
+/** 合并同 key 的固定项：保留 order 最小的一条（其余由 reindexPinned 重新编号） */
+function dedupePinned(items: PinnedItem[]): PinnedItem[] {
+  const map = new Map<string, PinnedItem>()
+  for (const item of [...items].sort((a, b) => a.order - b.order)) {
+    if (!map.has(item.key)) map.set(item.key, item)
+  }
+  return [...map.values()]
 }
 
 function isHistoryItem(v: unknown): v is HistoryItem {

@@ -398,12 +398,21 @@ function bind(): void {
   }
 }
 
+// 拉取失败（重载期间会话短暂失效等）保留上一次结果：列表闪成「没有已安装的插件」比不刷新更糟
 async function loadPlugins(): Promise<void> {
-  plugins = (await guard(() => settings.plugins(), [] as PluginLike[])) as PluginLike[]
+  try {
+    plugins = (await settings.plugins()) as PluginLike[]
+  } catch {
+    /* 保留上一次列表 */
+  }
 }
 
 async function loadAudit(): Promise<void> {
-  audit = (await guard(() => settings.audit(120), [] as AuditLike[])) as AuditLike[]
+  try {
+    audit = (await settings.audit(120)) as AuditLike[]
+  } catch {
+    /* 保留上一次列表 */
+  }
 }
 
 async function boot(): Promise<void> {

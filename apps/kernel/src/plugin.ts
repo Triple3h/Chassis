@@ -20,21 +20,10 @@ import type { CommandRegistry } from './registry'
 import type { SessionManager } from './session'
 import type { KernelServices, PluginContext } from './services/types'
 import type { ScriptRuntime } from './services/exec'
-import type { Disposer } from './types'
+import type { Disposer, SessionCloseReason } from './types'
 import { ensureDir, listDirSafe, pathExists } from './util/fsx'
 import type { PluginServerPool } from './http/pluginServers'
-
-/**
- * 插件改名后的数据目录映射（2026-09-16：四个 Vue 插件简化 id，去掉历史前缀）。
- * 加载时若新数据目录不存在、旧目录还在 ⇒ 整体复制过来（只复制不删除）。
- * 映射是单向、一次性的；旧目录留由用户自行清理。
- */
-const LEGACY_PLUGIN_IDS: Record<string, string> = {
-  totp: 'sofast-totp',
-  hosts: 'sofast-hosts',
-  'text-diff': 'sofast-text-diff',
-  'json-tools': 'sofast-json-tools',
-}
+import { LEGACY_PLUGIN_IDS } from './legacy'
 
 export type PluginState =
   | 'discovered'
@@ -473,7 +462,7 @@ export class PluginManager {
     }
   }
 
-  async disable(id: string): Promise<void> {
+  async disable(id: string, reason: SessionCloseReason = 'disable'): Promise<void> {
     const loaded = this.loaded.get(id)
     if (loaded) {
       this.loaded.delete(id)
@@ -487,7 +476,7 @@ export class PluginManager {
       }
     }
     this.deps.exec.releasePlugin(id)
-    this.deps.sessions.closePlugin(id)
+    this.deps.sessions.closePlugin(id, reason)
     await this.deps.servers.stop(id)
     const record = this.records.get(id)
     if (record) {
@@ -514,16 +503,33 @@ export class PluginManager {
     else await this.load(id)
   }
 
+  /**
+   * 热重载（requirements §7.4）：停用 → 重新读盘 → 加载。
+   *
+   * 原来开着的插件页会话会随停用一起关闭（listener 端口已消失，页面必然失效）；
+   * 重载结束广播 `plugin/reloaded`，由启动台 UI 用同一命令重开页面（新会话 / 新端口）——
+   * 否则在插件自己的页面里点「重载」（插件管理页重载自己 / 全部重载）会把当前页面打死。
+   */
   async reload(id: string): Promise<PluginRecord> {
     const record = this.records.get(id)
     if (!record) throw new LauncherError('NOT_FOUND', `插件不存在：${id}`)
     const wasDisabled = record.state === 'disabled' || this.deps.config.get().disabled.includes(id)
-    await this.disable(id)
+    // 停用前记下开着的 view 命令，重载成功后交给 UI 重开
+    const views = this.deps.sessions.byPlugin(id).map((session) => session.command)
+    await this.disable(id, 'reload')
     if (wasDisabled) {
       record.state = 'disabled'
       return record
     }
-    return this.load(id)
+    try {
+      const loaded = await this.load(id)
+      this.deps.bus.emit('plugin/reloaded', { pluginId: id, commands: views, ok: this.isActive(id) })
+      return loaded
+    } catch (err) {
+      // 加载失败也要通知：UI 不能把死掉的旧页面留在窗口里
+      this.deps.bus.emit('plugin/reloaded', { pluginId: id, commands: views, ok: false })
+      throw err
+    }
   }
 
   async reloadAll(): Promise<void> {
@@ -642,7 +648,7 @@ export class PluginManager {
     const record = this.records.get(id)
     if (!record) throw new LauncherError('NOT_FOUND', `插件不存在：${id}`)
     if (record.builtin) throw new LauncherError('FORBIDDEN', '出厂插件不可卸载（可禁用）')
-    await this.disable(id)
+    await this.disable(id, 'uninstall')
     await fsp.rm(record.dir, { recursive: true, force: true })
     this.records.delete(id)
     this.emitChanged()
@@ -654,7 +660,7 @@ export class PluginManager {
       this.watcher = null
     }
     for (const record of this.list()) {
-      await this.disable(record.id).catch(() => undefined)
+      await this.disable(record.id, 'shutdown').catch(() => undefined)
     }
   }
 

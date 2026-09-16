@@ -5,6 +5,8 @@ export type Disposer = () => void
 export type KernelEvent =
   | 'registry/changed'
   | 'plugin/state'
+  | 'plugin/reloaded'
+  | 'session/closed'
   | 'history/changed'
   | 'pinned/changed'
   | 'search/query'
@@ -13,6 +15,9 @@ export type KernelEvent =
   | 'ui/footer'
   | 'ui/hide'
   | 'shell/visibility'
+
+/** 会话为什么被关掉：`reload` 时 UI 应当在插件重载完成后重开该页面 */
+export type SessionCloseReason = 'close' | 'ui' | 'reload' | 'disable' | 'uninstall' | 'shutdown'
 
 export interface Session {
   sid: string

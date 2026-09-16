@@ -10,6 +10,7 @@ import { CommandRegistry, SearchResultHub } from './registry'
 import { SearchEngine, pluginKeyOf } from './search'
 import { SessionManager } from './session'
 import { PluginManager } from './plugin'
+import { LEGACY_ID_TO_CURRENT } from './legacy'
 import { PluginServerPool } from './http/pluginServers'
 import { UiServer } from './http/server'
 import { createKernelServices } from './services/kernel'
@@ -202,6 +203,11 @@ export class Kernel {
     const config = await this.config.load()
     await this.audit.init()
     await this.history.load(config.historyLimit)
+    // 插件改过 id：历史 / 固定项里的旧 pluginId 与 key 前缀一次性迁移（否则老条目一律被判「插件不可用」置灰）
+    const migrated = this.history.migratePluginIds(LEGACY_ID_TO_CURRENT)
+    if (migrated.history || migrated.pinned) {
+      this.log('info', `历史 / 固定项插件 id 迁移：历史 ${migrated.history} 条、固定 ${migrated.pinned} 条`)
+    }
 
     this.hostUi.state.theme = config.theme === 'light' ? 'light' : 'dark'
 
@@ -209,9 +215,15 @@ export class Kernel {
     await this.plugins.init()
     await this.plugins.startWatcher()
 
-    // 会话回收：会话关闭时通知 UI 卸载 iframe
-    this.sessions.on((session, kind) => {
-      this.bus.emit('plugin/state', { session: session.sid, kind })
+    // 会话回收：关闭时把理由一起广播给 UI（`reload` ⇒ 重载完成后重开页面，其余 ⇒ 卸载 iframe）
+    this.sessions.on((session, kind, reason) => {
+      if (kind !== 'close') return
+      this.bus.emit('session/closed', {
+        sid: session.sid,
+        pluginId: session.pluginId,
+        command: session.command,
+        reason: reason ?? 'close',
+      })
     })
 
     await this.registerTray()

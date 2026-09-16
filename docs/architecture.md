@@ -142,7 +142,7 @@ active → degraded（脚本连续失败 3 次）
 | POST | `/api/search` | `{ query }` → `{ token, groups, pending }` |
 | POST | `/api/exec` | 执行结果项 / 指定命令 / ActionDecl |
 | POST | `/api/invoke` | 按全局命令 id 执行（托盘、测试用） |
-| GET | `/api/events` | SSE：`registry/changed`、`plugin/state`、`history/changed`、`search/query`、`ui/*`、`shell/visibility`… |
+| GET | `/api/events` | SSE：`registry/changed`、`plugin/state`、`plugin/reloaded`、`session/closed`、`history/changed`、`search/query`、`ui/*`、`shell/visibility`… |
 | POST | `/api/bridge` | 插件页调用转发（token 校验 + 审计） |
 | POST | `/api/session/close`、`/api/session/crashed` | 会话回收 / 崩溃上报 |
 | POST | `/api/pinned/toggle`、`/api/pinned/reorder`、`/api/history/*` | 固定与历史 |

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import type { Disposer, Session } from './types'
+import type { Disposer, Session, SessionCloseReason } from './types'
 
 /** 会话 = 一次 view 命令的打开实例（每次打开都是新会话，sid 区分） */
 export class SessionManager {
   private sessions = new Map<string, Session>()
-  private listeners = new Set<(session: Session, kind: 'open' | 'close') => void>()
+  private listeners = new Set<(session: Session, kind: 'open' | 'close', reason?: SessionCloseReason) => void>()
 
   create(input: { pluginId: string; command: string; port: number }): Session {
     const sid = randomUUID()
@@ -37,35 +37,36 @@ export class SessionManager {
     return [...this.sessions.values()]
   }
 
-  close(sid: string): boolean {
+  /** reason 会随关闭事件广播给 UI：`reload` 表示插件正在重启，页面稍后会被重开 */
+  close(sid: string, reason: SessionCloseReason = 'close'): boolean {
     const session = this.sessions.get(sid)
     if (!session) return false
     this.sessions.delete(sid)
-    this.emit(session, 'close')
+    this.emit(session, 'close', reason)
     return true
   }
 
-  closePlugin(pluginId: string): number {
+  closePlugin(pluginId: string, reason: SessionCloseReason = 'disable'): number {
     let count = 0
     for (const session of this.byPlugin(pluginId)) {
-      if (this.close(session.sid)) count += 1
+      if (this.close(session.sid, reason)) count += 1
     }
     return count
   }
 
-  closeAll(): void {
-    for (const sid of [...this.sessions.keys()]) this.close(sid)
+  closeAll(reason: SessionCloseReason = 'shutdown'): void {
+    for (const sid of [...this.sessions.keys()]) this.close(sid, reason)
   }
 
-  on(fn: (session: Session, kind: 'open' | 'close') => void): Disposer {
+  on(fn: (session: Session, kind: 'open' | 'close', reason?: SessionCloseReason) => void): Disposer {
     this.listeners.add(fn)
     return () => this.listeners.delete(fn)
   }
 
-  private emit(session: Session, kind: 'open' | 'close'): void {
+  private emit(session: Session, kind: 'open' | 'close', reason?: SessionCloseReason): void {
     for (const fn of [...this.listeners]) {
       try {
-        fn(session, kind)
+        fn(session, kind, reason)
       } catch {
         /* ignore */
       }

@@ -160,8 +160,8 @@ export class BridgeDispatcher {
       }
 
       case 'ctx.commands.close':
-        this.deps.sessions.close(sid)
-        this.deps.bus.emit('plugin/state', { pluginId, sid, closed: true })
+        // 关闭理由由内核的会话监听统一广播（`session/closed`），这里不再单独发事件
+        this.deps.sessions.close(sid, 'ui')
         return null
 
       case 'ctx.commands.registerAction': {

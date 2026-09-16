@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { assert, assertDeepEqual, assertEqual, run, test } from '../helpers/assert'
 import { HistoryStore } from '../../apps/kernel/src/history'
+import { LEGACY_ID_TO_CURRENT } from '../../apps/kernel/src/legacy'
 import { itemKey } from '../../apps/kernel/src/util/text'
 
 async function tmpStore(limit = 500): Promise<{ store: HistoryStore; dir: string }> {
@@ -79,6 +80,54 @@ test('debounce + 原子写：flush 后落盘可重新加载', async () => {
   const files = await fsp.readdir(dir)
   assert(files.includes('history.json') && files.includes('pinned.json'), `落盘文件缺失：${files.join(',')}`)
   assert(!files.some((f) => f.endsWith('.tmp')), '不应残留临时文件')
+  await fsp.rm(dir, { recursive: true, force: true })
+})
+
+test('插件改名：旧 pluginId 与 key 前缀迁移，并与新 id 的同类条目合并', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'launcher-history-migrate-'))
+  const legacyCommandKey = itemKey('sofast-hosts', 'hosts', undefined)
+  const legacyArgsKey = itemKey('sofast-hosts', 'hosts', { tab: 'system' })
+  await fsp.writeFile(
+    path.join(dir, 'history.json'),
+    JSON.stringify({
+      version: 1,
+      items: [
+        { key: legacyCommandKey, pluginId: 'sofast-hosts', command: 'hosts', title: 'Hosts 管家', lastUsed: 1000, count: 1 },
+        // 新 id 已经写过同一条：迁移后必须合并，不能变成两条
+        { key: itemKey('hosts', 'hosts', undefined), pluginId: 'hosts', command: 'hosts', title: 'Hosts 管家', lastUsed: 2000, count: 2 },
+        { key: legacyArgsKey, pluginId: 'sofast-hosts', command: 'hosts', args: { tab: 'system' }, title: 'Hosts 管家', lastUsed: 500, count: 1 },
+        { key: itemKey('other', 'x', undefined), pluginId: 'other', command: 'x', title: '别的插件', lastUsed: 300, count: 1 },
+      ],
+    }),
+  )
+  await fsp.writeFile(
+    path.join(dir, 'pinned.json'),
+    JSON.stringify({
+      version: 1,
+      items: [{ key: legacyCommandKey, pluginId: 'sofast-hosts', command: 'hosts', title: 'Hosts 管家', order: 0 }],
+    }),
+  )
+
+  const store = new HistoryStore(dir)
+  await store.load(500)
+  const migrated = store.migratePluginIds(LEGACY_ID_TO_CURRENT)
+  assertEqual(migrated.history, 2, '只迁移旧 id 的两条')
+  assertEqual(migrated.pinned, 1)
+  assertEqual(store.allRecent().length, 3, '新旧 id 的同一条应当合并')
+
+  const merged = store.find(itemKey('hosts', 'hosts', undefined))
+  assert(merged, '迁移后 key 前缀应当是新 id')
+  assertEqual(merged?.pluginId, 'hosts')
+  assertEqual(merged?.count, 3, '合并后使用次数相加')
+  assertEqual(merged?.lastUsed, 2000, '保留最近使用的一条')
+  assert(store.find(legacyArgsKey) === undefined, '带 args 的条目也应当换前缀')
+  assert(store.find(itemKey('hosts', 'hosts', { tab: 'system' })), 'args 哈希不该被改动')
+  assertEqual(store.find(itemKey('other', 'x', undefined))?.pluginId, 'other', '别的插件不受影响')
+  assertEqual(store.pinnedList()[0]?.pluginId, 'hosts')
+
+  await store.flush()
+  const raw = JSON.parse(await fsp.readFile(path.join(dir, 'history.json'), 'utf8')) as { items: Array<{ pluginId: string }> }
+  assert(!raw.items.some((item) => item.pluginId === 'sofast-hosts'), '迁移结果应当落盘')
   await fsp.rm(dir, { recursive: true, force: true })
 })
 
