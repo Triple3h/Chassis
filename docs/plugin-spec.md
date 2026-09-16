@@ -412,6 +412,8 @@ hostUi.setFooter([
 
 - 命令/结果图标：lucide 名优先；插件私有图标用相对路径或 data URL，尺寸 ≥ 40×40（渲染 20×20）
 - **不得**引用远程图标 URL
+- 启动台内置了一份常用 lucide 图标子集（`apps/launcher-ui/src/lib/icons.ts`，约 40 个）；名字写法不敏感（`git-compare` 与 `GitCompare` 等价）
+- **不在子集内的名字会退化成「名称首字母」占位方块**（不报错）；需要新图标就往那份字典里加一条（数据取自 lucide，许可见 `docs/THIRD-PARTY.md`）
 
 ### 10.5 i18n
 

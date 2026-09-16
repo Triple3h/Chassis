@@ -7,6 +7,7 @@
   "private": true,
   "type": "module",
   "apiVersion": "1",
+  "icon": "git-compare",
   "categories": [
     "developer",
     "tool"
@@ -20,7 +21,8 @@
       "title": "文本比对",
       "mode": "view",
       "searchable": true,
-      "placeholder": "粘贴两段文本做差异比对（可在插件内用 | 分隔）"
+      "placeholder": "粘贴两段文本做差异比对（可在插件内用 | 分隔）",
+      "icon": "git-compare"
     }
   ],
   "scripts": {

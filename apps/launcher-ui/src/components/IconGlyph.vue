@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { iconPath } from '../lib/icons'
+import { iconMarkup } from '../lib/icons'
 
 const props = withDefaults(defineProps<{ name?: string; size?: number; tile?: boolean }>(), {
   size: 20,
@@ -8,7 +8,8 @@ const props = withDefaults(defineProps<{ name?: string; size?: number; tile?: bo
 })
 
 const isRemote = computed(() => Boolean(props.name && /^(https?:|data:)/.test(props.name)))
-const path = computed(() => iconPath(props.name))
+/** 字典里存的是 svg 子元素（v-html 渲染），未命中就退回首字母占位 */
+const markup = computed(() => iconMarkup(props.name))
 const radius = computed(() => `${Math.round(props.size * 0.22)}px`)
 const initials = computed(() => {
   const raw = props.name ?? ''
@@ -31,7 +32,7 @@ const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px
     draggable="false"
   />
   <span
-    v-else-if="path"
+    v-else-if="markup"
     class="shrink-0 flex items-center justify-center"
     :class="tile ? 'bg-[var(--hover)] text-[var(--fg-muted)]' : 'text-[var(--fg-muted)]'"
     :style="tile ? { ...box, borderRadius: radius } : undefined"
@@ -46,9 +47,8 @@ const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px
       stroke-linecap="round"
       stroke-linejoin="round"
       aria-hidden="true"
-    >
-      <path :d="path" />
-    </svg>
+      v-html="markup"
+    />
   </span>
   <span
     v-else

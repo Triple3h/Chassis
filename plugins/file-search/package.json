@@ -7,7 +7,7 @@
   "apiVersion": "1",
   "description": "用 Spotlight 索引搜索本机文件，可打开或在 Finder 中显示",
   "author": "launcher",
-  "icon": "file-text",
+  "icon": "file-search",
   "keywords": ["file", "文件", "搜索", "mdfind", "spotlight"],
   "capabilities": ["storage", "shell.open"],
   "commands": [
@@ -17,7 +17,8 @@
       "mode": "script",
       "contributes": true,
       "keywords": ["file", "文件", "查找", "find"],
-      "placeholder": "输入文件名"
+      "placeholder": "输入文件名",
+      "icon": "file-search"
     },
     {
       "name": "reveal",

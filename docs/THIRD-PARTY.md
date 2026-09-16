@@ -74,6 +74,63 @@ SOFTWARE.
 
 ---
 
+## Lucide（ISC；其中 Feather 衍生图标为 MIT）
+
+- 仓库：<https://github.com/lucide-icons/lucide>
+- 许可证：ISC License, Copyright (c) 2026 Lucide Icons and Contributors；其中从 Feather 衍生的一部分图标为 MIT License, Copyright (c) 2013-present Cole Bemis（`search` / `terminal` / `check` / `trash` / `plus` / `server` 等在本仓库使用范围内）
+- 用途：**图标数据来源**（非依赖）。`apps/launcher-ui/src/lib/icons.ts` 内置的 svg 子元素取自 lucide 官方图标，渲染仍由本仓库完成（`apps/launcher-ui/src/components/IconGlyph.vue`）。
+
+> **为什么内联而不装包**：图标是可枚举的静态数据，内联进 `lib/icons.ts` 后总体积只有几 KB，
+> 同时保持离线可用、零运行时依赖；`docs/plugin-spec.md §10.4` 据此只允许三种图标形态（lucide 名 / 相对路径 / data URL）。
+
+### ISC License 原文（Lucide）
+
+```
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+### MIT License 原文（Feather 衍生图标）
+
+```
+MIT License
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
 ## 参考但未引入（仅作设计对照）
 
 | 项目 | 许可证 | 参考点 |
@@ -88,4 +145,4 @@ SOFTWARE.
 
 ## 本仓库许可证
 
-MIT（本仓库当前未放 `LICENSE` 文件；对外分发前须补齐）。
+MIT，见根目录 [LICENSE](../LICENSE)。

@@ -1,6 +1,10 @@
 /**
- * 图标：不引第三方图标库（体积 + 离线），内置 lucide 风格的 path 数据。
- * 插件也可以传 lucide 名（如 `terminal`），命中则用内置图标渲染。
+ * 图标：不引第三方图标库（体积 + 离线），字典里存 lucide 的 svg 子元素
+ * （数据取自 lucide（ISC 许可，见 docs/THIRD-PARTY.md），渲染仍由本仓库完成）。
+ *
+ * 值有两种形态：新条目直接写 lucide 的子元素（`<path>` / `<circle>` / `<rect>` …），
+ * 早期条目只有单条 path 的 `d`，渲染时自动补 `<path>` 外壳。
+ * 插件可以传 lucide 名（`terminal` / `GitCompare` / `git-compare` 都认），命中则用内置图标渲染。
  */
 export const ICONS: Record<string, string> = {
   search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm10 2-4.35-4.35',
@@ -33,9 +37,45 @@ export const ICONS: Record<string, string> = {
   info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 16v-4 M12 8h.01',
   history: 'M3 3v5h5 M3.05 13A9 9 0 1 0 6 5.3L3 8 M12 7v5l4 2',
   globe: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M2 12h20 M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z',
+  'file-search':
+    '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><circle cx="11.5" cy="14.5" r="2.5"/><path d="M13.3 16.3 15 18"/>',
+  'shield-check':
+    '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+  server:
+    '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/>',
+  'git-compare':
+    '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/>',
+  braces:
+    '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>',
+  'sliders-horizontal':
+    '<path d="M10 5H3"/><path d="M12 19H3"/><path d="M14 3v4"/><path d="M16 17v4"/><path d="M21 12h-9"/><path d="M21 19h-5"/><path d="M21 5h-7"/><path d="M8 10v4"/><path d="M8 12H3"/>',
+  'columns-2': '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',
+  save: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
+  'qr-code':
+    '<rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/>',
 }
 
-export function iconPath(name: string | undefined): string | null {
+/** lucide 改过名的图标：插件按官方旧名写也能命中 */
+const ALIASES: Record<string, string> = {
+  sliders: 'sliders-horizontal',
+  columns: 'columns-2',
+}
+
+/** PascalCase / camelCase 归一化成 kebab-case：`GitCompare` → `git-compare`（lucide 官方名是前者） */
+function toKebab(name: string): string {
+  return name
+    .replace(/^lucide:/i, '')
+    .replace(/_/g, '-')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1-$2')
+    .toLowerCase()
+}
+
+/** 查表并转成可直接 v-html 的 svg 子元素；未命中返回 null（调用方画首字母占位） */
+export function iconMarkup(name: string | undefined): string | null {
   if (!name) return null
-  return ICONS[name] ?? null
+  const key = toKebab(name)
+  const raw = ICONS[key] ?? ICONS[ALIASES[key] ?? '']
+  if (!raw) return null
+  return raw.startsWith('<') ? raw : `<path d="${raw}" />`
 }

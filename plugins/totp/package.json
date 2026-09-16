@@ -7,6 +7,7 @@
   "private": true,
   "type": "module",
   "apiVersion": "1",
+  "icon": "shield-check",
   "categories": [
     "security",
     "tool"
@@ -23,12 +24,14 @@
       "title": "双重验证码",
       "mode": "view",
       "searchable": true,
-      "placeholder": "搜索账户，或粘贴 otpauth:// 链接 / Base32 密钥"
+      "placeholder": "搜索账户，或粘贴 otpauth:// 链接 / Base32 密钥",
+      "icon": "shield-check"
     },
     {
       "name": "read-image",
       "title": "读取本地图片（脚本）",
-      "mode": "script"
+      "mode": "script",
+      "icon": "qr-code"
     }
   ],
   "scripts": {

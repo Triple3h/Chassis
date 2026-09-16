@@ -17,7 +17,8 @@
       "mode": "script",
       "contributes": true,
       "keywords": ["url", "www", "搜索", "search", "baidu", "google"],
-      "placeholder": "输入网址或关键词"
+      "placeholder": "输入网址或关键词",
+      "icon": "globe"
     }
   ],
   "scripts": {

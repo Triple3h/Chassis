@@ -7,6 +7,7 @@
   "private": true,
   "type": "module",
   "apiVersion": "1",
+  "icon": "server",
   "categories": [
     "tool"
   ],
@@ -21,17 +22,20 @@
       "title": "Hosts 管家",
       "mode": "view",
       "searchable": true,
-      "placeholder": "搜索域名，或粘贴「1.2.3.4 example.com」直接添加"
+      "placeholder": "搜索域名，或粘贴「1.2.3.4 example.com」直接添加",
+      "icon": "server"
     },
     {
       "name": "hosts-read",
       "title": "读取 Hosts 文件（脚本）",
-      "mode": "script"
+      "mode": "script",
+      "icon": "file-text"
     },
     {
       "name": "hosts-write",
       "title": "写入 Hosts 文件（脚本）",
-      "mode": "script"
+      "mode": "script",
+      "icon": "save"
     }
   ],
   "scripts": {

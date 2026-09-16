@@ -17,7 +17,8 @@
       "mode": "script",
       "contributes": true,
       "keywords": ["app", "app-launcher", "yingyong", "应用", "启动"],
-      "placeholder": "输入应用名"
+      "placeholder": "输入应用名",
+      "icon": "app-window"
     },
     {
       "name": "refresh",
