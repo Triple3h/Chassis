@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import ActionsMenu from './components/ActionsMenu.vue'
 import DetailPanel from './components/DetailPanel.vue'
 import FooterBar from './components/FooterBar.vue'
@@ -236,8 +236,7 @@ function onKeydown(event: KeyboardEvent): void {
     if (matchChord(event, 'Escape') || matchChord(event, 'Mod+W')) {
       event.preventDefault()
       event.stopPropagation()
-      ui.closePluginView()
-      searchBox.value?.focus()
+      void leavePluginView()
       return
     }
     if (matchChord(event, 'Mod+,')) {
@@ -401,6 +400,19 @@ async function reopenPluginView(view: PluginViewState): Promise<void> {
   ui.closePluginView()
 }
 
+/**
+ * 离开插件页回到搜索态（footer 的「返回」按钮、`Esc`、`⌘W` 都走这一条）。
+ *
+ * 必须 `await nextTick()` 再聚焦：插件页开着的时候 SearchBox 是卸载状态，
+ * 它的模板 ref 是 null，同步调用 `.focus()` 只会静默失败 ——
+ * 表现就是"回来了但键盘打不进字，还得用鼠标点一下"。
+ */
+async function leavePluginView(): Promise<void> {
+  ui.closePluginView()
+  await nextTick()
+  searchBox.value?.focus()
+}
+
 async function openSettings(): Promise<void> {
   try {
     const res = await api.invoke('internal-settings:settings')
@@ -540,10 +552,9 @@ function actionLabel(action: { type: string }, index: number): string {
 
 const defaultHints = computed(() => {
   if (ui.inPluginView) {
-    return [
-      { keys: ['Esc'], label: '返回' },
-      { keys: formatKeys(['Mod+W']), label: '关闭' },
-    ]
+    // 插件视图里宿主只有一个动作（返回），它和它的两个快捷键都在左下角那个按钮上，
+    // 这一侧再写一遍就是同一个词在一行里出现两次
+    return []
   }
   const hints = [
     { keys: ['↑', '↓', '←', '→'], label: '选择' },
@@ -566,7 +577,13 @@ const defaultHints = computed(() => {
         @loaded="ui.pluginLoading = false"
         @crash="(reason) => ui.showToast(reason)"
       />
-      <FooterBar :buttons="ui.footer" :default-hints="defaultHints" @action="onFooterAction" />
+      <FooterBar
+        :buttons="ui.footer"
+        :default-hints="defaultHints"
+        back
+        @action="onFooterAction"
+        @back="leavePluginView"
+      />
     </template>
 
     <!-- 启动台 -->
