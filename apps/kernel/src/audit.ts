@@ -28,16 +28,24 @@ export interface AuditQuery {
 
 /**
  * 统一审计（requirements §7.7 / P6）。
- * 所有 `插件 → 宿主` 的调用都必须经过这里，没有旁路。
+ * 所有 `插件 → 宿主` 的调用都必须经过这里，没有旁路；
+ * 唯一例外是底座基础能力（`essential` 出厂插件）——由 `setExempt` 豁免，不进环形缓冲与日志文件。
  */
 export class AuditLog {
   readonly dir: string
   private ring: AuditRecord[] = []
   private queue: Promise<void> = Promise.resolve()
   private ready = false
+  /** 豁免判定：返回 true 的插件不落审计（装配期由内核注入，见 Kernel 构造器） */
+  private exempt: (pluginId: string) => boolean = () => false
 
   constructor(dataRoot: string) {
     this.dir = path.join(dataRoot, 'logs')
+  }
+
+  /** 底座基础能力（essential）的调用等价于底座自身的行为，不记审计 */
+  setExempt(fn: (pluginId: string) => boolean): void {
+    this.exempt = fn
   }
 
   async init(): Promise<void> {
@@ -57,6 +65,10 @@ export class AuditLog {
       capability: input.capability ?? '',
     }
     if (input.error) rec.error = input.error
+    // 基础能力不落审计：它们不可禁用、随底座一同发布，且调用量大得多（设置页轮询、应用扫描、文件搜索），
+    // 记进来只会挤满环形缓冲与日志文件，把真正需要追溯的第三方插件记录淹掉
+    if (this.exempt(input.pluginId)) return rec
+
     const argsText = input.args === undefined ? '' : truncateForAudit(input.args)
     if (argsText) rec.truncatedArgs = argsText
 

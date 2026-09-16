@@ -190,6 +190,9 @@ export class Kernel {
       },
     })
 
+    // 底座基础能力（essential）的调用不进审计：等价于底座自身行为，且调用量大
+    this.audit.setExempt((pluginId) => this.plugins.isEssential(pluginId))
+
     this.search = new SearchEngine({
       registry: this.registry,
       hub: this.hub,

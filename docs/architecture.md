@@ -234,7 +234,7 @@ active → degraded（脚本连续失败 3 次）
 | 脚本沙箱 | `script` / `no-view` 产物跑在 `worker_threads` 里，拥有完整 Node 权限（可读写文件、起子进程） | 这是"脚本命令"这一形态的固有代价（与 uTools/ZTools 一致）。审计记录调用，但无法阻止脚本自行 `child_process`。缓解：安装时展示 `exec.spawn` 高风险能力、可拒绝（拒绝后脚本无法被 `ctx.exec.run` 拉起，但用户仍可通过命令直接触发）。**若要真正沙箱化，需要给 worker 加 `--experimental-permission` 或换进程级沙箱，属于 v2 议题。** |
 | 插件页网络 | CSP `connect-src 'self' https:` + `default-src 'self'`，禁止访问 `127.0.0.1` | 防止插件探测本机服务 |
 | 插件页与宿主 | iframe `sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"` | 需要 `allow-same-origin` 才能用 `localStorage` / `ctx.storage` |
-| 审计旁路 | 没有：所有插件→宿主调用都过 `BridgeDispatcher`（UI 侧）或 `ScriptRuntime.handleRpc`（脚本侧） | P6 |
+| 审计旁路 | 没有：所有插件→宿主调用都过 `BridgeDispatcher`（UI 侧）或 `ScriptRuntime.handleRpc`（脚本侧） | P6。唯一例外：底座基础能力（`essential` 出厂插件，不可禁用）的调用经 `AuditLog.setExempt` 豁免，不进环形缓冲与日志文件 |
 | zip 安装 | 拒绝绝对路径 / `..` / 超大文件；**符号链接**：`adm-zip` 不还原符号链接（按普通文件处理），因此不存在链接逃逸 | 与需求 §9 的"拒符号链接"目标等价 |
 
 ---
