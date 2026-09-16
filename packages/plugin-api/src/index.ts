@@ -107,6 +107,15 @@ export function isInLauncher(): boolean {
   return inLauncherCache
 }
 
+/**
+ * JSON 往返：把不可结构化克隆的值展平成普通数据。
+ * 主要针对 Vue 的 reactive —— 它是 Proxy，`postMessage` 会抛 DataCloneError；
+ * 而宿主 API 的参数最终都走 JSON（storage 落盘、JSON-RPC 转发），展平不丢语义。
+ */
+function toPlain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 function post(method: string, payload?: Record<string, unknown>, options?: CallOptions): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!isInLauncher()) {
@@ -127,7 +136,24 @@ function post(method: string, payload?: Record<string, unknown>, options?: CallO
       token: params().get('token') ?? '',
       params: payload ?? {},
     }
-    window.parent.postMessage(message, '*')
+    // postMessage 按结构化克隆传输：Vue 的 reactive(Proxy) 会抛 DataCloneError，
+    // 消息根本发不出去（现象是「调用静默超时、宿主侧毫无记录」）。失败后用 JSON 往返重发一次。
+    try {
+      window.parent.postMessage(message, '*')
+    } catch {
+      try {
+        window.parent.postMessage({ ...message, params: toPlain(message.params) }, '*')
+      } catch (err) {
+        window.clearTimeout(timer)
+        pending.delete(id)
+        reject(
+          new LauncherError(
+            'BAD_ARGS',
+            `参数无法发送给宿主（${method}）：${err instanceof Error ? err.message : String(err)}`,
+          ),
+        )
+      }
+    }
   })
 }
 

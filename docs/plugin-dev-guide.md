@@ -413,6 +413,14 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
   - `package.json` 的 `build` 末段改成 `node scripts/build-no-view.mjs`。
 - **顺带**：Vite 的 `defineConfig` **不接受配置数组**，CLI 会直接报 `config must export or return an object`，所以「多配置」只能自己在脚本里循环调用。
 
+### 5.18 调用宿主"点了没反应"（保存 / 删除按钮像挂了）
+
+- **现象**：点按钮后界面毫无变化，也没有任何报错；宿主审计日志里**完全没有这次调用**（连失败记录都没有）。
+- **原因**：参数里带了 Vue 的 `reactive` / `ref` 代理（Proxy）。`window.parent.postMessage` 按结构化克隆传输，**含 Proxy 的 payload 会抛 `DataCloneError`**，
+  消息根本发不出去 —— SDK 侧只表现为"调用超时"。
+- **对策**：SDK 已内置兜底（首发失败时 JSON 往返展平后重发一次，见 `packages/plugin-api` 的 `post()`）；
+  插件侧仍建议在写库 / 提交前展开一层（`list.map((x) => ({ ...x }))`）或 `toRaw()`，并给写操作补 `try/catch + toast.err`，别让失败被静默吞掉。
+
 ---
 
 ## 6. 新增一个插件的检查清单

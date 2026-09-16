@@ -260,6 +260,8 @@ const content = await hostUi.getSearchContent()
 - 所有方法返回 `Promise`，**永不抛出原生异常**；失败抛 `LauncherError { code, message }`
 - 每个方法都可传 `{ timeoutMs }`；**必须**处理超时（宿主可能正在退出）
 - SDK 内部对所有调用加超时（默认 1.2s，`exec` 用调用方给的值），**不得**依赖"永不返回"的语义
+- 参数必须**可结构化克隆**：不要把 Vue 的 `reactive` / `ref` 代理直接交给宿主（`postMessage` 会抛 `DataCloneError`，消息发不出去）。
+  SDK 已内置兜底（失败时 JSON 往返展平重发），插件侧展开一层更稳：`list.map((x) => ({ ...x }))`
 
 ### 7.2 API 全表
 
