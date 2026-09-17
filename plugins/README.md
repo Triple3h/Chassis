@@ -3,24 +3,25 @@
 出厂**预装**的 8 个插件。内核一视同仁：同一份「出厂 bundle」、可禁用、可卸载
 （只有 `internal-*` 属管理面不可卸载），产物形态与 `docs/plugin-spec.md` 完全一致。
 
-| 插件 | 命令 | 工具链 |
-|---|---|---|
-| `app-launcher` | `search`（script，贡献型） + `refresh`（no-view） | esbuild |
-| `file-search` | `search`（script，贡献型） | esbuild |
-| `web-open` | `web`（script，贡献型） | esbuild |
-| `internal-settings` | `settings` + `manage`（view） | esbuild |
-| `totp` | `totp`（view） + `read-image`（script） | Vite + Vue |
-| `host-manager` | `hosts`（view） + `hosts-read` / `hosts-write`（script） | Vite + Vue |
-| `text-diff` | `diff`（view） | Vite + Vue |
-| `json-tools` | `json`（view） | Vite + Vue |
+| 插件 | 命令 | 视图层 | 逻辑层 |
+|---|---|---|---|
+| `app-launcher` | `search`（script，贡献型） + `refresh`（no-view） | esbuild | Rust |
+| `file-search` | `search`（script，贡献型） | esbuild | Rust |
+| `web-open` | `web`（script，贡献型） | esbuild | Rust |
+| `internal-settings` | `settings` + `manage`（view） | esbuild | — |
+| `totp` | `totp`（view） + `read-image`（script） | Vite + Vue | Rust |
+| `host-manager` | `hosts`（view） + `hosts-read` / `hosts-write`（script） | Vite + Vue | Rust |
+| `text-diff` | `diff`（view） | Vite + Vue | — |
+| `json-tools` | `json`（view） | Vite + Vue | — |
 
-## 两套工具链
+## 工程形态：视图层两套工具链，逻辑层统一 Rust
 
-| | 内置（esbuild 工具链） | Vue 插件 |
+| | 内置（esbuild 工程） | Vue 插件 |
 |---|---|---|
-| 工具链 | `scripts/build-plugin.mjs`（esbuild，无框架） | 各自的 Vite + Vue 3 + Tailwind v4 工程 |
+| 视图层 | `scripts/build-plugin.mjs`（esbuild，无框架） | 各自的 Vite + Vue 3 + Tailwind v4 工程 |
+| 逻辑层 | Rust crate（源码在插件目录的 `src/`，产物 `dist/<命令名>`，apiVersion 2） | 同左（统一用 Rust SDK `launcher-plugin-sdk`） |
 | 清单 | 手写 `package.json` 精简字段 | 构建期由 `scripts/lib/manifest-plugin.mjs` 裁剪写入 `dist/package.json` |
-| 宿主调用 | view 直连 `@launcher/api`；逻辑层用 Rust SDK `launcher-plugin-sdk` | 同左（逻辑层同样走 Rust） |
+| 宿主调用 | view 直连 `@launcher/api`；逻辑层用 Rust SDK `launcher-plugin-sdk` | 同左 |
 | 共享代码 | 无（各自独立） | `@launcher/ui`（工作区包，`packages/ui/`）：UI 积木 + 前端工具（构建期打进各自产物） |
 | 构建驱动 | 根 `scripts/build-all.mjs` 按 `package.json` 的 `build:view` / `build:scripts` 驱动 | 同左 |
 
@@ -108,12 +109,17 @@ import { exec, host, hostUi, screenshot, storage } from '@launcher/api'        /
 逻辑层（`no-view` / `script`，Rust）：
 
 ```rust
-use launcher_plugin_sdk::{run, json, Context, Result};
+use launcher_plugin_sdk::{json, Mode};
 
-fn main() { run(dispatch) }                 // panic 由 SDK 转 fail
-fn dispatch(ctx: &Context) -> Result<()> {
-    let args = ctx.args::<MyArgs>()?;        // ctx.args / settings / data_path / log / progress / on_query
-    ctx.done(json!({ "ok": true }))
+fn main() {
+    // panic 由 SDK 转 fail；run 模式结束后进程退出
+    launcher_plugin_sdk::run(|ctx| match ctx.mode() {
+        Mode::Run => {
+            let args = ctx.args::<MyArgs>()?;   // ctx.args / settings / data_path / log / progress / on_query
+            ctx.done(json!({ "ok": true }))
+        }
+        Mode::Search => ctx.on_query(|query, _token| Ok(vec![json!({ "id": query, "title": query })])),
+    });
 }
 ```
 
@@ -134,7 +140,7 @@ CSP 或老 WebView 下 Worker 可能创建失败，降级分支不是可选项�
 ### 硬约束（违反必出问题）
 
 - **可变数据只写 `ctx().dataPath`**（N2）；`pluginPath` 只许读。
-- 清单**必须**带 `apiVersion: "1"` 与 `capabilities`（只声明真正用到的）。
+- 清单**必须**带 `apiVersion`（新插件写 `"2"`；底座仍接受 `"1"` 的视图层插件）与 `capabilities`（只声明真正用到的）。
 - `commands[].name` 对 `no-view`/`script` 必须等于产物文件名 `dist/<name>`。
 - 逻辑层 crate 的 `[[bin]]` 名 = 命令名（单一 bin 天然自包含，不存在 v1 那种「多入口被 Rollup 拆 chunk」的问题）。
 - `vite.config.ts` 必须 `base: './'`，**不要开 `manualChunks`**。

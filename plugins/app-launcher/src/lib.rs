@@ -1,8 +1,9 @@
-//! macOS 应用扫描 + 匹配 + 图标（v1 `src/core/{scanner,match,icons,store}.ts` 的 Rust 版）。
+//! macOS 应用扫描 + 匹配 + 图标。
 //!
-//! 扫描与本地化名称解析逻辑移植自 ZTools `macScanner.ts`（MIT, Copyright (c) ZToolsCenter），
-//! 按本底座的「零 Electron」约束改造：`app.getPreferredSystemLanguages()` → `defaults read -g AppleLanguages`、
-//! 图标输出 `.icns` 路径再用系统 `sips` 转 PNG。详见 `docs/THIRD-PARTY.md`。
+//! 扫描与本地化名称解析逻辑衍生自 ZTools `macScanner.ts`
+//! （MIT License, Copyright (c) 2025 lzx8589561 —— 声明与许可原文见 `docs/THIRD-PARTY.md`），
+//! 按本仓库的零 Electron 约束改造：语言列表走 `defaults read -g AppleLanguages`、
+//! 图标输出 `.icns` 路径再用系统 `sips` 转 PNG。
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -79,7 +80,7 @@ pub fn mac_application_paths() -> Vec<String> {
     ]
 }
 
-// ── 本地化名称（v1 scanner.ts 的移植，含 ZTools 的 lproj / loctable 规则）──
+// ── 本地化名称（含 lproj / loctable 规则；衍生声明见本文件头）──
 
 fn unique_non_empty<I: IntoIterator<Item = Option<String>>>(values: I) -> Vec<String> {
     let mut seen = HashSet::new();
@@ -692,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn lproj_candidates_follow_zTools_rules() {
+    fn lproj_candidates_follow_bcp47_rules() {
         assert_eq!(bcp47_to_lproj_names("zh-Hans-CN")[0], "zh-Hans");
         assert!(bcp47_to_lproj_names("zh-Hans-CN").contains(&"zh_CN".to_string()));
         assert!(bcp47_to_lproj_names("zh-Hant-TW").contains(&"zh_TW".to_string()));

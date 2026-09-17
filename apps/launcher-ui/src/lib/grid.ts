@@ -1,8 +1,7 @@
 import type { RankedResult } from './types'
 
 /**
- * 结果网格（布局与操作逻辑对照 ZTools 的聚合视图）：
- * 分区标题 + 每行 N 个「图标 + 名称」格子，方向键按格子移动。
+ * 结果网格：分区标题 + 每行 N 个「图标 + 名称」格子，方向键按格子移动。
  */
 
 export type ResultGroup = 'pinned' | 'best' | 'recent'
@@ -178,7 +177,7 @@ export function displayRowIndex(rows: GridRow[], itemIndex: number): number {
   return locate(rows, itemIndex)?.row ?? 0
 }
 
-/** 同列上下移动：落点行比当前行短时贴到该行末尾（ZTools 同款钳制） */
+/** 同列上下移动：落点行比当前行短时贴到该行末尾 */
 export function moveVertical(rows: GridRow[], itemIndex: number, dir: 1 | -1): number {
   const at = locate(rows, itemIndex)
   if (!at) return itemIndex

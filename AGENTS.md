@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-Launcher is a ZTools-style launcher: Tauri 2 Rust shell (system primitives only) + **Rust kernel** (`apps/kernel`, bin `launcher-kernel`, ADR-0005) + Vue 3 launcher UI. Three invariants govern every change: the kernel has **zero capabilities** (scanning apps, reading files, launching — all plugins), built-in plugins use the same mechanism as third-party ones, and undeclared capabilities do not exist at runtime.
+Chassis is a plugin-based macOS launcher: Tauri 2 Rust shell (system primitives only) + **Rust kernel** (`apps/kernel`, bin `launcher-kernel`, ADR-0005) + Vue 3 launcher UI. Three invariants govern every change: the kernel has **zero capabilities** (scanning apps, reading files, launching — all plugins), built-in plugins use the same mechanism as third-party ones, and undeclared capabilities do not exist at runtime. The app runs with no Node dependency: the kernel and all logical-layer plugin commands are Rust executables.
 
 ## Project Structure & Module Organization
 
@@ -35,7 +35,7 @@ Rust tests live beside their modules plus `apps/kernel/tests/`. TS tests use a d
 
 ## Commit & Pull Request Guidelines
 
-Commits follow Conventional Commits with a Chinese subject plus explanatory body: `feat: 启动台结果改为图标网格（对照 ZTools 的布局与操作逻辑）`, `refactor: 清除第三方兼容层 + plugins/shared 上收为 @launcher/ui`, `chore: .codebuddy 不入库`.
+Commits follow Conventional Commits with a Chinese subject plus explanatory body: `feat: 启动台结果改为图标网格（分区折叠 / 键盘导航 / 拖拽重排）`, `refactor: 清除第三方兼容层 + plugins/shared 上收为 @launcher/ui`, `chore: .codebuddy 不入库`.
 
 Pull requests: state the behavior change and rationale, list commands run (`typecheck` / `test` / `build` / `spec-check`), and attach a screenshot for UI changes. Spec-first — update `docs/launcher-requirements.md` or `docs/plugin-spec.md` (or add an ADR) before implementing unspecified behavior, and refresh docs whenever slots, fields, or schema change.
 

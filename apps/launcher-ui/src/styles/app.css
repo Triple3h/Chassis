@@ -167,7 +167,7 @@ body {
   cursor: grab;
 }
 
-/* 结果网格：滚动条会破坏「整片图标墙」的观感（ZTools 同样隐藏） */
+/* 结果网格：滚动条会破坏「整片图标墙」的观感 */
 .no-scrollbar {
   scrollbar-width: none;
 }

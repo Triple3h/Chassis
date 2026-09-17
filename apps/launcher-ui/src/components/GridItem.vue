@@ -45,7 +45,7 @@ const segments = computed<Segment[]>(() => {
   ].filter((s) => s.text.length > 0)
 })
 
-/** 格子里放不下副标题，进 tooltip（ZTools 同款处理） */
+/** 格子里放不下副标题，进 tooltip */
 const tooltip = computed(() =>
   [props.result.item.title, props.result.item.subtitle, props.result.pluginTitle].filter(Boolean).join('\n'),
 )

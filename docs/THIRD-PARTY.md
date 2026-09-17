@@ -1,8 +1,9 @@
-# 第三方代码与许可证
+# 第三方组件与许可证
 
-> 状态：随依赖与移植变更维护 ｜ 最后更新：2026-09-16
+> 状态：随依赖与衍生实现变更维护 ｜ 最后更新：2026-09-17
 
-本仓库包含（或移植了）以下第三方代码。所有引入都保留了原始许可证与版权声明。
+本仓库包含以下第三方组件的衍生实现或数据，均保留了原始许可证与版权声明。
+本仓库整体以 MIT 许可发布，见根目录 [LICENSE](../LICENSE)。
 
 ---
 
@@ -10,39 +11,20 @@
 
 - 仓库：<https://github.com/ZToolsCenter/ZTools>
 - 许可证：MIT License, Copyright (c) 2025 lzx8589561
-- 用途：**移植**（非直接依赖）macOS 应用扫描与本地化名称解析逻辑。
+- 用途：macOS 应用扫描与本地化名称解析逻辑是本仓库的**衍生实现**（非直接依赖）。
 
-### 移植清单（文件级）
+### 衍生清单（文件级）
 
 | 本仓库文件 | 来源（ZTools） | 改造内容 |
 |---|---|---|
-| `plugins/app-launcher/src/lib.rs`（v1：`src/core/scanner.ts`，已随 v1 清理删除） | `src/main/core/commandScanner/macScanner.ts`（约 432 行中的扫描主体） | 去掉 Electron 依赖：语言列表走 `defaults read -g AppleLanguages`；图标用 `.icns` 路径（由 `sips` 转 PNG）；并发用内置保序实现 |
-| `plugins/app-launcher/src/core/scanner.ts` 中的 `collectAppBundles` | 同上 | 原样移植（含符号链接解析、PWA/Office 子目录下钻一层、`.app` 命中即停止下钻） |
-| `plugins/app-launcher/src/core/scanner.ts` 中的 `bcp47ToLprojNames` / `bcp47ToLoctableKeys` / `parseStringsContent` / `readStringsFile` | 同上 | 原样移植（含 binary plist / XML plist / UTF-16 文本三种 `.strings` 格式） |
-| `apps/kernel/src/http/server.rs` 的 URL 拆分与穿越防护 | `src/main/utils/pluginUrl.ts`（`getUrlScheme` / `splitPluginUrl` 的思路） | 按本仓库的静态服务需求重写为 `resolve_within_root` |
+| `plugins/app-launcher/src/lib.rs` | `src/main/core/commandScanner/macScanner.ts`（约 432 行中的扫描主体） | 去掉 Electron 依赖：语言列表走 `defaults read -g AppleLanguages`；图标用 `.icns` 路径（由 `sips` 转 PNG）；并发用内置保序实现 |
+| 同上（`collect_app_bundles`） | 同上 | 含符号链接解析、PWA/Office 子目录下钻一层、`.app` 命中即停止下钻 |
+| 同上（`bcp47_to_lproj_names` / `bcp47_to_loctable_keys` / `parse_strings_content` / `read_strings_file`） | 同上 | 含 binary plist / XML plist / UTF-16 文本三种 `.strings` 格式 |
+| `apps/kernel/src/util/fsx.rs` 的 `resolve_within_root` | `src/main/utils/pluginUrl.ts`（`getUrlScheme` / `splitPluginUrl` 的思路） | 按本仓库的静态资源服务需求重写为路径越界防护 |
 
-**未移植**：ZTools 的插件管理、窗口管理、存储、同步、AI、支付、市场等模块（架构不同：Electron `WebContentsView` → Tauri WebView + iframe + 每插件独立端口）。
+除上表所列之外，本仓库代码均为原创实现（UI 的图标网格、键盘导航、显隐动效等不与任何第三方共享源码）。
 
-### 设计对照：启动台结果网格（UI，未复制代码）
-
-`apps/launcher-ui` 的**结果网格**（分区标题 + 每行 N 个「图标 + 名称」格子、「展开 (N) / 收起」、方向键按格子移动、`Esc` 分步退出、已固定分区拖拽重排）是照 ZTools 渲染层的聚合视图**行为语义**重写的本仓库实现（Vue 3 + Pinia + Tailwind，代码见 `apps/launcher-ui/src/lib/grid.ts`、`components/ResultGrid.vue`）：对照 `src/renderer/src/components/search/AggregateView.vue`、`components/common/CollapsibleList.vue`、`CommandList.vue`、`composables/useNavigation.ts`。**代码为原创，不含 ZTools 源码。**
-
-### 依赖选型参考（非代码移植）
-
-以下 npm 包的选择参考了 ZTools 的实践（ZTools `package.json`）：
-
-| 包（v1 选型时） | 本仓库用途 | v2（当前实现） |
-|---|---|---|
-| `pinyin-pro` | 拼音全拼 / 首字母索引 | `pinyin` crate（`apps/kernel/src/pinyin.rs`；多音字按**读音变体**展开） |
-| `chokidar` | 监听 `extensions/` 目录变化触发热重载 | 由管理面动作触发重载（不再监听目录） |
-| `adm-zip` | 插件 zip 安装 | `zip` crate（`apps/kernel/src/plugin/admin.rs`） |
-
-> **`simple-plist` 一直没被采用**：v1 时它运行时 `require('bplist-creator' / 'bplist-parser')`，打不进自包含产物（违反 N1），
-> 当时改为自研的 TS 解析器；v2 起由 `plugins/app-launcher/rust` 用 `plist` crate 读（binary + XML 只读）。
-
----
-
-## MIT License 原文（ZTools）
+### MIT License 原文（ZTools）
 
 ```
 MIT License
@@ -131,7 +113,7 @@ SOFTWARE.
 
 | 项目 | 许可证 | 参考点 |
 |---|---|---|
-| [rubickCenter/rubick](https://github.com/rubickCenter/rubick) | MIT | uTools 形态的插件桥与插件市场设计 |
+| [rubickCenter/rubick](https://github.com/rubickCenter/rubick) | MIT | 插件桥与插件市场的形态设计 |
 | [MystikoLab/rustcast](https://github.com/MystikoLab/rustcast) | MIT | Rust 侧原生 Launcher 的排序与计算器设计 |
 | [newdee/magpie](https://github.com/newdee/magpie) | MIT | Tauri 2 启动类应用的窗口/热键组织方式 |
 

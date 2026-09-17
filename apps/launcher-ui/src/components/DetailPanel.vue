@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 二级面板：覆盖在网格右侧（不挤压网格列数），ZTools 的 DetailPanel 同款做法 */
+/** 二级面板：覆盖在网格右侧（不挤压网格列数） */
 defineProps<{ title: string; text: string }>()
 defineEmits<{ (e: 'close'): void }>()
 </script>

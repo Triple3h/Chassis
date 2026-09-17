@@ -193,12 +193,12 @@ active → degraded（脚本连续失败 3 次）
 ```
 
 出厂插件在 `<appRoot>/builtin-plugins/`（打包后是 `Contents/Resources/builtin-plugins`），只读、可禁用不可卸载。
-源码全部住在 `plugins/`，只是一个目录里有两套工具链：
+源码全部住在 `plugins/`，一个目录里有两类工程（视图层 + 逻辑层）：
 
-| 插件 | 工具链 | 说明 |
+| 插件 | 视图层（`view` 命令） | 逻辑层（`no-view` / `script`） |
 |---|---|---|
-| 内置（app-launcher / file-search / web-open / internal-settings） | esbuild，无框架 | 与底座同一套发布节奏 |
-| Vue 插件（totp / host-manager / text-diff / json-tools） | Vite + Vue + Tailwind，共用工作区包 `@launcher/ui`（`packages/ui`：UI 积木 + 前端工具） | 2026-09-16 起与内置插件同目录维护、直连底座 SDK；见 `plugins/README.md` |
+| 内置（app-launcher / file-search / web-open / internal-settings） | esbuild，无框架 | Rust crate（源码在插件目录的 `src/`，产物 `dist/<命令名>`） |
+| Vue 插件（totp / host-manager / text-diff / json-tools） | Vite + Vue + Tailwind，共用工作区包 `@launcher/ui`（`packages/ui`：UI 积木 + 前端工具） | Rust crate（同上）；见 `plugins/README.md` |
 
 开发态从仓库根加载：内核 `--builtin-plugins` 接受**逗号分隔的多个目录**（默认 `plugins/`），
 壳的开发态回退指向同一处；打包时 `scripts/lib/resources.mjs` 把各插件的 `dist/` 拷进 `builtin-plugins/`。
@@ -223,7 +223,7 @@ active → degraded（脚本连续失败 3 次）
 | D10 | §10「主线程 > 50ms 的必须进 Worker」（拼音索引构建、大文件解析） | 拼音索引规模小（命令级），暂未进 Worker；历史文件 ≤ 2000 条，读取在毫秒级 | 记为待办：命令数量破千或历史破万时迁移 |
 | D11 | §6.3 打包体积/冷启动指标 | 未做基准；自用版（`pnpm app:local`）已实机运行 | 需要真机 `tauri build` 才能量体积；自用不分发，暂不阻塞 |
 | D12 | §8.10 与第三方旧宿主的兼容层 | **不做兼容**（2026-09-16 起）：桥只认原生信封 `__launcher: 1`，清单校验不放过 `apiVersion` / `capabilities` 缺省，旧布局数据迁移一并移除 | 半兼容的代价是长期维护两套语义，还会把"未实现的能力"伪装成"能用"；底座与插件同仓库，没有历史包袱要背 |
-| D13 | §7.5 「拼音匹配」 | 用 `pinyin-pro`（ZTools 同选型） | 需求 §12 风险对策明确要求"用成熟库" |
+| D13 | §7.5 「拼音匹配」 | 用 `pinyin` crate（内置词典；多音字按读音变体展开，见 §4） | 需求 §12 风险对策明确要求"用成熟库"；Rust 侧依赖选型见 `docs/m5-rust-and-windows.md` §A1.2 |
 | D14 | 未规定 plist 读取方式 | v2 由 `plugins/app-launcher/rust` 用 `plist` crate 读（binary + XML 只读）；v1 是自研 TS 解析器 | v1 的 `simple-plist` 内部是运行时 `require`，打不进自包含产物；v2 换 Rust 后由 crate 承担 |
 | D15 | §7.6「插件在 200ms 内回结果」 | 插件激活后**延迟 800ms 预热**贡献型搜索 worker | 否则用户第一次输入必然吃一次 worker 冷启动 + 索引加载而超时（体验上就是"第一次搜不到"） |
 | D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
@@ -239,22 +239,23 @@ active → degraded（脚本连续失败 3 次）
 
 | 面 | 现状 | 说明 |
 |---|---|---|
-| 脚本沙箱 | `no-view` / `script` 产物是**独立子进程**，拥有当前用户的完整权限（可读写文件、起子进程） | 这是"逻辑层命令"这一形态的固有代价（与 uTools/ZTools 一致，v2 文档已明说"不引入额外沙箱承诺"）。审计记录宿主侧调用，但无法阻止脚本自行起进程。缓解：安装时展示 `exec.spawn` 高风险能力、可拒绝（拒绝后脚本无法被 `ctx.exec.run` 拉起，但用户仍可通过命令直接触发）。**要真正沙箱化需要 WASM 或平台沙箱，属于独立议题。** |
+| 脚本沙箱 | `no-view` / `script` 产物是**独立子进程**，拥有当前用户的完整权限（可读写文件、起子进程） | 这是"逻辑层命令"这一形态的固有代价（`plugin-spec` 已明说"不引入额外沙箱承诺"）。审计记录宿主侧调用，但无法阻止脚本自行起进程。缓解：安装时展示 `exec.spawn` 高风险能力、可拒绝（拒绝后脚本无法被 `ctx.exec.run` 拉起，但用户仍可通过命令直接触发）。**要真正沙箱化需要 WASM 或平台沙箱，属于独立议题。** |
 | 插件页网络 | CSP `connect-src 'self' https:` + `default-src 'self'`，禁止访问 `127.0.0.1` | 防止插件探测本机服务 |
 | 插件页与宿主 | iframe `sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"` | 需要 `allow-same-origin` 才能用 `localStorage` / `ctx.storage` |
 | 审计旁路 | 没有：所有插件→宿主调用都过 `BridgeDispatcher`（UI 侧）或 `ScriptRuntime.handleRpc`（脚本侧） | P6。唯一例外：底座基础能力（`essential` 出厂插件，不可禁用）的调用经 `AuditLog.setExempt` 豁免，不进环形缓冲与日志文件 |
-| zip 安装 | 拒绝绝对路径 / `..` / 超大文件；**符号链接**：`adm-zip` 不还原符号链接（按普通文件处理），因此不存在链接逃逸 | 与需求 §9 的"拒符号链接"目标等价 |
+| zip 安装 | 拒绝绝对路径 / `..` / 超大文件（`zip` crate 逐条校验后解压到 `.staging/`）；**符号链接**：解压不还原链接（条目按普通文件写出），因此不存在链接逃逸 | 与需求 §9 的"拒符号链接"目标等价 |
 
 ---
 
 ## 10. 测试与验收
 
 ```bash
-pnpm typecheck       # 15 个工作区包（含 packages/ui 与各插件，vue 工程走自己的 vue-tsc）
-pnpm test            # 15 个测试文件：内核单元 / 契约 / 验收 + 插件 core·script 用例
-pnpm build           # kernel + ui + 全部出厂插件
-pnpm spec-check      # 出厂插件规范自检（清单 / N1 / N2 / N3 / 产物 / 远程资源）
-pnpm app:local       # 打包自用 .app（M4 的自用形态；公证 / updater 未接）
+cargo test --workspace   # Rust：内核单元 / SDK / 各插件逻辑层
+pnpm typecheck           # 全部工作区包（含 packages/ui 与各插件，vue 工程走自己的 vue-tsc）
+pnpm test                # TS 侧全部测试：契约 / 验收 + 各插件视图层 core 用例
+pnpm build               # kernel + ui + 全部出厂插件
+pnpm spec-check          # 出厂插件规范自检（清单 / N1 / N2 / N3 / 产物 / 远程资源）
+pnpm app:local           # 打包自用 .app（公证 / updater / CI 未接）
 ```
 
 出厂插件在真底座上另有两条端到端冒烟：
@@ -269,7 +270,7 @@ node scripts/smoke-first-batch.mjs   # 四个 Vue 插件端到端（HTTP 驱动�
 | 单元 | `tests/unit/` | 清单校验矩阵、历史排序/淘汰/原子写、路径穿越、审计打码、拼音匹配、Context 装配期裁剪（含 disposer 逆序） |
 | 契约 | `tests/contract/` | `echo-plugin` 覆盖 §8.6 全表（含 `exec.run` / token 校验 / 未授权 / 管理面 `FORBIDDEN`） |
 | 验收 | `tests/smoke/` | §1.3 口径：零插件可启动可搜索、装插件后立刻可搜、执行写历史、固定项持久化、禁用后命令消失而历史置灰、卸载后目录消失 |
-| 插件用例 | `plugins/*/test/`、`packages/*` | 各插件的 core 纯函数与 script 胶水；`packages/ui` 等公共库（`pnpm test` 一并收集） |
+| 插件用例 | `plugins/*/test/`、`packages/*` | 各插件视图层的 core 纯函数；`packages/ui` 等公共库（`pnpm test` 一并收集）。逻辑层用例在各插件 crate 的 `cargo test` |
 
 **人工验收（自动化覆盖不到的部分）**：自动化已覆盖「会话能开、生产资源可达、桥与脚本正确、能力越权被拒、数据落点正确」；
 下面这些在发版/大改后仍需人点一遍：粘贴→格式化→树视图（json-tools）、footer 按键与 `Esc` 分级退出、截图→粘贴导入（totp）、host-manager 的块开关与提权写入回读校验、拖拽重排后的固定顺序落库。

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 分区标题：左「最近使用」右「展开 (19) / 收起」，整行可点（对照 ZTools 的 CollapsibleList） */
+/** 分区标题：左「最近使用」右「展开 (19) / 收起」，整行可点 */
 defineProps<{ label: string; total: number; expanded: boolean; collapsible: boolean; height: number }>()
 defineEmits<{ (e: 'toggle'): void }>()
 </script>

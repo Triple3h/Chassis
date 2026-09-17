@@ -528,7 +528,7 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
-  // 方向键按「格子」移动（ZTools 的聚合视图同款）：↑↓ 同列换行，←→ 逐格
+  // 方向键按「格子」移动：↑↓ 同列换行，←→ 逐格
   if (matchChord(event, 'ArrowDown')) {
     event.preventDefault()
     ui.selected = moveVertical(rows.value, ui.selected, 1)
@@ -584,7 +584,7 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-/** Esc 分步退出（ZTools 同款）：收起二级面板 → 清空输入 → 隐藏窗口 */
+/** Esc 分步退出：收起二级面板 → 清空输入 → 隐藏窗口 */
 function stepwiseEscape(): void {
   if (ui.detailOpen) {
     ui.detailOpen = false
@@ -716,7 +716,7 @@ function onMeasure(width: number): void {
   if (width > 0) containerWidth.value = width
 }
 
-/** 固定项拖拽重排（ZTools 的已固定网格支持拖动排序） */
+/** 固定项拖拽重排 */
 async function onReorder(payload: { from: RankedResult; to: RankedResult }): Promise<void> {
   const keys = data.pinnedResults.map((result) => result.itemKey)
   const from = keys.indexOf(payload.from.itemKey)

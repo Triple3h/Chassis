@@ -754,7 +754,7 @@ function renderAbout(): string {
       <strong>底座原则</strong>
       <div class="hint">底座零能力：内核里不出现任何具体能力，所有能力（含「启动应用」本身）都以插件形式集成。</div>
       <div class="hint">能力即权限：未在清单声明的能力在装配期就不挂载，插件侧表现为「方法不存在」，且有审计记录。</div>
-      <div class="hint">许可证：本底座为 MIT；内置应用扫描逻辑移植自 ZTools（MIT），见 docs/THIRD-PARTY.md。</div>
+      <div class="hint">许可证：本项目为 MIT；第三方组件与许可证清单见 docs/THIRD-PARTY.md。</div>
     </div>
   `
 }

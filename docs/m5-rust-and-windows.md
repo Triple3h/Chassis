@@ -1,6 +1,6 @@
 # M5 实现计划：Rust 内核（阶段 A）→ Windows 平台（阶段 B）
 
-> **状态**（2026-09-17）：**A0 / A1 / A2 / A3 已完成**（阶段 A 收尾；仅剩「换包实机」这一步需人工操作）。
+> **状态**（2026-09-17）：**阶段 A（A0–A3）全部完成**，macOS 换包实机已验证并按日常使用维护；阶段 B（Windows）待启动。
 > - **A0**：ADR-0005、文档 v2 修订、`packages/plugin-sdk-rs`、`scripts/parity-echo.mjs`（v1 worker ↔ v2 子进程 4/4 逐字段一致）。
 > - **A1**：Rust 内核全部模块（契约 / 数据层 / 插件层 / 搜索链路 / 会话 + 服务层 / HTTP+SSE / 桥 / 插件管理 / 显隐 / `api.rs` 33 端点 / `kernel.rs` 装配），`cargo test --workspace` 内核 96 单测 + 7 集成全绿；**standalone 真实启动冒烟通过**（8/8 插件、搜索命中、SSE、落盘、干净退出）。
 > - **A2**：五个出厂插件的逻辑层全部 Rust 化（web-open / file-search / host-manager / totp / app-launcher），`dist/<name>` 可执行产物，各插件 5–11 项单测；**顺带修掉 v1 的搜索延迟补位缺口**（慢源结果过去会被丢弃）。
@@ -521,7 +521,7 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 | LICENSE | ✅ 已有（MIT，`Copyright (c) 2026 TripleH`） |
 | 敏感文件 / secrets | ✅ 无（306 个入库文件检查过，无 `.env` / 证书 / token） |
 | `.gitignore` | ✅ 已覆盖 `node_modules/`、`dist/`、`dist-app/`、`.dev-data/`、`apps/shell/{target,gen,resources/*}`、`.codegraph/`；`.codebuddy/` 只放规则与技能 |
-| 第三方来源声明 | ✅ `docs/THIRD-PARTY.md`（ZTools MIT / Lucide ISC） |
+| 第三方来源声明 | ✅ `docs/THIRD-PARTY.md`（第三方组件与许可证清单） |
 | 插件 `author` 署名 | ⚠️ 4 个插件写的是 `triple3h`（`text-diff` / `json-tools` / `totp` / `host-manager` 的 `package.json`）→ 统一为公开身份（GitHub 用户名或组织） |
 | README | ⚠️ 需补：Windows 安装段（Release 下载 + SmartScreen 说明）、macOS 安装段（右键打开 / xattr）、"数据只在本机、不联网"的隐私说明、Actions 徽章（可选） |
 | 版本号 | ⚠️ 建议起 tag `v0.2.0` 之类，并把 `tauri.conf.json` / 各 `package.json` 的 `0.1.0` 与之对齐（写进发布流程） |

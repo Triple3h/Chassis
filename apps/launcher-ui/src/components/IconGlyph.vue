@@ -15,7 +15,7 @@ const initials = computed(() => {
   const raw = props.name ?? ''
   return raw.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '').slice(0, 1).toUpperCase() || '·'
 })
-/** 磁贴模式下字形只占外框的 56%（对照 ZTools 的 AppList 占位图标） */
+/** 磁贴模式下字形只占外框的 56% */
 const glyphSize = computed(() => (props.tile ? Math.round(props.size * 0.56) : props.size))
 const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px` }))
 </script>

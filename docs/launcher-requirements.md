@@ -1,9 +1,9 @@
 # 启动台底座 · 需求与实现文档
 
-> 版本：v1.0 ｜ 状态：已实施（进度见 `README.md` 的「当前状态」）｜ 日期：2026-09-14，最后更新：2026-09-16
+> 版本：v1.0 ｜ 状态：已实施（进度见 `README.md` 的「当前状态」）｜ 日期：2026-09-14，最后更新：2026-09-17
 > 读者：实现者 / 评审者 / 后续参与的人
 > 用法：本文件是**唯一的需求源**。开工时按 §13 的里程碑推进；遇到本文件没写的行为，先补文档再写代码。
-> 说明：本文件就是本仓库的需求源（文件名 `docs/launcher-requirements.md`）。早期它是"另起新仓库"的移植稿，因此 §5 的目录树与少数行文保留了当时的规划口径 —— **实际落地的结构以 `README.md` 的「目录结构」为准**。
+> 说明：§5 的目录树是**规划口径**（模块视角）；**实际落地的结构以 `README.md` 的「目录结构」为准**。
 
 ---
 
@@ -11,7 +11,7 @@
 
 ### 1.1 一句话
 
-一个 **ZTools 形态的启动台**：全局热键唤出、输入即搜、结果支持**最近使用**与**已固定**。底座**零能力**，所有能力（包括"启动应用"本身）都以插件形式一点点集成进来。
+一个**插件化的 macOS 启动台**：全局热键唤出、输入即搜、结果支持**最近使用**与**已固定**。底座**零能力**，所有能力（包括「启动应用」本身）都以插件形式一点点集成进来。
 
 ### 1.2 核心原则
 
@@ -22,7 +22,7 @@
 | P3 | 能力无关的数据模型 | 历史/固定/结果项的 schema 里不出现能力特定字段（如 `app.path`） | 加一类插件就要改内核 |
 | P4 | 注册即可逆 | 任何注册必须返回 disposer，插件停用按序回滚 | 启停/热重载/崩溃重启留残留 |
 | P5 | 能力即权限 | 未声明的 capability 在装配期就不注册，插件侧表现为"方法不存在" | 权限只能靠运行时判断 + 提示，安全边界形同虚设 |
-| P6 | 一切跨进程调用可审计 | 插件→宿主调用统一入口 + 落本地审计日志 | 插件出问题只能靠猜（ZTools 是事后补的 logCollector） |
+| P6 | 一切跨进程调用可审计 | 插件→宿主调用统一入口 + 落本地审计日志 | 插件出问题只能靠猜，无法定位是哪次调用出的错 |
 | P7 | 插件代码只读、数据分离 | `extensions/<id>/` 只读；数据落 appData 下独立目录 | 升级插件丢用户数据 |
 
 ### 1.3 验收口径（贯穿全程的一句话）
@@ -40,9 +40,9 @@
 | 术语 | 定义 |
 |---|---|
 | **壳（Shell）** | Rust 层。只提供系统原语（窗口/热键/托盘/通知/剪贴板/打开），**零业务逻辑** |
-| **内核（Kernel）** | Node sidecar 里的 TypeScript 进程。插件运行时 + 服务总线 + 注册表 + 历史/固定 + 审计 |
+| **内核（Kernel）** | Rust 进程（bin `launcher-kernel`）。插件运行时 + 服务总线 + 注册表 + 历史/固定 + 审计 |
 | **底座** | 壳 + 内核 + 启动台 UI + 管理面，即"零能力"的那部分 |
-| **插件（Plugin）** | 一个目录，含清单 + 可选的 Web 页 + 可选的 Node 脚本 |
+| **插件（Plugin）** | 一个目录，含清单 + 可选的 Web 页（view）+ 可选的可执行产物（no-view / script） |
 | **能力（Capability）** | 插件可申请的宿主能力，如 `storage`、`clipboard.write`、`shell.open`、`exec.spawn` |
 | **接缝（Seam）** | 内核里以抽象 key 暴露的服务（`ctx.storage` 等），实现可由 provider 替换 |
 | **internal 插件** | 不可卸载的插件（设置、插件管理器） |
@@ -72,7 +72,7 @@
 
 ### 3.2 搜索与结果网格
 
-**结果以「图标网格」呈现**（布局与操作逻辑对照 ZTools 的聚合视图）：分区标题 + 每行 N 个格子（图标 + 名称两行截断），列数由窗口宽度算出（720px ⇒ 7 列，上限 9）。
+**结果以「图标网格」呈现**：分区标题 + 每行 N 个格子（图标 + 名称两行截断），列数由窗口宽度算出（720px ⇒ 7 列，上限 9）。
 
 **空输入时**展示（按此顺序）：
 
@@ -255,8 +255,8 @@ launcher/
 │   │   └── src/
 │   │       ├── main.ts
 │   │       ├── App.vue
-│   │       ├── components/{SearchBox,ResultGrid,GridItem,SectionHeader,DetailPanel,Footer,ActionsMenu}.vue
-│   │       ├── stores/{commands.ts,history.ts,pinned.ts,ui.ts,plugins.ts}
+│   │       ├── components/{SearchBox,ResultGrid,GridItem,SectionHeader,DetailPanel,FooterBar,ActionsMenu}.vue
+│   │       ├── stores/{data.ts,ui.ts}
 │   │       ├── lib/grid.ts           # 结果网格：列数/度量/分区/导航
 │   │       ├── lib/virtual.ts        # 虚拟滚动
 │   │       ├── lib/keys.ts           # ⌘/Ctrl 归一化、快捷键表
@@ -265,24 +265,23 @@ launcher/
 ├── Cargo.toml                        # M5：Rust workspace 根（成员：packages/plugin-sdk-rs、apps/kernel、各逻辑层插件 plugins/<id>；
 │                                     #     apps/shell 显式 exclude —— Cargo 要求成员位于根之下）
 ├── packages/
-│   ├── plugin-api/                   # npm: @launcher/api（UI 侧 SDK，postMessage 客户端）
-│   ├── plugin-api-node/              # npm: @launcher/api-node（v1 逻辑层 SDK；M5 后由 plugin-sdk-rs 取代）
-│   ├── plugin-sdk-rs/                # M5：Rust 插件 SDK（launcher-plugin-sdk）
-│   ├── plugin-manifest/              # 清单 TS 类型 + zod 校验（内核与 CLI 共用）
+│   ├── plugin-api/                   # npm: @launcher/api（视图层 SDK，postMessage 客户端）
+│   ├── plugin-sdk-rs/                # Rust 插件 SDK（launcher-plugin-sdk；取代 v1 的 plugin-api-node）
+│   ├── plugin-manifest/              # 清单 TS 类型 + 校验（视图层 / 工具链 / 测试夹具；内核侧为 Rust 实现）
 │   ├── ui/                           # npm: @launcher/ui（设计令牌 + AppShell / UiIcon / UiDialog + 前端工具）
-│   └── plugin-cli/                   # 脚手架 + 打包（create-plugin / pack）
+│   └── plugin-cli/                   # 脚手架 + 打包（待办，尚未实现）
 ├── plugins/                          # 出厂 bundle（机制与第三方完全相同）
 │   ├── app-launcher/                 # 应用扫描 + 启动（第一个做）
 │   ├── file-search/
 │   ├── web-open/                     # 网址 / 搜索引擎直达
 │   └── internal-settings/            # internal：设置 + 插件管理（不可卸载）
 ├── scripts/
-│   ├── build-all.mjs
+│   ├── build-all.mjs                 # 内核 + UI + 全部出厂插件
 │   ├── run-ts.mjs                    # esbuild 打包 TS 后交给 node（测试用）
-│   └── dev-plugin.mjs                # 给插件开发起 dev server 并注册到内核
+│   └── dev.mjs                       # 开发模式：内核（standalone）+ UI（vite dev）
 ├── tests/
-│   ├── fixtures/echo-plugin/         # 覆盖全部宿主 API 的契约测试插件
-│   └── e2e/
+│   ├── fixtures/echo-plugin/         # 覆盖全部宿主 API 的契约测试插件（Rust 版）
+│   └── unit/ · contract/ · smoke/    # （harness 拉起真内核二进制）
 └── docs/
     ├── launcher-requirements.md      # 本文件（需求源）
     ├── plugin-spec.md                # 第三方插件开发文档（面向插件作者）
@@ -518,10 +517,10 @@ interface AuditRecord {
 ├── package.json          # 清单（宿主只读顶层字段）
 ├── index.html            # view 命令入口（所有 view 命令共用）
 ├── assets/               # 前端产物
-├── <command>.mjs         # no-view / script 命令产物，文件名 == commands[].name
+├── <command>             # no-view / script 命令产物（Windows 为 <command>.exe），文件名 == commands[].name
 └── data/                 # ❌ 不要放这里（数据落 appData）
 ```
-宿主查找脚本入口顺序：`<name>.mjs` → `<name>.js` → `workers/<name>.mjs` → `workers/<name>.js`。
+宿主查找产物顺序：`<name>(.exe)` → `workers/<name>(.exe)`（可执行文件；apiVersion 2）。
 
 ### 8.2 清单（`package.json`）
 
@@ -673,7 +672,7 @@ type ActionDecl =
 # 插件是 pnpm workspace 成员，命令在仓库根执行
 pnpm install
 pnpm --filter <name> dev                   # 起 vite dev server，并把 dev 地址注册到运行中的内核
-pnpm --filter <name> build                 # 产出 dist/（含 index.html + assets + <name>.mjs + package.json）
+pnpm --filter <name> build                 # 产出 dist/（含 index.html + assets + package.json + 各命令的可执行产物）
 pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 供安装
 ```
 - dev 注册：dev server 通过内核的本地 control 端口（仅 127.0.0.1 + 一次性 token）把 `devUrl` 挂上，内核把插件页指向 vite dev server ⇒ **热更新免重启**
@@ -733,16 +732,17 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 | WKWebView 的 iframe/postMessage 行为与 Chromium 有差异 | 插件页通信异常 | M1 第一周就用真 WKWebView 验证桥；保留"直连内核 HTTP + fetch"作降级通道 |
 | 全局热键被占用 | 唤不出来 | 注册失败立即提示 + 引导设置页改键；托盘兜底 |
 | 插件页跨域/端口被占 | 加载失败 | 端口从 0 开始让系统分配（绑定后读回）；listener 起不来则该插件标记 error |
-| Node sidecar 体积（+25–50MB） | 安装包变大 | 认账；换取现有 script 命令零迁移。可后续换 `bun --compile` 或系统 Node 复用 |
+| 内核与插件产物体积（内核 8–15MB + 每个逻辑层插件 1–3MB） | 安装包变大 | 认账；单进程自包含换来「运行时免 Node」与更低的常驻内存 |
 | macOS 公证流程卡壳 | 发不出去 | 第 1 周启动 Apple Developer（$99/年）+ CI 签名配置 |
 | 拼音/中文搜索质量差 | 搜不到 | 先做全拼 + 首字母两级索引，词库用成熟库，关键词可手配 `keywords` |
-| 底座被能力污染（P1 失守） | 演回 ZTools | 每次 PR 检查"内核 diff 里是否出现能力词"；§1.3 验收口径做成自动测试 |
+| 底座被能力污染（P1 失守） | 内核越做越大，插件化名存实亡 | 每次 PR 检查"内核 diff 里是否出现能力词"；§1.3 验收口径做成自动测试 |
 
 ---
 
 ## 13. 里程碑与验收
 
 > 进度快照见 `README.md` 的「当前状态」。本节保留**计划口径**（交付物与验收标准），不随实现改动。
+> M0–M4 的交付物按当时的实现口径书写（TypeScript 内核）；**M5 起为 Rust 实现**（见 ADR-0005）。
 
 ### M0 — 壳 + 启动台 UI（1–1.5 周）
 **交付**：`apps/shell`（窗口/热键/托盘）、`apps/launcher-ui`（搜索框 + 结果网格 + 键盘导航 + 固定的假数据）、`history.ts` 落盘。
@@ -803,21 +803,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 | 2 | 是否兼容第三方旧协议 | **否**（2026-09-16 起）：底座只认原生协议 `@launcher/api` |
 | 3 | 存储后端 | **JSON 文件 + 原子写**；历史 > 2000 条再评估 SQLite |
 | 4 | 平台 | **macOS（arm64）+ Windows 10/11**（2026-09-17 更新）。Windows 由「M4 之后单独立项」提升为 **M6**（动机：分享给使用 Windows 的同事）；两端均在各自平台上原生构建 |
-| 5 | Node sidecar | **2026-09-17 更新：不内嵌 Node，且 M5 起不再需要 Node**（内核与逻辑层插件 Rust 化）。开发期依赖系统 Node ≥ 22 只是过渡态；交付物（macOS 换包 / Windows 安装包）不含 Node |
+| 5 | 运行时依赖 | **2026-09-17 更新：不内嵌 Node，且 M5 起不再需要 Node**（内核与逻辑层插件 Rust 化）。开发期依赖系统 Node ≥ 22 只是过渡态；交付物（macOS 换包 / Windows 安装包）不含 Node |
 | 6 | UI 框架 | **Vue 3 + Vite + Pinia + Tailwind v4**（与现有插件资产一致，可直接复用组件与设计令牌） |
 | 7 | 默认热键 | `⌥Space` |
 | 8 | 插件数据目录 | `<dataRoot>/plugins/<pluginId>/`，`dataRoot = ~/Library/Application Support/<AppName>` |
-
----
-
-## 15. 参考：ZTools 的实测数据（对照，不要照抄）
-
-| 项 | ZTools | 本方案 |
-|---|---|---|
-| 主进程/内核规模 | 53,290 行 TS（160 文件）、464 个 IPC handler | 预计 ≤ 6,000 行 TS |
-| 插件容器 | `WebContentsView` + `session.fromPartition`（35 + 233 处引用） | 单 WebView + iframe + 每插件独立端口 |
-| 插件 preload | 2,185 行，301 处 ipcRenderer，`require('child_process')` | `initialization_script` 无关：postMessage 桥 + SDK 包 |
-| 宿主 API 数 | 约 374 个 | 首批 24 个（§8.6）+ Node 侧 7 个 |
-| 历史/固定的 schema | `HistoryItem` 带 `app.path`（能力泄漏） | 能力无关（§7.5） |
-| 原生模块 | 13 个 C++ 类，无源码 | 壳层 16 个原语，Rust 自己写 |
-| 原生日志/审计 | `logCollector`（事后补） | `audit.ts` 从第一天就有（P6） |
