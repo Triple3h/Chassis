@@ -34,11 +34,14 @@
 }
 
 /* ── 倒计时环 ──────────────────────────────────────────────────
-   剩余时间有两种表达，同时存在且互不冲突：
-   · 行内 style 的 stroke-dashoffset（每秒重算）—— 动画没跑起来时的正确兜底；
-   · CSS 动画（animation 的优先级高于行内样式）—— 动画跑起来时逐帧平滑的那条。
-   相位由 App.vue 的 ringStyle() 用负 animation-delay 钉在 TOTP 时间步上；
-   dasharray 取 66（> 2πr，r = 10.5），同值在 App.vue 的 RING_DASH 与上面 @keyframes 里。 */
+   进度只有一个时间源：App.vue 每秒（对齐整秒）按时间步算出目标
+   `stroke-dashoffset`，平滑交给 `transition` 补间 —— 补间时长与 tick 周期一致，
+   视觉上连续；`stroke-dashoffset: 0` 是兜底初值（也让它成为 Safari 认得的可过渡属性）。
+   dasharray 取 66（> 2πr，r = 10.5），同值在 App.vue 的 RING_DASH 里。
+
+   ⚠️ 不要再往这里加 CSS 动画：动画自身的时钟也在走，而 App.vue 每秒重设的
+   `animation-delay` 表达的是"本时间步已过秒数"—— 两者叠加等于把同一秒算两遍，
+   环每秒跑两秒（一轮 30s 转两整圈）。 */
 .launcher-ring {
   transform: rotate(-90deg);
 }
@@ -53,7 +56,14 @@
   stroke-width: 2.6;
   stroke-linecap: round;
   stroke-dasharray: 66;
-  animation: launcher-ring-deplete linear infinite;
+  stroke-dashoffset: 0;
+  transition:
+    stroke var(--launcher-motion-fast) var(--launcher-ease-move),
+    stroke-dashoffset 1s linear;
+}
+/* 跨时间步的那一帧：瞬时回到满圈（保留颜色过渡）——
+   不关的话 1s 的补间会把「空 → 满」演成环倒转一整圈，见 App.vue 的 markStepReset */
+.launcher-ring .progress.is-reset {
   transition: stroke var(--launcher-motion-fast) var(--launcher-ease-move);
 }
 .launcher-ring .progress.is-warn {
@@ -61,14 +71,6 @@
 }
 .launcher-ring .progress.is-danger {
   stroke: var(--launcher-danger);
-}
-@keyframes launcher-ring-deplete {
-  from {
-    stroke-dashoffset: 0;
-  }
-  to {
-    stroke-dashoffset: 66;
-  }
 }
 
 .launcher-row {

@@ -22,7 +22,7 @@ import SettingsDialog from './components/SettingsDialog.vue'
 const ROW = 60
 const CARD_H = 54
 /** 倒计时环的「周长」：取 66 > 2πr(r=10.5)，整圈覆盖、末位留白可忽略。
- *  同值出现在模板的 SVG 与 app.css 的 keyframes 里（三处必须一起改）。 */
+ *  同值出现在 app.css 的 `stroke-dasharray`（两处必须一起改）。 */
 const RING_DASH = 66
 
 const accounts = ref<Account[]>([])
@@ -164,14 +164,36 @@ function urgency(a: Account): '' | 'is-warn' | 'is-danger' {
 }
 
 /**
- * 倒计时环的相位：`animation-delay` 取负的「本周期已过秒数」，让 CSS 动画与 TOTP 的
- * 时间步（now % period）对齐 —— 环是连续走的，每秒那次重算只把它重新钉一次相位，
- * 顺带纠正浏览器动画时钟的漂移（窗口隐藏期间被暂停也能在下次修正）。
+ * 倒计时环的进度：每秒按时间步算一次目标 `stroke-dashoffset`，平滑由 CSS 的
+ * `transition: stroke-dashoffset 1s linear` 补间（见 app.css 的说明）。
+ * 只有这一个时间源 —— 环与秒数、验证码都出自同一个 `now`。
  */
-function ringStyle(a: Account): Record<string, string> {
-  const period = a.period || 30
-  const elapsed = (now.value / 1000) % period
-  return { animationDuration: `${period}s`, animationDelay: `-${elapsed}s` }
+function ringOffset(a: Account): string {
+  return `${RING_DASH * (1 - progressOf(a))}px`
+}
+
+/** 刚跨过时间步的账户：这一帧要瞬时把环复位到满圈 */
+const ringReset = ref<Set<string>>(new Set())
+/** 各账户上次落笔的时间步序号（用来发现「刚跨了一步」） */
+const ringStep = new Map<string, number>()
+
+/**
+ * 跨时间步的那一帧把过渡关掉（模板加 `is-reset`）。
+ *
+ * 不关的话，1s 的补间会把「offset 66 → 0」演成环沿逆时针**倒转一整圈**回来 ——
+ * 那是全表最扎眼的一处动效。复位只活一帧，下一次 tick 集合清空、过渡自然恢复。
+ */
+function markStepReset(): void {
+  const resets = new Set<string>()
+  for (const a of filtered.value) {
+    if (a.type !== 'totp') continue
+    const step = Math.floor(now.value / ((a.period || 30) * 1000))
+    const prev = ringStep.get(a.id)
+    ringStep.set(a.id, step)
+    // 首次见到（插件页刚打开 / 行刚滚进视口）不复位：首帧本来就没有过渡
+    if (prev !== undefined && prev !== step) resets.add(a.id)
+  }
+  ringReset.value = resets
 }
 
 /* ------------------------------------------------------------------ 交互 */
@@ -182,9 +204,13 @@ function setGroup(name: string) {
   if (listEl.value) listEl.value.scrollTop = 0
 }
 
-/** 整行双击复制；点在验证码上时不重复触发（它单击就已经复制过了） */
-function rowDblClick(e: MouseEvent, a: Account) {
-  if ((e.target as HTMLElement | null)?.closest('.launcher-code-btn')) return
+/**
+ * 整行单击 = 选中 + 复制。
+ * 双击的第二次 click 丢掉：`detail > 1` 只让第一次生效，否则 HOTP 行会被扣掉两个计数器。
+ */
+function onRowClick(e: MouseEvent, index: number, a: Account) {
+  selected.value = index
+  if (e.detail > 1) return
   void copyAccount(a)
 }
 
@@ -416,6 +442,8 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   if (e.key === 'Escape' && query.value) {
+    // 标记「已消费」：SDK 只把没人认领的 Esc 交还宿主（退回启动台），清搜索词时不退
+    e.preventDefault()
     query.value = ''
   }
 }
@@ -466,6 +494,7 @@ async function syncFooter() {
 function scheduleTick() {
   tickTimer = window.setTimeout(async () => {
     now.value = Date.now()
+    markStepReset()
     await refreshCodes()
     scheduleTick()
   }, 1000 - (Date.now() % 1000))
@@ -596,11 +625,10 @@ watch(selected, (i) => {
         <div
           v-for="(account, i) in visibleRows"
           :key="account.id"
-          class="launcher-card absolute inset-x-0 flex cursor-default items-center gap-3 px-3"
+          class="launcher-card absolute inset-x-0 flex cursor-pointer items-center gap-3 px-3"
           :class="{ 'is-selected': startIndex + i === selected, 'is-copied': copiedId === account.id }"
           :style="{ top: (startIndex + i) * ROW + 'px', height: CARD_H + 'px' }"
-          @click="selected = startIndex + i"
-          @dblclick="rowDblClick($event, account)"
+          @click="onRowClick($event, startIndex + i, account)"
         >
           <span class="launcher-avatar" :style="avatarStyle(account)">{{ initial(account) }}</span>
 
@@ -634,12 +662,11 @@ watch(selected, (i) => {
                   <circle class="track" cx="13" cy="13" r="10.5" />
                   <circle
                     class="progress"
-                    :class="urgency(account)"
+                    :class="[urgency(account), ringReset.has(account.id) ? 'is-reset' : '']"
                     cx="13"
                     cy="13"
                     r="10.5"
-                    :stroke-dashoffset="RING_DASH * (1 - progressOf(account))"
-                    :style="ringStyle(account)"
+                    :style="{ strokeDashoffset: ringOffset(account) }"
                   />
                 </svg>
                 <span class="launcher-timer-n launcher-code" :class="urgency(account)">
@@ -694,7 +721,7 @@ watch(selected, (i) => {
     <footer class="flex shrink-0 items-center gap-3 border-t border-line px-3.5 py-2 text-[11px] text-faint">
       <span class="launcher-hint"><span class="launcher-kbd">↑</span><span class="launcher-kbd">↓</span>选择</span>
       <span class="launcher-hint"><span class="launcher-kbd">↵</span>复制</span>
-      <span class="launcher-hint">双击整行也可复制</span>
+      <span class="launcher-hint">单击整行即可复制</span>
       <span v-if="settings.clearClipboardAfter" class="launcher-hint">
         复制 {{ settings.clearClipboardAfter }} 秒后清空剪贴板
       </span>
