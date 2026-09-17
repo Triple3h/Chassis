@@ -1,4 +1,4 @@
-# Vue 插件开发手册
+# 插件开发手册（view 层 Vue / 逻辑层 Rust）
 
 > 面向本仓库 `plugins/` 下的出厂插件（view 层是 Vite + Vue；**v2 起逻辑层是 Rust**，见下方迁移说明）。
 > **平台模型（命令形态、产物契约、脚本协议、踩坑）适用于任何底座插件。**
@@ -47,13 +47,13 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 | | `view` | `no-view` | `script` |
 |---|---|---|---|
 | 界面 | 有，渲染在 **iframe** | 无 | 无 |
-| 运行环境 | 宿主本地 HTTP 托管的静态页 | **Node Worker** | **Node Worker** |
-| 出现在命令面板 | ✅ | ✅ | ❌（只能被 `Backend.run` 调用） |
-| 入口 | 插件根目录 `index.html`（固定，无需声明） | `dist/<name>.mjs` | 同左 |
-| 典型用途 | UI 交互 | 用户主动触发的后台任务 | 「View 的后端函数」，读写文件、调 SDK |
-| 依赖包 | `@launcher/api` | `@launcher/api-node` | 同左 |
+| 运行环境 | 宿主本地 HTTP 托管的静态页 | **Rust 子进程**（`spawn` + NDJSON） | **Rust 子进程**（同左） |
+| 出现在命令面板 | ✅ | ✅ | ❌（只能被 `exec.run` 调用） |
+| 入口 | 插件根目录 `index.html`（固定，无需声明） | `dist/<name>`（可执行产物；Windows `<name>.exe`） | 同左 |
+| 典型用途 | UI 交互 | 用户主动触发的后台任务 | 「View 的后端函数」，读写文件、调系统命令 |
+| 依赖包 | `@launcher/api` | `launcher-plugin-sdk`（Rust，crate `launcher_plugin_sdk`） | 同左 |
 
-宿主查找 Node 入口的顺序：`<pluginRoot>/<command>.mjs` → `<command>.js` → `workers/<command>.mjs` → `workers/<command>.js`。
+宿主查找逻辑层产物的顺序：`<pluginRoot>/dist/<name>(.exe)` → `<pluginRoot>/dist/workers/<name>(.exe)`（ADR-0005：`.mjs` 不再支持）。
 **`commands[].name` 必须与产物文件名一致。**
 
 一个插件可以有多个 `view` 命令，它们**共用同一个 `index.html`**，靠 URL 上的 `?cmd=` 区分。
@@ -69,7 +69,7 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
   "type": "module",             // 必须，ESM
   "description": "...",
   "categories": ["tool"],
-  "apiVersion": "1",            // 必填：当前只接受 "1"
+  "apiVersion": "2",            // 必填：有 no-view/script 命令必须 "2"（可执行产物）
   "capabilities": ["storage"],  // 必填：可以是空数组；用户可逐项拒绝
   "commands": [
     { "name": "hello", "title": "打个招呼", "mode": "view", "searchable": true, "placeholder": "输入内容后回车" },
@@ -81,9 +81,9 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 
 | 字段 | 说明 |
 |---|---|
-| `apiVersion` | 必填；当前只接受 `"1"`，缺省或未知值一律拒绝加载 |
+| `apiVersion` | 必填；内核接受 `"1"` / `"2"`，**有 no-view/script 命令必须 `"2"`**（v1 逻辑层 `.mjs` 已不支持），缺省或未知值一律拒绝加载 |
 | `capabilities` | 必填（可空数组）；权限清单，用户可拒绝 → 对应服务不挂载 |
-| `commands[].name` | 命令标识；No-View/Script 用它对应产物文件名 |
+| `commands[].name` | 命令标识；No-View/Script 用它对应产物文件名（`dist/<name>`，Windows `.exe`） |
 | `commands[].title` | 命令面板里显示的名字 |
 | `commands[].mode` | `view` / `no-view` / `script`（官方说明 `background` 未来支持） |
 | `commands[].searchable` | 是否参与全局搜索（只对 view / no-view 有意义） |
@@ -97,7 +97,7 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
   需要时读 `new URLSearchParams(location.search)`。
 - **主题**：宿主可能透传 `?theme=` 或在文档上设 `data-theme`；否则跟随 `prefers-color-scheme`。建议三级探测（见 `@launcher/ui/theme`）。
 - **本地存储**：插件私有的键值存储，落盘在 `<dataRoot>/plugins/<id>/storage.json`（P7：数据与代码分离），**明文 JSON**，只支持可序列化值。
-- **网络**：插件是本地静态页，可以联网，但把密钥类数据发出去等于自曝 —— 本仓库四个插件都不联网（totp 的扫码识别用随包 wasm，不请求 CDN）。
+- **网络**：插件是本地静态页，可以联网，但把密钥类数据发出去等于自曝 —— 本仓库八个插件都不联网（totp 的扫码识别用随包 wasm，不请求 CDN）。
 
 ---
 
@@ -281,7 +281,7 @@ build: {
 
 - 安装：`dist/` → `<dataRoot>/extensions/<插件名>`（或设置页「插件管理」安装），内核启动时扫描该目录。
 - 开发：`pnpm dev` 起 Vite 服务器，浏览器直接访问即可调 UI；宿主相关能力走降级分支。
-- 多插件共存：每个插件是独立工程，彼此的 `node_modules` 不互相提升；**要复用的代码走工作区包**（`@launcher/api` / `@launcher/api-node` / `@launcher/ui`），别用相对路径跨插件 import。
+- 多插件共存：每个插件是独立工程，彼此的 `node_modules` 不互相提升；**要复用的代码走工作区包**（`@launcher/api` / `@launcher/ui`，逻辑层用 `launcher-plugin-sdk`），别用相对路径跨插件 import。
 
 ---
 
@@ -354,7 +354,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 | `@launcher/ui/UiDialog.vue` | 弹窗骨架（Esc 关闭、尺寸档位） |
 | `@launcher/ui/AppShell.vue` | 页面骨架 + 轻提示 + 主题应用 |
 
-宿主调用不在这张表里：**直连 `@launcher/api` / `@launcher/api-node`**，没有中间适配层。
+宿主调用不在这张表里：**view 直连 `@launcher/api`、逻辑层直连 `launcher-plugin-sdk`**，没有中间适配层。
 
 ---
 
@@ -380,10 +380,11 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **原因**：iframe 受浏览器沙箱限制，没有文件系统访问权。
 - **对策**：用 `mode: "script"` 的逻辑层命令（Rust 子进程）读盘，转 base64 回传（本仓库 `plugins/totp/src/bin/read_image.rs`）。
 
-### 5.4 Script 产物不生成 / 命令面板搜不到
+### 5.4 逻辑层命令产物不生成 / 命令面板搜不到
 
-- **原因**：① 命令名与产物文件名不一致；② worker 构建 `emptyOutDir` 默认 true，把 UI 产物连同 `.mjs` 一起删了；③ 构建顺序反了（worker 先于 UI）。
-- **对策**：`entryFileNames: '[name].mjs'` + `emptyOutDir: false` + 先 UI 后 worker。
+- **原因（v2，现行）**：① 命令名与产物文件名不一致（大小写、连字符）；② `dist/<name>` 还是旧二进制（改了 Rust 没重跑 `npm run build:scripts`）；③ 根 `Cargo.toml` members 漏登记 `plugins/<id>`（`cargo build -p` 找不到包）；④ 清单 `apiVersion` 不是 `"2"`。
+- **对策**：产物名 = 命令名；`npm run build:scripts`（或根 `pnpm build`）后跑 `pnpm spec-check`（会校验可执行位 + 二进制魔数）。
+- **v1 历史**：worker 构建 `emptyOutDir` 误删 UI 产物 / 构建顺序反了 —— 见 §3.3 与 §5.17（仅历史参考）。
 
 ### 5.5 从 `packages/ui` import 报模块找不到
 
@@ -448,6 +449,8 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 
 ### 5.17 多个 script 入口被拆成多个文件，产物不再自包含
 
+> **v1 历史**（`vite.worker.config.ts` + `.mjs` 时代）：v2 逻辑层是 Rust 可执行产物（一个 bin 天然自包含），本节问题已不存在，仅作历史参考。
+
 - **现象**：插件里有 `hosts-read.ts` 和 `hosts-write.ts` 两个入口，构建后 `dist/` 里除两个 `.mjs` 之外还多出 `dist/assets/_hosts-file-xxx.mjs`，入口文件里只剩一条 `import './assets/…'`。
 - **原因**：Rollup 在多入口模式下，**被两个入口共用的模块必须提取成共享 chunk**（否则就得把同一份代码复制两份，Rollup 不做这件事）。`output.manualChunks: undefined` 也拦不住，它不是用户配置能改的默认行为。
 - **风险**：宿主只把 `dist/<name>.mjs` 当 Worker 入口拉起。这条跨文件相对 import 一旦因为「用户只拷了单个 `.mjs`」「打包时漏了 `assets/`」「宿主换了加载方式」而断掉，命令直接失效——而且报错发生在宿主侧，插件里根本看不见。单入口插件（只一个 script 命令）不会触发，所以很容易到第二个入口才踩到。
@@ -495,10 +498,10 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 [ ] plugins/<name>/package.json：apiVersion + capabilities 必填，commands 齐全、mode 正确
 [ ] package.json 提供 build:view / build:scripts（根 scripts/build-all.mjs 按这两条驱动）
 [ ] vite.config.ts：base './'，outDir dist，构建后写清单
-[ ] 有 no-view/script 命令时（v2）：插件根 `Cargo.toml` + 同目录 `src/*.rs` + `build:scripts`（cargo build + `--copy-scripts`），产物名 = 命令名（§7）；v1（TS）走 vite.worker.config.ts + 逐入口构建（§3.3 / §5.17）
+[ ] 有 no-view/script 命令时（v2）：插件根 `Cargo.toml` + 同目录 `src/*.rs` + 根 `Cargo.toml` members 登记；`apiVersion: "2"`；`build:scripts`（cargo build + `--copy-scripts`）与 `test:scripts`（cargo test），产物名 = 命令名（§7）
 [ ] tsconfig.json：extends `../../tsconfig.vue-plugin.json`（走工作区包标准解析，不需要额外 paths）
 [ ] src/styles/app.css：@import tailwindcss + theme.css，@source 覆盖 src 与 `../../packages/ui`
-[ ] 宿主调用直接 `@launcher/api` / `@launcher/api-node`，先用 `host.isLauncher()` 分流、调用点兜失败
+[ ] 宿主调用直接走 SDK：view 用 `@launcher/api`，逻辑层用 `launcher-plugin-sdk`（Rust）；view 侧先用 `host.isLauncher()` 分流、调用点兜失败
 [ ] 大计算进 Worker、长列表虚拟滚动
 [ ] pnpm build:plugins && pnpm spec-check 全绿：dist 里 index.html + assets + package.json + 可执行产物
 [ ] 起静态服务器实机点一遍（不只是 dev server，prod 的资源路径不同）
@@ -582,7 +585,7 @@ fn main() {
 ## 8. 参考
 
 - 规范与架构：`docs/plugin-spec.md`（对外契约）、`docs/architecture.md`（内核实现）、`plugins/README.md`（目录与构建）
-- API 权威定义：`packages/plugin-api/src/index.ts`（UI 侧）、`packages/plugin-sdk-rs/src/`（逻辑层 v2）、`packages/plugin-api-node/src/index.ts`（逻辑层 v1，过渡期）
+- API 权威定义：`packages/plugin-api/src/index.ts`（UI 侧）、`packages/plugin-sdk-rs/src/`（逻辑层 v2；v1 的 `packages/plugin-api-node` 已删除）
 - 现有范例：
   - `plugins/totp` —— view + script + 对话框 + 口令加密（`src/core/vault.ts`）
   - `plugins/host-manager` —— 提权写系统文件、只换自己的托管区、写前备份 + 写后回读校验
