@@ -4,13 +4,16 @@ import type { HostsWriteArgs, HostsWriteResult } from '../core/script-types'
 import { resolveHostsPath, writeHostsFile } from './_hosts-file'
 
 /**
- * script 命令：把内容写回系统 hosts。
+ * script 命令：把托管区写回系统 hosts。
  *
  * package.json 里声明为 { "name": "hosts-write", "mode": "script" }，
  * View 侧用 Backend.run('hosts-write', args) 调用；产物必须是 dist/hosts-write.mjs。
  *
  * args:
- *   { content: string, mode?: 'auto' | 'direct' | 'privileged', backup?: boolean }
+ *   { region: string, remove?: string[], mode?: 'auto' | 'direct' | 'privileged', backup?: boolean }
+ *   region 是**托管区文本**（含首尾标记），不是整份文件：
+ *   区外的行归系统与别的程序管，我们不碰，详见 _hosts-file.ts 的 spliceRegion。
+ *   remove 只用于「区外条目收进块」时把那几行从区外摘掉。
  *
  * 注意：目标路径不接收调用方传参，只由 _hosts-file.ts 里的平台规则决定，
  * 否则这个「能提权写文件」的脚本就变成了任意文件写入的跳板。
@@ -25,9 +28,11 @@ void (async () => {
   const baseDir = dataPath
 
   try {
-    const content = typeof opts.content === 'string' ? opts.content : ''
+    const region = typeof opts.region === 'string' ? opts.region : ''
+    const remove = Array.isArray(opts.remove) ? opts.remove.filter((v): v is string => typeof v === 'string') : []
     const result = writeHostsFile({
-      content,
+      region,
+      remove,
       dataPath: baseDir,
       mode: opts.mode,
       backup: opts.backup,
@@ -36,6 +41,7 @@ void (async () => {
       path: result.path,
       ok: result.ok,
       method: result.method,
+      changed: result.changed,
       backup: result.backup,
       verified: result.verified,
       error: result.error,

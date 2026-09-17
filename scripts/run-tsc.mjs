@@ -4,7 +4,7 @@
  *
  * 两种编译器：
  *  - 普通 TS 包（含 esbuild 工具链的插件）：根目录的 `tsc -p`;
- *  - **vue 工程**（`plugins/{totp,hosts,text-diff,json-tools}`）：它们有自己的 `vue-tsc`（`tsc` 认不了 `.vue`），
+ *  - **vue 工程**（`plugins/{totp,host-manager,text-diff,json-tools}`）：它们有自己的 `vue-tsc`（`tsc` 认不了 `.vue`），
  *    所以走包自己的 `typecheck` 脚本 —— 判定依据是源码里有 `.vue` 文件。
  */
 import { spawnSync } from 'node:child_process'

@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * Vue 四件套（`plugins/{totp,hosts,text-diff,json-tools}`）在**真底座**上的冒烟：
+ * Vue 四件套（`plugins/{totp,host-manager,text-diff,json-tools}`）在**真底座**上的冒烟：
  * 覆盖「首批 4 个插件」验收里能自动化的部分（规范 §6 / §8 / §9 的运行时行为）。
  *
  * 做法：把 4 个插件的 dist 拷成临时「已安装插件」，起真内核（standalone），
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
  *   · 入口型搜索：搜得到命令、view 会话能开、index.html 与 assets 全部 200（资源路径正确）
  *   · 桥：host.info / hostUi 读写 / footer / storage
  *   · 能力边界：只有 hostUi 的插件调 exec.run 必须被拒 + 审计留痕（阶段 1.3 / N3）
- *   · 脚本：exec.run 真跑 read-image / hosts-read，返回值就是 done(x)（阶段 2.1 / 2.2）
+ *   · 脚本：exec.run 真跑 read-image / hosts-read 与 hosts-write（只动临时 hosts 文件），返回值就是 done(x)（阶段 2.1 / 2.2）
  *   · N2：插件安装目录在整个过程中不得被写入；备份/存储只能落 dataRoot
  *
  * 用法：node scripts/smoke-first-batch.mjs
@@ -33,7 +33,7 @@ const PLUGINS = [
   { id: 'json-tools', command: 'json', query: 'JSON', capability: ['hostUi'] },
   { id: 'text-diff', command: 'diff', query: '比对', capability: ['hostUi'] },
   { id: 'totp', command: 'totp', query: '验证码', capability: ['storage', 'hostUi', 'screenshot', 'exec.spawn'] },
-  { id: 'hosts', command: 'hosts', query: 'hosts', capability: ['storage', 'hostUi', 'exec.spawn'] },
+  { id: 'host-manager', command: 'hosts', query: 'hosts', capability: ['storage', 'hostUi', 'exec.spawn'] },
 ]
 
 function line(text) {
@@ -64,6 +64,16 @@ const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'launcher-first-batch-'))
 const dataRoot = path.join(workDir, 'data')
 const builtinRoot = path.join(workDir, 'installed')
 fs.mkdirSync(builtinRoot, { recursive: true })
+
+/**
+ * hosts 插件的读写目标改到临时文件 —— 冒烟脚本**绝不能碰用户真实的 /etc/hosts**。
+ * 内核与它拉起的脚本 worker 都继承这个环境变量（见 host-manager/src/no-view/_hosts-file.ts）。
+ */
+const OUTSIDE = `##\n# Host Database\n##\n127.0.0.1\tlocalhost\n# 别的程序写的\n10.8.0.1\tvpn.example.com\n\n`
+const REGION =
+  '# >>> host-manager >>>\n# @block 开发环境\n10.0.0.1\tdev.example.com\n# @/block\n# <<< host-manager <<<\n'
+process.env.LAUNCHER_HOSTS_PATH = path.join(workDir, 'hosts')
+fs.writeFileSync(process.env.LAUNCHER_HOSTS_PATH, OUTSIDE + REGION)
 
 /** 安装形态：<builtinRoot>/<pluginId>/ 直接是插件根（与解压 zip 后一致） */
 function installPlugins() {
@@ -265,42 +275,60 @@ try {
   /* --------------------------------------------- 阶段 2：脚本（真读本机文件） */
   line('\n[阶段 2] 脚本命令（exec.run → Node Worker）')
 
-  const hostsSession = await openSession('hosts', 'hosts')
-  check(Boolean(hostsSession.sid), 'hosts 打开会话', JSON.stringify(hostsSession.error))
+  const hostsSession = await openSession('host-manager', 'hosts')
+  check(Boolean(hostsSession.sid), 'host-manager 打开会话', JSON.stringify(hostsSession.error))
 
   if (hostsSession.sid) {
     const read = await bridge(hostsSession, 'ctx.exec.run', { command: 'hosts-read', args: {}, timeoutMs: 15000 })
     const readValue = read.result
     check(
       read.ok === true && readValue?.ok === true && typeof readValue.content === 'string' && readValue.path.includes('hosts'),
-      'hosts-read 返回系统 hosts 内容（done(x) 原样透传）',
+      'hosts-read 返回目标 hosts 内容（done(x) 原样透传）',
       JSON.stringify(read).slice(0, 200),
     )
 
-    const before = readValue?.content
-    const rejected = await bridge(hostsSession, 'ctx.exec.run', {
+    // 写入只换托管区：区外那几行（系统行 / 别的程序写的）必须逐字节保留
+    const before = readValue?.content ?? ''
+    const changed = await bridge(hostsSession, 'ctx.exec.run', {
       command: 'hosts-write',
-      args: { content: '   \n' },
+      args: { region: `${REGION.replace('10.0.0.1', '10.0.0.5')}` },
+      timeoutMs: 15000,
+    })
+    const after = await bridge(hostsSession, 'ctx.exec.run', { command: 'hosts-read', args: {}, timeoutMs: 15000 })
+    const afterText = after.result?.content ?? ''
+    check(
+      changed.ok === true && changed.result?.ok === true && changed.result?.changed === true,
+      'hosts-write 写入托管区',
+      JSON.stringify(changed).slice(0, 200),
+    )
+    check(
+      afterText.startsWith(OUTSIDE) && afterText.includes('10.0.0.5\tdev.example.com'),
+      '只换托管区：区外内容逐字节不动',
+      JSON.stringify(afterText.slice(0, 160)),
+    )
+
+    const again = await bridge(hostsSession, 'ctx.exec.run', {
+      command: 'hosts-write',
+      args: { region: REGION.replace('10.0.0.1', '10.0.0.5') },
       timeoutMs: 15000,
     })
     check(
-      rejected.ok === true && rejected.result?.ok === false && /内容为空/.test(rejected.result?.error ?? ''),
-      'hosts-write 拒绝空内容（不会把本机解析写废）',
-      JSON.stringify(rejected).slice(0, 200),
+      again.ok === true && again.result?.ok === true && again.result?.changed === false,
+      '重复写入同样的托管区 = 空操作（不写、不备份、不弹授权）',
+      JSON.stringify(again).slice(0, 200),
     )
-    const after = await bridge(hostsSession, 'ctx.exec.run', { command: 'hosts-read', args: {}, timeoutMs: 15000 })
-    check(after.result?.content === before, '拒绝写入后 /etc/hosts 原样未动')
+    void before
 
     const stored = await bridge(hostsSession, 'ctx.storage.set', { key: 'smoke', value: { at: 1 } })
     const back = await bridge(hostsSession, 'ctx.storage.get', { key: 'smoke' })
     check(stored.ok === true && back.result?.at === 1, 'storage 读写回到同一份数据', JSON.stringify(back))
     // 落盘是 debounce + 原子写（200ms），等一下再断言文件
     await sleep(500)
-    const storageFile = path.join(dataRoot, 'plugins', 'hosts', 'storage.json')
+    const storageFile = path.join(dataRoot, 'plugins', 'host-manager', 'storage.json')
     const onDisk = fs.existsSync(storageFile) ? JSON.parse(fs.readFileSync(storageFile, 'utf-8')) : null
     check(
       onDisk?.smoke?.at === 1,
-      '存储落在 <dataRoot>/plugins/hosts/storage.json',
+      '存储落在 <dataRoot>/plugins/host-manager/storage.json',
       fs.existsSync(storageFile) ? storageFile : '文件不存在',
     )
   }

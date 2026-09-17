@@ -2,25 +2,37 @@
 import { computed, ref } from 'vue'
 import UiDialog from '@launcher/ui/UiDialog.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
+import UiSelect from '@launcher/ui/UiSelect.vue'
 import { copyText, readClipboardText } from '@launcher/ui/clipboard'
 import { useToast } from '@launcher/ui/toast'
+import { NEW_BLOCK, type AdoptTarget } from '../core/blocks'
 import { parseImportText, type EntryFields } from '../core/hosts'
 
 /**
  * 批量粘贴：从文档、工单、同事聊天记录里直接拖一段 hosts 进来。
- * 边打边解析，认不出来的行原样列出来让用户自己看着办。
+ * 边打边解析，认不出来的行原样列出来让用户自己看着办；落点是某个块（或新建一个块）。
  */
+const props = defineProps<{
+  blocks: Array<{ id: string; name: string }>
+  defaultTarget: string
+}>()
+
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'submit', payload: { entries: EntryFields[]; replace: boolean }): void
+  (e: 'submit', payload: { entries: EntryFields[]; target: AdoptTarget }): void
 }>()
 
 const text = ref('')
-const replace = ref(false)
+const target = ref(props.defaultTarget)
+const newName = ref('粘贴导入')
 const toast = useToast()
 
 const parsed = computed(() => parseImportText(text.value))
 const preview = computed(() => parsed.value.entries.slice(0, 200))
+const options = computed(() => [
+  ...props.blocks.map((b) => ({ value: b.id, label: b.name })),
+  { value: NEW_BLOCK, label: '＋ 新建一个块…' },
+])
 
 async function pullFromClipboard() {
   const fromClipboard = await readClipboardText()
@@ -34,7 +46,10 @@ async function pullFromClipboard() {
 
 function submit() {
   if (!parsed.value.entries.length) return
-  emit('submit', { entries: parsed.value.entries, replace: replace.value })
+  emit('submit', {
+    entries: parsed.value.entries,
+    target: target.value === NEW_BLOCK ? { newBlockName: newName.value.trim() || '粘贴导入' } : { blockId: target.value },
+  })
 }
 
 async function copyInput() {
@@ -51,16 +66,14 @@ async function copyInput() {
     @close="emit('close')"
   >
     <div class="flex flex-col gap-3">
-      <div class="flex items-center gap-2">
-        <textarea
-          v-model="text"
-          class="launcher-input launcher-mono h-40 resize-none leading-[18px]"
-          placeholder="10.0.0.1	dev.example.com	# 开发环境
+      <textarea
+        v-model="text"
+        class="launcher-input launcher-mono h-40 resize-none leading-[18px]"
+        placeholder="10.0.0.1	dev.example.com	# 开发环境
 10.0.0.2	api.example.com
 # 10.0.0.3	old.example.com"
-          spellcheck="false"
-        />
-      </div>
+        spellcheck="false"
+      />
 
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
         <button class="launcher-btn" @click="pullFromClipboard">
@@ -70,11 +83,18 @@ async function copyInput() {
         <span v-if="parsed.skipped.length" class="launcher-chip text-warn">
           跳过 {{ parsed.skipped.length }} 行
         </span>
-        <div class="flex-1" />
-        <label class="flex cursor-pointer items-center gap-1.5 text-muted">
-          <input v-model="replace" type="checkbox" />
-          替换全文（默认追加到末尾）
-        </label>
+      </div>
+
+      <div class="flex items-center gap-2 text-[12px]">
+        <span class="shrink-0 text-muted">收进</span>
+        <UiSelect v-model="target" :options="options" />
+        <input
+          v-if="target === NEW_BLOCK"
+          v-model="newName"
+          class="launcher-input"
+          placeholder="给新块起个名字"
+          @keydown.enter="submit"
+        />
       </div>
 
       <div v-if="preview.length" class="launcher-scroll max-h-40 rounded-lg border border-line bg-panel2 p-2">
@@ -90,13 +110,13 @@ async function copyInput() {
 
       <div v-if="parsed.skipped.length" class="rounded-lg border border-line bg-panel2 p-2">
         <div class="mb-1 text-[11.5px] text-warn">下面这些行读不出 IP 和域名，不会被导入：</div>
-        <div v-for="(line, i) in parsed.skipped.slice(0, 6)" :key="i" class="launcher-mono truncate text-[11.5px] text-muted">
+        <div
+          v-for="(line, i) in parsed.skipped.slice(0, 6)"
+          :key="i"
+          class="launcher-mono truncate text-[11.5px] text-muted"
+        >
           {{ line }}
         </div>
-      </div>
-
-      <div v-if="replace" class="rounded-lg border border-line bg-panel2 p-2 text-[11.5px] text-warn">
-        替换全文会丢掉当前列表里所有条目（包括 localhost 那些系统行），请谨慎使用。
       </div>
     </div>
 
@@ -105,7 +125,7 @@ async function copyInput() {
       <div class="flex-1" />
       <button class="launcher-btn" @click="emit('close')">取消</button>
       <button class="launcher-btn primary" :disabled="!parsed.entries.length" @click="submit">
-        {{ replace ? '替换全文' : `追加 ${parsed.entries.length} 条` }}
+        导入 {{ parsed.entries.length }} 条
       </button>
     </template>
   </UiDialog>

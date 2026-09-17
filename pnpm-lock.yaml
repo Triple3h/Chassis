@@ -113,7 +113,7 @@ importers:
         specifier: ^22.10.0
         version: 22.20.2
 
-  plugins/hosts:
+  plugins/host-manager:
     dependencies:
       '@launcher/api':
         specifier: workspace:*

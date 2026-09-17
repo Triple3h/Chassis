@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { removeOutsideLines, spliceRegion } from '../core/blocks'
 import type { BackupInfo, HostsReadResult, HostsWriteResult, WriteMode } from '../core/script-types'
 
 /**
@@ -11,10 +12,14 @@ import type { BackupInfo, HostsReadResult, HostsWriteResult, WriteMode } from '.
  * 为什么必须走 script：View 跑在 iframe 里，浏览器沙箱读不了 `/etc/hosts`；
  * 而 `mode: "script"` 的命令跑在 Node Worker 中，可以正常访问文件系统。
  *
+ * 写的是什么：调用方给的是**托管区文本**（`# >>> host-manager >>>` … `# <<< host-manager <<<`），
+ * 这一层现读一遍磁盘、只把标记之间那一段换掉（`spliceRegion`）——
+ * 系统行、VPN 启动时自己加的行都在区外，逐字节原样留着。
+ *
  * 安全边界（这一层能改系统文件，必须自己收紧）：
  *   1. **目标路径不可由调用方指定** —— 只认 LAUNCHER_HOSTS_PATH（测试用）与平台默认值。
  *      否则「支持提权写文件」的脚本就成了任意文件写入的跳板。
- *   2. 写入前先备份，写入后回读校验，内容为空直接拒绝。
+ *   2. 写入前先备份，写入后回读校验；内容为空、或算出来与磁盘一致（没有改动）都不写。
  *   3. 提权一律走系统自带对话框（osascript / UAC），不自己存密码。
  *   4. 备份、待生效文件只落 `dataPath`（N2）：安装目录在新底座里是只读的，
  *      升级/重装会覆盖它 —— 用户的备份绝不能放在那儿。
@@ -240,7 +245,14 @@ function manualCommand(pending: string, target: string): string {
 /* ------------------------------------------------------------------ 写入 */
 
 export interface WriteOptions {
-  content: string
+  /**
+   * 要写进去的托管区文本（含首尾标记；空串 = 移除托管区）。
+   * 真正的文件内容在这里现算：读一遍当前文件 → 只替换托管区（见 `spliceRegion`），
+   * 于是「页面加载之后 VPN 又加了几行」不会在保存时被整份覆盖掉。
+   */
+  region: string
+  /** 顺带从区外删掉的行（收进块时用，见 `removeOutsideLines`） */
+  remove?: string[]
   /** 插件数据目录（备份与待生效文件都写这里，N2） */
   dataPath: string
   /** 仅供测试注入；正常运行永远用 resolveHostsPath() */
@@ -262,10 +274,6 @@ export function writeHostsFile(opts: WriteOptions): HostsWriteResult {
   const mode: WriteMode = opts.mode ?? 'auto'
   const result: HostsWriteResult = { ok: false, method: 'none', path: target }
 
-  if (!opts.content.trim()) {
-    return { ...result, error: '内容为空，已阻止写入（空 hosts 会让本机解析全部失效）' }
-  }
-
   // 保留原文件的编码与 BOM：先探一次，拿不到就按 UTF-8 处理
   let bom = false
   let encoding: 'utf8' | 'binary' = 'utf8'
@@ -277,7 +285,20 @@ export function writeHostsFile(opts: WriteOptions): HostsWriteResult {
     // 文件在、但读不出来（超大 / 权限异常）：不冒险覆盖它
     return { ...result, error: before.error ?? '无法读取目标文件，已中止写入' }
   }
-  const data = encode(opts.content, bom, encoding)
+
+  // 只换托管区：区外内容（系统行 / 别的程序写的行）逐字节原样保留
+  const current = before.ok ? before.content : ''
+  const next = spliceRegion(removeOutsideLines(current, opts.remove ?? []), opts.region)
+  if (next === current) {
+    // 托管区与磁盘上的一致：不写、不备份、不弹授权框
+    return { ...result, ok: true, changed: false }
+  }
+
+  if (!next.trim()) {
+    return { ...result, error: '内容为空，已阻止写入（空 hosts 会让本机解析全部失效）' }
+  }
+
+  const data = encode(next, bom, encoding)
 
   if (opts.backup !== false) {
     try {
@@ -294,7 +315,7 @@ export function writeHostsFile(opts: WriteOptions): HostsWriteResult {
   if (mode !== 'privileged') {
     try {
       writeFileSync(target, data)
-      return { ...result, ok: true, method: 'direct', verified: verify(target, data) }
+      return { ...result, ok: true, method: 'direct', changed: true, verified: verify(target, data) }
     } catch (err) {
       if (!isPermissionError(err)) {
         return { ...result, error: err instanceof Error ? err.message : String(err) }
@@ -334,6 +355,7 @@ export function writeHostsFile(opts: WriteOptions): HostsWriteResult {
     ...result,
     ok: verified,
     method: 'privileged',
+    changed: true,
     verified,
     error: verified ? undefined : '提权命令执行完了，但回读内容与预期不一致，请到备份里确认',
   }

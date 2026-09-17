@@ -4,8 +4,10 @@ import UiIcon from '@launcher/ui/UiIcon.vue'
 import { ipWarning, isProtectedEntry, type EntryLine } from '../core/hosts'
 
 /**
- * 列表里的一行条目（定高 40px，配合虚拟滚动）。
- * 行高写死在模板里，useVirtualList 的 rowHeight 必须和它一致。
+ * 块里的一行条目（定高 40px）。
+ *
+ * 操作按钮**绝对定位、悬停才浮出来**：块卡片只有 300px 宽，
+ * 两个按钮放进文档流会把域名列挤到只剩几个像素（实测 clientWidth=8）。
  */
 const props = defineProps<{
   line: EntryLine
@@ -32,7 +34,7 @@ const namesTitle = computed(() => props.line.names.join(' '))
 
 <template>
   <div
-    class="launcher-row group flex h-10 cursor-pointer items-center gap-2.5 border-b border-line px-3 hover:bg-hover"
+    class="launcher-row hm-entry group flex h-10 cursor-pointer items-center gap-2.5 border-b border-line px-3 hover:bg-hover"
     :class="{ 'opacity-50': line.disabled }"
     @click="emit('edit')"
   >
@@ -44,7 +46,7 @@ const namesTitle = computed(() => props.line.names.join(' '))
     />
 
     <span
-      class="launcher-mono w-[104px] shrink-0 truncate text-[12px]"
+      class="launcher-mono w-[86px] shrink-0 truncate text-[12px]"
       :class="ipBad ? 'text-danger' : 'text-fg'"
       :title="line.ip"
     >
@@ -53,17 +55,17 @@ const namesTitle = computed(() => props.line.names.join(' '))
 
     <div class="min-w-0 flex-1 truncate text-[12.5px]" :title="namesTitle">
       <span class="text-accent">{{ line.names.join('  ') }}</span>
-      <span v-if="line.comment" class="ml-2.5 text-[11.5px] text-muted"># {{ line.comment }}</span>
+      <span v-if="line.comment" class="ml-2 text-[11.5px] text-muted"># {{ line.comment }}</span>
     </div>
 
     <span v-if="locked" class="shrink-0 text-faint" title="系统关键条目，删掉可能影响本机解析">
       <UiIcon name="lock" :size="12" />
     </span>
-    <span v-if="conflict" class="shrink-0 text-warn" title="这个域名在别处指向了另一个 IP，hosts 只会以最后一条为准">
+    <span v-if="conflict" class="shrink-0 text-warn" title="这个域名在别处指向了另一个 IP，hosts 只会以先出现的为准">
       <UiIcon name="alert" :size="12" />
     </span>
 
-    <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+    <div class="hm-row-actions group-hover/entry:opacity-100">
       <button class="launcher-btn ghost" title="编辑" @click.stop="emit('edit')">
         <UiIcon name="pencil" :size="12" />
       </button>

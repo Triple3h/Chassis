@@ -1,9 +1,9 @@
 {
-  "name": "hosts",
+  "name": "host-manager",
   "title": "Hosts 管家",
   "author": "triple3h",
-  "description": "查看与修改系统 hosts 文件：条目启停、快速检索、批量粘贴、写入前备份与快照回滚",
-  "version": "0.1.0",
+  "description": "按块管理 hosts：一个项目一个块、块级开关、外部条目单独成块；只替换自己的托管区，别的程序写的行一律不碰，写入前备份",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "apiVersion": "1",
@@ -44,7 +44,7 @@
     "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "build:scripts": "node scripts/build-no-view.mjs",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "node ../../scripts/run-ts.mjs test/core.test.ts && node ../../scripts/run-ts.mjs test/script.test.ts",
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts && node ../../scripts/run-ts.mjs test/blocks.test.ts && node ../../scripts/run-ts.mjs test/script.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

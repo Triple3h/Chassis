@@ -1,8 +1,9 @@
-import { diffLines, parseHosts, serializeHosts, type DiffResult, type HostsDoc } from './hosts'
+import { parseBlocksDoc, type BlocksDoc } from './blocks'
+import { diffLines, type DiffResult } from './hosts'
 import type { HostsReply, HostsRequest } from './worker'
 
 /**
- * 计算调度层：解析 / 序列化 / 差分优先丢进 Worker。
+ * 计算调度层：解析 / 差分优先丢进 Worker。
  * Worker 建不起来（CSP、老 WebView）或运行中崩了，就地在主线程跑同一份纯函数——
  * 降级分支不是可选项。
  */
@@ -66,12 +67,9 @@ async function call<T>(request: HostsRequestInit, fallback: () => T): Promise<T>
   return fallback()
 }
 
-export function runParseHosts(text: string): Promise<HostsDoc> {
-  return call({ op: 'parse', text }, () => parseHosts(text))
-}
-
-export function runSerializeHosts(doc: HostsDoc): Promise<string> {
-  return call({ op: 'serialize', doc }, () => serializeHosts(doc))
+/** 整份文件 → 块模型（几万行也走 Worker） */
+export function runParseBlocks(text: string): Promise<BlocksDoc> {
+  return call({ op: 'parse', text }, () => parseBlocksDoc(text))
 }
 
 export function runDiffLines(prev: string, next: string): Promise<DiffResult> {

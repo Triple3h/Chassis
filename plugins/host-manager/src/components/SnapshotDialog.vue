@@ -6,7 +6,8 @@ import type { Snapshot } from '../core/snapshots'
 
 /**
  * 快照：写入前自动留一份，用户也可以手动命名存档。
- * 载入快照只改编辑器里的内容，仍然要再点一次保存才会写进系统文件。
+ * 存的是**托管区**（本插件的块），不含系统行与别的程序写的行 —— 那些本来就不归我们管。
+ * 载入快照只改编辑器里的块，仍然要再点一次保存才会写进系统文件。
  */
 defineProps<{
   snapshots: Snapshot[]
@@ -39,7 +40,7 @@ function when(ts: number): string {
 </script>
 
 <template>
-  <UiDialog title="快照" subtitle="每次写入前会自动存一份；载入后仍需点保存才会生效" @close="emit('close')">
+  <UiDialog title="块存档" subtitle="每次写入前会自动存一份；载入后仍需点保存才会生效" @close="emit('close')">
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <input
@@ -81,7 +82,8 @@ function when(ts: number): string {
       </div>
 
       <div class="text-[11.5px] text-muted">
-        当前编辑器里有 {{ currentEntries }} 条记录。存档会把「现在编辑的内容」存起来，含尚未写入系统的改动。
+        当前托管区里有 {{ currentEntries }} 条记录。存档只存本插件的块（含尚未写入系统的改动），
+        系统行与别的程序写的行不在其中。
       </div>
     </div>
 

@@ -82,12 +82,17 @@ function isSnapshot(value: unknown): value is Snapshot {
   return !!s && typeof s.id === 'string' && typeof s.content === 'string' && typeof s.createdAt === 'number'
 }
 
+/**
+ * 读写都吞掉「没有宿主」这一个错：演示模式（浏览器里直接打开 dist/）下 storage 一律 NOT_FOUND，
+ * 让它冒出去会把 onMounted 整条链路带崩，界面停在「正在读取…」。
+ * 其它错误同样按空值处理 —— 存档坏了不该让插件打不开。
+ */
 export async function loadSnapshots(): Promise<Snapshot[]> {
-  const raw = await storage.get<unknown>(KEY)
+  const raw = await storage.get<unknown>(KEY).catch(() => undefined)
   if (!Array.isArray(raw)) return []
   return pruneSnapshots(raw.filter(isSnapshot)).sort((a, b) => b.createdAt - a.createdAt)
 }
 
 export async function persistSnapshots(list: Snapshot[]): Promise<void> {
-  await storage.set(KEY, pruneSnapshots(list))
+  await storage.set(KEY, pruneSnapshots(list)).catch(() => undefined)
 }

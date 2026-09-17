@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -15,6 +15,9 @@ import {
 /**
  * script 命令（hosts-read / hosts-write）的核心逻辑测试。
  * 全程在临时目录里造真实文件，**绝不碰真正的 /etc/hosts**。
+ *
+ * 写入这一层最关键的一条：**区外内容一个字节都不能变**。
+ * 系统行、VPN 启动时自己加的行都在托管区之外，写盘时只换标记之间那一段。
  */
 
 let passed = 0
@@ -30,9 +33,9 @@ function test(name: string, fn: () => void) {
   }
 }
 
-const tmp = mkdtempSync(path.join(os.tmpdir(), 'hosts-'))
+const tmp = mkdtempSync(path.join(os.tmpdir(), 'host-manager-'))
 /**
- * 插件数据目录（N2 的唯一可写处）：`<dataRoot>/plugins/hosts`。
+ * 插件数据目录（N2 的唯一可写处）：`<dataRoot>/plugins/host-manager`。
  * 备份与待生效文件都只能落在它下面 —— 安装目录会被升级覆盖，绝不能写。
  */
 const dataPath = path.join(tmp, 'data')
@@ -45,6 +48,12 @@ function makeTarget(name: string, content: Buffer | string): string {
 }
 
 const ORIGINAL = '127.0.0.1\tlocalhost\n1.1.1.1\ta.example.com\n'
+
+/** 区外（系统行 + 别的程序加的行）+ 一段托管区 */
+const REGION = '# >>> host-manager >>>\n# @block 开发环境\n10.0.0.1\tdev.example.com\n# @/block\n# <<< host-manager <<<\n'
+const WITH_REGION = `##\n# Host Database\n##\n127.0.0.1\tlocalhost\n# VPN 自己加的\n10.8.0.1\tvpn.example.com\n\n${REGION}`
+/** 区域后面还有别的程序写的行 */
+const REGION_IN_MIDDLE = `${REGION}\n# 后面还有\n2.2.2.2\tlater.example.com\n`
 
 console.log('路径解析')
 
@@ -144,72 +153,152 @@ test('读备份时挡掉路径穿越', () => {
   assert.throws(() => readBackup(dataPath, '/etc/passwd'), /不合法/)
 })
 
-console.log('写入')
+console.log('写入：托管区手术式替换')
 
-test('直写成功：内容落盘、回读校验通过、留下备份', () => {
-  const target = makeTarget('write.hosts', ORIGINAL)
-  const next = '127.0.0.1\tlocalhost\n2.2.2.2\tb.example.com\n'
-  const res = writeHostsFile({ content: next, dataPath, target })
+test('只换托管区：区外逐字节保留，备份留的是改动前的内容', () => {
+  const target = makeTarget('region.hosts', WITH_REGION)
+  const next = REGION.replace('10.0.0.1\tdev.example.com', '10.0.0.9\tnew.example.com')
+  const res = writeHostsFile({ region: next, dataPath, target })
 
   assert.equal(res.ok, true)
   assert.equal(res.method, 'direct')
+  assert.equal(res.changed, true)
   assert.equal(res.verified, true)
   assert.ok(res.backup)
-  assert.equal(readFileSync(target, 'utf8'), next)
-  // 备份里是改动前的内容
-  assert.equal(readBackup(dataPath, res.backup as string), ORIGINAL)
+
+  const after = readFileSync(target, 'utf8')
+  assert.ok(after.startsWith('##\n# Host Database\n##\n127.0.0.1\tlocalhost\n# VPN 自己加的\n10.8.0.1\tvpn.example.com\n\n'))
+  assert.ok(after.includes('10.0.0.9\tnew.example.com'))
+  assert.ok(!after.includes('dev.example.com'))
+  assert.equal(readBackup(dataPath, res.backup as string), WITH_REGION)
 })
 
-test('备份名重复时不会互相覆盖', () => {
-  const target = makeTarget('dup.hosts', ORIGINAL)
-  const a = writeHostsFile({ content: '1.1.1.1 a\n', dataPath, target })
-  const b = writeHostsFile({ content: '2.2.2.2 b\n', dataPath, target })
-  assert.ok(a.backup && b.backup)
-  assert.notEqual(a.backup, b.backup)
-  assert.equal(readBackup(dataPath, a.backup as string), ORIGINAL)
-  assert.equal(readBackup(dataPath, b.backup as string), '1.1.1.1 a\n')
+test('写盘时重读磁盘：加载之后别的程序加的行不会被覆盖', () => {
+  const target = makeTarget('concurrent.hosts', WITH_REGION)
+  // 模拟「页面已经打开、用户正在改块，VPN 又往文件里塞了一行」
+  writeFileSync(
+    target,
+    WITH_REGION.replace('10.8.0.1\tvpn.example.com\n', '10.8.0.1\tvpn.example.com\n10.9.9.9\tvpn-late.example.com\n'),
+  )
+
+  const res = writeHostsFile({ region: REGION.replace('10.0.0.1', '10.0.0.5'), dataPath, target })
+  assert.equal(res.ok, true)
+  assert.equal(res.changed, true)
+
+  const after = readFileSync(target, 'utf8')
+  assert.ok(after.includes('10.9.9.9\tvpn-late.example.com'), '别的程序后加的行必须还在')
+  assert.ok(after.includes('10.0.0.5\tdev.example.com'), '托管区按新配置写入')
+  assert.ok(after.startsWith('##\n# Host Database\n##'), '文件开头也没被重排')
 })
 
-test('空内容被拒绝，且不动原文件', () => {
-  const target = makeTarget('empty.hosts', ORIGINAL)
-  const res = writeHostsFile({ content: '   \n', dataPath, target })
+test('托管区没变就什么都不做（不写、不备份、不弹授权）', () => {
+  const target = makeTarget('same.hosts', WITH_REGION)
+  const before = statSync(target).mtimeMs
+  const backups = listBackups(dataPath).length
+  const res = writeHostsFile({ region: REGION, dataPath, target })
+
+  assert.equal(res.ok, true)
+  assert.equal(res.changed, false)
+  assert.equal(res.method, 'none')
+  assert.equal(res.backup, undefined)
+  assert.equal(statSync(target).mtimeMs, before)
+  assert.equal(listBackups(dataPath).length, backups)
+})
+
+test('文件里还没有托管区时，区域追加在末尾', () => {
+  const target = makeTarget('append.hosts', ORIGINAL)
+  const res = writeHostsFile({ region: REGION, dataPath, target })
+  assert.equal(res.ok, true)
+  const after = readFileSync(target, 'utf8')
+  assert.ok(after.startsWith(ORIGINAL), '原文一个字不动')
+  assert.ok(after.endsWith(`\n\n${REGION}`), '空一行再跟上托管区')
+})
+
+test('region 传空串 = 把托管区从文件里摘掉，区外留着', () => {
+  const target = makeTarget('detach.hosts', REGION_IN_MIDDLE)
+  const res = writeHostsFile({ region: '', dataPath, target })
+  assert.equal(res.ok, true)
+  const after = readFileSync(target, 'utf8')
+  assert.ok(!after.includes('host-manager'))
+  assert.ok(!after.includes('dev.example.com'))
+  assert.ok(after.includes('2.2.2.2\tlater.example.com'))
+})
+
+test('remove：只摘掉点名的那几行（收进块时用）', () => {
+  const target = makeTarget('remove.hosts', WITH_REGION)
+  const res = writeHostsFile({
+    region: REGION,
+    remove: ['10.8.0.1\tvpn.example.com\n'],
+    dataPath,
+    target,
+  })
+  assert.equal(res.ok, true)
+  const after = readFileSync(target, 'utf8')
+  assert.ok(!after.includes('10.8.0.1\tvpn.example.com'))
+  assert.ok(after.includes('127.0.0.1\tlocalhost'))
+  assert.ok(after.includes('dev.example.com'), '托管区不受影响')
+})
+
+test('remove 对不上的行静默跳过，不会误删别的行', () => {
+  const target = makeTarget('remove-miss.hosts', WITH_REGION)
+  const res = writeHostsFile({ region: REGION, remove: ['3.3.3.3\tghost.example.com\n'], dataPath, target })
+  assert.equal(res.ok, true)
+  assert.equal(res.changed, false, '点名要删的行不存在、托管区也没变 ⇒ 没有改动')
+  assert.equal(readFileSync(target, 'utf8'), WITH_REGION)
+})
+
+test('整份内容为空时拒绝写入（空 hosts 会让本机解析全失效）', () => {
+  const target = makeTarget('empty.hosts', REGION)
+  const res = writeHostsFile({ region: '', dataPath, target })
   assert.equal(res.ok, false)
   assert.equal(res.method, 'none')
   assert.match(res.error ?? '', /内容为空/)
-  assert.equal(readFileSync(target, 'utf8'), ORIGINAL)
+  assert.equal(readFileSync(target, 'utf8'), REGION)
+})
+
+test('备份名重复时不会互相覆盖', () => {
+  const target = makeTarget('dup.hosts', WITH_REGION)
+  const a = writeHostsFile({ region: REGION.replace('dev.example.com', 'a.example.com'), dataPath, target })
+  const b = writeHostsFile({ region: REGION.replace('dev.example.com', 'b.example.com'), dataPath, target })
+  assert.ok(a.backup && b.backup)
+  assert.notEqual(a.backup, b.backup)
+  assert.equal(readBackup(dataPath, a.backup as string), WITH_REGION)
+  assert.ok((readBackup(dataPath, b.backup as string) as string).includes('a.example.com'))
 })
 
 test('可以关掉备份', () => {
-  const target = makeTarget('nobackup.hosts', ORIGINAL)
+  const target = makeTarget('nobackup.hosts', WITH_REGION)
   const before = listBackups(dataPath).length
-  const res = writeHostsFile({ content: '3.3.3.3 c\n', dataPath, target, backup: false })
+  const res = writeHostsFile({ region: REGION.replace('dev', 'nodev'), dataPath, target, backup: false })
   assert.equal(res.ok, true)
   assert.equal(res.backup, undefined)
   assert.equal(listBackups(dataPath).length, before)
 })
 
 test('保留原文件的 BOM 与编码', () => {
-  const target = makeTarget('bom-write.hosts', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(ORIGINAL)]))
-  const next = '127.0.0.1\tlocalhost\n'
-  const res = writeHostsFile({ content: next, dataPath, target })
+  const target = makeTarget(
+    'bom-write.hosts',
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(WITH_REGION)]),
+  )
+  const res = writeHostsFile({ region: REGION.replace('dev', 'bomdev'), dataPath, target })
   assert.equal(res.ok, true)
   const after = readFileSync(target)
   assert.deepEqual(after.subarray(0, 3), Buffer.from([0xef, 0xbb, 0xbf]))
-  assert.equal(after.subarray(3).toString('utf8'), next)
+  assert.ok(after.subarray(3).toString('utf8').includes('bomdev.example.com'))
 })
 
 test('目标不存在时可以创建（不存在的路径交由上层决定）', () => {
   const target = path.join(tmp, 'brand-new.hosts')
-  const res = writeHostsFile({ content: '1.1.1.1 a\n', dataPath, target })
+  const res = writeHostsFile({ region: REGION, dataPath, target })
   assert.equal(res.ok, true)
-  assert.equal(readFileSync(target, 'utf8'), '1.1.1.1 a\n')
+  assert.equal(readFileSync(target, 'utf8'), REGION)
 })
 
 test('原文件读不出来时拒绝覆盖', () => {
   // 用一个目录冒充 hosts 文件：existsSync 为真，readFileSync 会报 EISDIR
   const target = path.join(tmp, 'a-directory')
   mkdirSync(target, { recursive: true })
-  const res = writeHostsFile({ content: '1.1.1.1 a\n', dataPath, target })
+  const res = writeHostsFile({ region: REGION, dataPath, target })
   assert.equal(res.ok, false)
   assert.equal(res.method, 'none')
 })
@@ -227,9 +316,9 @@ test('备份保留份数有上限', () => {
 })
 
 test('写入是原地覆盖，不动文件的 inode（保住 root:wheel 与 644 权限）', () => {
-  const target = makeTarget('inode.hosts', ORIGINAL)
+  const target = makeTarget('inode.hosts', WITH_REGION)
   const before = statSync(target).ino
-  writeHostsFile({ content: '1.1.1.1 a\n', dataPath, target })
+  writeHostsFile({ region: REGION.replace('dev', 'inode'), dataPath, target })
   assert.equal(statSync(target).ino, before)
 })
 

@@ -1,0 +1,355 @@
+@import "tailwindcss";
+@import "../../../../packages/ui/styles/theme.css";
+
+/* Tailwind v4 不会自动跨目录扫描，必须显式声明 */
+@source "../";
+@source "../../../../packages/ui";
+
+/* ── 块色号（左栏卡片与右栏行底色共用）──────────────────────────────
+   深浅两套显式写死 rgba：**不要用 color-mix** —— 构建器（Lightning CSS）会把它拆成
+   「实色兜底 + 真值」两条规则，在没有 color-mix 的引擎上整块会被刷成纯色。 */
+:root {
+  --hm-fill-0: rgba(37, 99, 235, 0.06);
+  --hm-fill-1: rgba(22, 163, 74, 0.07);
+  --hm-fill-2: rgba(217, 119, 6, 0.08);
+  --hm-fill-3: rgba(124, 58, 237, 0.06);
+  --hm-fill-4: rgba(219, 39, 119, 0.06);
+  --hm-fill-5: rgba(13, 148, 136, 0.07);
+  --hm-edge-0: #2563eb;
+  --hm-edge-1: #16a34a;
+  --hm-edge-2: #d97706;
+  --hm-edge-3: #7c3aed;
+  --hm-edge-4: #db2777;
+  --hm-edge-5: #0d9488;
+  /* 选中块时叠在行上的一层薄色（用 background-image 叠，保住块底色） */
+  --hm-active-layer: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="dark"] {
+  --hm-fill-0: rgba(91, 140, 255, 0.1);
+  --hm-fill-1: rgba(74, 222, 128, 0.1);
+  --hm-fill-2: rgba(251, 191, 36, 0.1);
+  --hm-fill-3: rgba(196, 181, 253, 0.1);
+  --hm-fill-4: rgba(244, 114, 182, 0.1);
+  --hm-fill-5: rgba(45, 212, 191, 0.1);
+  --hm-edge-0: #5b8cff;
+  --hm-edge-1: #4ade80;
+  --hm-edge-2: #fbbf24;
+  --hm-edge-3: #c4b5fd;
+  --hm-edge-4: #f472b6;
+  --hm-edge-5: #2dd4bf;
+  --hm-active-layer: rgba(255, 255, 255, 0.07);
+}
+
+.launcher-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.launcher-row {
+  transition: background 0.12s ease;
+}
+
+/* 开关：原生 checkbox 太丑，用伪元素自绘 */
+.launcher-switch {
+  position: relative;
+  width: 30px;
+  height: 17px;
+  border-radius: 9px;
+  background: var(--launcher-line-strong);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  flex: none;
+  transition: background 0.15s ease;
+}
+.launcher-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.launcher-switch[data-on="true"] {
+  background: var(--launcher-success);
+}
+.launcher-switch[data-on="true"]::after {
+  transform: translateX(13px);
+}
+.launcher-switch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 左栏：块卡片 ─────────────────────────────────────────────── */
+
+.hm-card {
+  border: 1px solid var(--launcher-line);
+  border-radius: 10px;
+  background: var(--launcher-panel);
+  overflow: hidden;
+  transition:
+    border-color var(--launcher-motion-fast) var(--launcher-ease-move),
+    background var(--launcher-motion-fast) var(--launcher-ease-move);
+}
+.hm-card-active {
+  border-color: var(--launcher-accent);
+}
+.hm-card-off {
+  background: var(--launcher-panel-2);
+}
+
+.hm-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.hm-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+/* 块内行只有 271px 宽，浮层里的两个图标按钮收紧一点：盖住的域名/备注少 20px。
+   圆角跟着「收进」按钮一起收到 6px —— 20px 高配 8px 圆角已经近乎全圆了。 */
+.hm-row-actions .launcher-btn {
+  height: 20px;
+  padding: 1px 4px;
+  border-radius: 6px;
+}
+
+/* 行内的操作按钮同理：右对齐浮层，不占域名列的宽度。
+   `position: relative` 是浮层的定位基准，**少了它会跑到祖先容器右边缘**（外部条目行实测跑到 667px 外被卡片裁掉） */
+.hm-entry,
+.hm-out-row {
+  position: relative;
+}
+.hm-row-actions,
+.hm-adopt {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  /* 竖向居中用独立的 `translate`，**不要用 `transform: translateY(-50%)`**：
+     `.launcher-btn:active` 上的 `transform: scale(.97)` 会把整个 transform 替换掉，
+     按钮一按下就往下掉半个身高（用户实测：按下去那一下看着像「变形」）。
+     `translate` 与 `transform` 是两套独立属性，缩放时不会互相顶掉。 */
+  translate: 0 -50%;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border-radius: 9px;
+  background: var(--launcher-panel);
+  box-shadow: 0 0 0 1px var(--launcher-line);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--launcher-motion-fast) var(--launcher-ease-move);
+}
+/* 外部条目的「收进」按钮：行尾预留了 48px（pr-12），所以它是**在预留位里**淡入，
+   不会盖住域名 —— 之前是浮在域名上，用户实测截图圈出来了。
+   形状按普通小按钮来做：20px 高配 9px 圆角是**全圆**，看着就是个胶囊/椭圆（用户实测说「变形了」）。 */
+.hm-adopt {
+  right: 6px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  /* 它有自己的预留位（行尾 48px），不需要再套一圈浮层描边：
+     `.launcher-btn` 自带 1px 边框，再叠 1px 阴影环会变成双粗边、看着比别处按钮「胖一圈」 */
+  background: var(--launcher-panel);
+  box-shadow: none;
+  transition:
+    opacity var(--launcher-motion-fast) var(--launcher-ease-move),
+    background var(--launcher-motion-instant) var(--launcher-ease-move),
+    transform var(--launcher-motion-instant) var(--launcher-ease-move),
+    box-shadow var(--launcher-motion-instant) var(--launcher-ease-move);
+}
+/* 按压：本插件的小按钮只有 20px 高，`.launcher-btn` 默认的 0.97 几乎看不出来，统一压到 0.9。
+   三者都靠独立的 `translate` 定位，所以缩放不会把它们带偏。 */
+.hm-adopt:active:not(:disabled),
+.hm-row-actions .launcher-btn:active:not(:disabled),
+.hm-head-actions .launcher-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+/* 「收进」再补一层底色与内阴影，按下去是「塌一下」的手感 */
+.hm-adopt:active:not(:disabled) {
+  background: var(--launcher-active);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+/* 外部条目：行间一条极细分隔，二十来行也能一眼扫（首行不加） */
+.hm-out-row + .hm-out-row {
+  border-top: 1px solid var(--launcher-line);
+}
+.hm-entry:hover .hm-row-actions,
+.hm-entry:hover .hm-adopt,
+.hm-out-row:hover .hm-adopt,
+.hm-row-actions:focus-within,
+.hm-adopt:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 悬停才浮出来的操作条：绝对定位 —— 放进文档流会把块名挤到只剩几个像素。
+   竖向居中同样用 `translate`（理由见上面的浮层注释）。 */
+.hm-head-actions {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border-radius: 9px;
+  background: var(--launcher-panel);
+  box-shadow: 0 0 0 1px var(--launcher-line);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--launcher-motion-fast) var(--launcher-ease-move);
+}
+.hm-card:hover .hm-head-actions,
+.hm-head-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 左侧色条：标出这个块的颜色，右栏同一段行底色一致 */
+.hm-edge-0 {
+  box-shadow: inset 3px 0 0 var(--hm-edge-0);
+}
+.hm-edge-1 {
+  box-shadow: inset 3px 0 0 var(--hm-edge-1);
+}
+.hm-edge-2 {
+  box-shadow: inset 3px 0 0 var(--hm-edge-2);
+}
+.hm-edge-3 {
+  box-shadow: inset 3px 0 0 var(--hm-edge-3);
+}
+.hm-edge-4 {
+  box-shadow: inset 3px 0 0 var(--hm-edge-4);
+}
+.hm-edge-5 {
+  box-shadow: inset 3px 0 0 var(--hm-edge-5);
+}
+.hm-dot-0 {
+  background: var(--hm-edge-0);
+}
+.hm-dot-1 {
+  background: var(--hm-edge-1);
+}
+.hm-dot-2 {
+  background: var(--hm-edge-2);
+}
+.hm-dot-3 {
+  background: var(--hm-edge-3);
+}
+.hm-dot-4 {
+  background: var(--hm-edge-4);
+}
+.hm-dot-5 {
+  background: var(--hm-edge-5);
+}
+
+.hm-name-input {
+  height: 22px;
+  min-width: 0;
+  flex: 1;
+  padding: 0 6px;
+  font-size: 12.5px;
+}
+
+/* 外部条目：虚线框，一眼区分「不归我管」 */
+.hm-outside {
+  border: 1px dashed var(--launcher-line-strong);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* ── 右栏：最终文件 ───────────────────────────────────────────── */
+
+.hm-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 14px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre;
+}
+.hm-no {
+  width: 36px;
+  flex: none;
+  text-align: right;
+  color: var(--launcher-faint);
+  font-size: 10.5px;
+}
+.hm-mark {
+  width: 7px;
+  flex: none;
+  text-align: center;
+  color: var(--launcher-add-fg);
+  font-weight: 600;
+}
+.hm-text {
+  flex: none;
+}
+
+.hm-line-marker .hm-text {
+  color: var(--launcher-faint);
+}
+.hm-line-block .hm-text {
+  color: var(--launcher-accent);
+  font-weight: 600;
+}
+.hm-line.k-comment .hm-text {
+  color: var(--launcher-muted);
+}
+.hm-line.k-raw .hm-text {
+  color: var(--launcher-warn);
+}
+.hm-line-dim .hm-text {
+  color: var(--launcher-faint);
+}
+
+/* 与磁盘相比新增 / 变化的行（区外的新增行看得到这层绿；块内的以块底色为准） */
+.hm-line-mark {
+  background-color: var(--launcher-add-bg);
+}
+
+/* 块底色：声明在 .hm-line-mark 之后，块内行统一显示所属块的颜色 */
+.hm-tint-0 {
+  background-color: var(--hm-fill-0);
+}
+.hm-tint-1 {
+  background-color: var(--hm-fill-1);
+}
+.hm-tint-2 {
+  background-color: var(--hm-fill-2);
+}
+.hm-tint-3 {
+  background-color: var(--hm-fill-3);
+}
+.hm-tint-4 {
+  background-color: var(--hm-fill-4);
+}
+.hm-tint-5 {
+  background-color: var(--hm-fill-5);
+}
+
+/* 选中的块：整段提亮一层，块底色还在 */
+.hm-line-active {
+  background-image: linear-gradient(var(--hm-active-layer), var(--hm-active-layer));
+}

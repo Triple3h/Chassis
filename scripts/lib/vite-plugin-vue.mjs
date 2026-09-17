@@ -1,7 +1,7 @@
 import path from 'node:path'
 
 /**
- * Vue 插件（`plugins/{totp,hosts,text-diff,json-tools}`）的构建期别名。
+ * Vue 插件（`plugins/{totp,host-manager,text-diff,json-tools}`）的构建期别名。
  *
  * 为什么需要：`@launcher/ui`（`packages/ui`）不在插件的 `node_modules` 之下，
  * 从包内文件 `import 'vue'` 时按 pnpm 的严格结构会解析到另一份实例，
