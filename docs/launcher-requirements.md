@@ -58,6 +58,12 @@
 |---|---|
 | 全局热键 | 默认 `⌥Space`（可改，存配置）。**注册失败要提示并引导换键**（被别的 App 占用是常态） |
 | 唤出表现 | 无边框、置顶、圆角、居中于**当前鼠标所在屏幕**（多屏），宽度 720px，高度自适应（初始 480px，最多 640px） |
+| 拖动 | 按住面板顶部（搜索栏那一行 / 顶缘 8px 热区）可移动窗口；输入框与按钮上不触发（那是文本选择与点击） |
+| 缩放 | 面板四边 + 四角可拖拽缩放（最小 480×240，上限为屏幕工作区）；缩放后停止自适应高度 |
+| 尺寸记忆 | 用户调过的尺寸**按模式分别记住**：`host` = 搜索态，`plugin` = **所有插件页**（设置页 / 各插件视图共用这一份，不按插件拆分），存 `config.windowSizes`；下次唤出 / 进入插件页时还原 |
+| 恢复默认大小 | 当前模式的尺寸被改过时，搜索栏右侧（插件页在 footer 右侧）出现「恢复默认大小」按钮：清掉该模式的记忆尺寸 + 回到默认形态（启动台 = 内容自适应，插件页 = 560 高） |
+| 选中文本 | 唤出时若前台 App 里选中了文本，且搜索框当前为空 ⇒ 这段文本作为初始查询带入（macOS 需"辅助功能"权限，未授权时静默跳过） |
+| 状态显示 | 搜索栏右侧常显**启动台自身**的 CPU 与内存占用（壳 + 内核两个进程；约 3s 刷新一次，窗口隐藏时暂停），悬停给出分解与整机对照 |
 | 隐藏 | `Esc`；失焦（可配置，默认开）；再次按热键；执行完"隐藏型"命令后 |
 | 显示时 | 搜索框自动聚焦，输入框内容**保留上次的选中状态但默认清空**（可配置"保留上次输入"） |
 | 托盘 | 左键点击 = 唤出/隐藏；右键菜单 = 设置 / 插件管理 / 重载全部插件 / 退出 |
@@ -297,10 +303,14 @@ launcher/
 
 | 方法 | 参数 | 返回 | 备注 |
 |---|---|---|---|
-| `window.show` | `{ focus?: boolean }` | `void` | 居中于鼠标所在屏 |
+| `window.show` | `{ focus?: boolean }` | `{ selection?: string }` | 居中于鼠标所在屏；`selection` = 显示**之前**读到的前台选中文本（窗口一显示就来不及了） |
 | `window.hide` | — | `void` | |
 | `window.isVisible` | — | `boolean` | |
-| `window.setHeight` | `{ height: number }` | `void` | 启动台自适应高度，钳制 320–640 |
+| `window.setHeight` | `{ height: number }` | `void` | 启动台自适应高度，钳制 320–640（宽度一并回到 720） |
+| `window.setSize` | `{ width: number; height: number }` | `{ width, height }` | 用户记忆的窗口尺寸（宽度 480–2000、高度 240–1400）；内容自适应仍走 `window.setHeight` |
+| `window.startDragging` | — | `void` | 无边框窗口：UI 在拖拽区 mousedown 时调用，之后的移动交给系统 |
+| `window.startResizeDragging` | `{ direction: 'north'\|'south'\|'east'\|'west'\|'northEast'\|'northWest'\|'southEast'\|'southWest' }` | `void` | 无边框窗口的四边 / 四角缩放 |
+| `selection.read` | `{ prompt?: boolean }` | `{ ok: boolean; text?: string; reason?: string }` | 前台 App 的选中文本（macOS 走 Accessibility API；`reason` 见 §6.2） |
 | `hotkey.register` | `{ accelerator: string }` | `{ ok: boolean; reason?: string }` | 失败要能给出"被占用"的原因 |
 | `hotkey.unregister` | — | `void` | |
 | `tray.setMenu` | `{ items: TrayItem[] }` | `void` | 菜单由内核提供（便于插件加项） |
@@ -313,15 +323,24 @@ launcher/
 | `app.quit` | — | `void` | |
 | `app.setAutostart` | `{ enabled: boolean }` | `void` | |
 | `app.info` | — | `{ version, platform, arch, dataRoot }` | |
+| `app.usage` | — | `{ ok: boolean; rss: number; cpuMs: number }` | 壳进程**自身**的常驻内存（bytes）与累计 CPU 时间（ms）—— 状态条要"启动台一共占多少"，内核算另一半 |
 
 **壳不做的事**：不做搜索、不读插件目录、不认识"命令"这个概念、不做排序、不存历史。
 
 ### 6.2 窗体行为
 
 - 无边框（`decorations: false`）、`alwaysOnTop: true`、`skipTaskbar: true`、透明圆角背景
+- **可拖动 / 可缩放**（`resizable: true` + 最小 480×240）：无边框窗口的系统拖拽区已经不存在，
+  拖动与四边/四角缩放由 UI 自己画把手、在 `mousedown` 时调 `window.startDragging` /
+  `window.startResizeDragging`（系统接管后续的移动）。**手动缩放后不再自动调高度**，
+  尺寸按模式记忆（`config.windowSizes.host` / `.plugin`，见 §3.1「尺寸记忆」）——
+  下次唤出 / 进入插件页由 UI 用 `window.setSize` 还原；「恢复默认大小」清掉记忆、回到内容自适应
 - macOS：`activationPolicy: Accessory`（不进 Dock）；`titleBarStyle: Overlay` 不需要（无边框）
 - 失焦隐藏：监听 window blur（延迟 120ms，避免点击自身子窗口时误隐）
 - 多屏：唤出时读鼠标坐标 → 选最近屏 → 该屏工作区居中（y 取 1/4 高度处更符合习惯）
+- **选中文本**（`selection.read`）：macOS 走 Accessibility API（`AXFocusedUIElement` → `AXSelectedText`），
+  需要"辅助功能"权限；未授权时**首次**带 `prompt` 调用一次系统引导，之后静默返回 `reason: 'denied'`。
+  读取必须发生在 `window.show` **之前**（窗口一显示，前台 App 就变成了自己，选区也随之消失）
 - 内核崩溃时：壳显示错误面板 + "重载内核 / 查看日志 / 退出"三个动作（不许白屏）
 
 ### 6.3 打包

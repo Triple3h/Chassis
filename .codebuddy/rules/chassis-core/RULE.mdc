@@ -1,5 +1,5 @@
 ---
-description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、窗口显隐三方协作、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名）、数据迁移与样式同源
+description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、窗口显隐/拖动/缩放与选区时机、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名）、数据迁移与样式同源
 alwaysApply: true
 enabled: true
 provider:
@@ -27,6 +27,17 @@ provider:
 - `window/hide` 落地后**必须清 `HIDE_AT_MS`**（否则下次热键被当成「取消隐藏」）；`toggle()` 的「离场途中再按 = 取消隐藏」判断排最前；UI `REVEAL_FAST_MS`(180ms) 必须小于「离场 + 回执」耗时。
 - **窗口边角**：`.shell` 上不放 `backdrop-filter`（唯一会溢出圆角的属性），也不放 `box-shadow`（阴影全在窗口外、一个像素都渲染不出来，却会让 WebKit 把贴住视口底边的圆角画成直角）；`clip-path: inset(0 round var(--radius-shell))` 兜底。
 - 动效令牌单一来源（ADR-0004）：UI `--motion-*`、插件侧镜像 `--launcher-motion-*`；`show/hideWindowAnimated()` 是唯一收口。
+
+## 窗口拖动 / 缩放 / 选中文本 / 状态条
+
+- **选区只能在 `window.show` 之前读**：窗口一上屏，前台 App 就是自己，`AXSelectedText` 随之消失（`primitives/selection.rs`）。所以 `window.show` 的返回值带 `{selection}` —— **谁调 show 谁负责把它转交内核**；热键 / 托盘 / 单实例三条路统一走 `window::show_and_report`（`let _ = show(...)` ＝ 选中文本凭空消失，"选中了再按热键却不带"就是这么来的）。
+- 读取策略在内核（`Kernel.applySelection`）：只填**空搜索框**、超长（`SELECTION_MAX_CHARS`）不带；壳只管"此刻前台选中了什么"这个事实。
+- **窗口尺寸归 UI**：把手按下 = `manualResized`，内容高度不再改窗口；尺寸**按模式分别记忆**（`config.windowSizes.host` / `.plugin`，UI 提交、内核 `sanitizeWindowSizes` 钳制），下次唤出 / 进插件页 / UI 挂载时用 `window.setSize` 还原（自适应那条路仍走 `window.setHeight`，别混用）。落盘时机：拖完防抖 400ms + **离场前 `flushSizeSave()` 补一次**；「恢复默认大小」= 清当前模式的记忆 + `setWindowHeight(desiredHeight, { force: true })` 回自适应。写回时必须**整个 `windowSizes` 对象一起给**（`patchConfig` 是浅合并，少给一个键就把另一模式的记忆抹了）。
+- `-webkit-app-region: drag` 只准用在**没有交互元素**的条带上（当前只有顶缘 8px 热区）；含 input/button 的行一律走 `data-drag-region` + `window.startDragging`（IPC 兜底），别赌某个 WebKit 版本的 `no-drag` 实现。
+- 缩放把手 `z-index` 必须高于拖拽条（角上缩放优先于拖动）；边把手宽度保持 6px（再宽会压住插件页 iframe 的滚动条）。
+- 「恢复默认大小」按钮有两个落点：宿主态在搜索栏右侧（只有图标）、插件页在宿主 footer 右侧（带文字）—— 插件页没有搜索栏可挂，别只在一边加。
+- 无边框窗口的系统调用：`start_resize_dragging` 只长在 `Window` 上（`WebviewWindow` 没有）⇒ `main_window(app)?.as_ref().window()`；方向类型来自 `tauri-runtime`（版本必须与 tauri 依赖的一致）。
+- 状态条（CPU / 内存）是**内核自用**数据（`services/systemStats.ts`，`node:os` 差分采样），**不进插件 API**；UI 显示**绝对量**而不是百分比（macOS `freemem` 不含可回收缓存，百分比常年八九十，写出来只会吓人）。
 
 ## 配置与事件
 
