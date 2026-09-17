@@ -1,4 +1,4 @@
-import { LauncherError, toErrorShape } from '@launcher/plugin-manifest'
+import { LauncherError, SERVICE_CAPABILITY, toErrorShape } from '@launcher/plugin-manifest'
 import type { ResultItem } from '@launcher/plugin-manifest'
 import type { AuditLog } from '../audit'
 import type { EventBus } from '../events'
@@ -47,34 +47,53 @@ export interface BridgeResult {
   error?: { code: string; message: string }
 }
 
-/** 方法 → 所需能力（'' 表示无需声明） */
-const METHOD_CAPABILITY: Record<string, string> = {
-  'ctx.storage.get': 'storage',
-  'ctx.storage.set': 'storage',
-  'ctx.storage.remove': 'storage',
-  'ctx.storage.all': 'storage',
-  'ctx.storage.clear': 'storage',
-  'ctx.hostUi.getSearchContent': 'hostUi',
-  'ctx.hostUi.setSearchContent': 'hostUi',
-  'ctx.hostUi.clearSearchContent': 'hostUi',
-  'ctx.hostUi.setFooter': 'hostUi',
-  'ctx.hostUi.hide': 'hostUi',
+/**
+ * 方法 → 所需能力（'' = 无需声明）。
+ *
+ * 真源是 `@launcher/plugin-manifest` 的 `SERVICE_CAPABILITY`（服务名 → 能力）：
+ * 从 `ctx.<service>.<method>` 取出服务名去查表即可。这里只补一张**特例表** ——
+ * clipboard 在服务表里只记「有 write 才能挂载」，而桥按方法细分读 / 写两种能力。
+ *
+ * 收敛之前这里维护着一份 20+ 行的逐方法清单：加一个 SDK 方法就得记得来改，
+ * 漏了就是「桥放行、装配期裁剪却没放」或反之。
+ */
+const METHOD_CAPABILITY_OVERRIDES: Record<string, string> = {
   'ctx.clipboard.readText': 'clipboard.read',
   'ctx.clipboard.writeText': 'clipboard.write',
-  'ctx.shell.openUrl': 'shell.open',
-  'ctx.shell.openPath': 'shell.open',
-  'ctx.shell.reveal': 'shell.open',
-  'ctx.exec.run': 'exec.spawn',
-  'ctx.notify.show': 'notify.show',
-  'ctx.screenshot.start': 'screenshot',
-  'ctx.quicklink.all': 'quicklink',
-  'ctx.quicklink.add': 'quicklink',
-  'ctx.quicklink.edit': 'quicklink',
-  'ctx.quicklink.remove': 'quicklink',
 }
 
 export function capabilityFor(method: string): string {
-  return METHOD_CAPABILITY[method] ?? ''
+  const override = METHOD_CAPABILITY_OVERRIDES[method]
+  if (override) return override
+  const service = method.split('.')[1]
+  return (service ? SERVICE_CAPABILITY[service] : undefined) ?? ''
+}
+
+/**
+ * 这些服务的调用**自带审计**（服务实现内部过 `audited()`，见 services 下的
+ * storage / hostUi / shell / quicklink）：桥不再对它们的成功调用重复记一条。
+ *
+ * 为什么：两边都记 = 同一次调用落两条（实测 `ctx.storage.get` 恰好 2 条）——
+ * 审计环形缓冲只有 500 条，可追溯窗口被白白砍半，设置页的审计列表也会成对重复。
+ *
+ * **失败路径仍然一律记**：参数 / 能力校验可能发生在服务层 `audited()` 之前
+ * （那一条就不会存在），多记一条的代价远小于漏记 —— P6 是「可审计」，不是「不重复」。
+ *
+ * 新增 SDK 方法时注意：属于上表服务的写进这里，其余（exec / audit / host / commands /
+ * searchResult / settings / log）由桥记入口审计。`tests/unit/bridge-audit.test.ts` 守着这条线。
+ */
+const SELF_AUDITED_PREFIXES = [
+  'ctx.storage.',
+  'ctx.hostUi.',
+  'ctx.clipboard.',
+  'ctx.shell.',
+  'ctx.notify.',
+  'ctx.screenshot.',
+  'ctx.quicklink.',
+]
+
+function isSelfAudited(method: string): boolean {
+  return SELF_AUDITED_PREFIXES.some((prefix) => method.startsWith(prefix))
 }
 
 /**
@@ -102,15 +121,18 @@ export class BridgeDispatcher {
     const start = Date.now()
     try {
       const result = await this.invoke(session, call)
-      this.deps.audit.record({
-        pluginId: session.pluginId,
-        channel: 'ui',
-        method: call.method,
-        ok: true,
-        ms: Date.now() - start,
-        capability: capabilityFor(call.method),
-        ...(call.params !== undefined ? { args: call.params } : {}),
-      })
+      // 自带审计的服务只记服务层那一条（否则同一次调用双记，见 SELF_AUDITED_PREFIXES）
+      if (!isSelfAudited(call.method)) {
+        this.deps.audit.record({
+          pluginId: session.pluginId,
+          channel: 'ui',
+          method: call.method,
+          ok: true,
+          ms: Date.now() - start,
+          capability: capabilityFor(call.method),
+          ...(call.params !== undefined ? { args: call.params } : {}),
+        })
+      }
       return { id: call.id, ok: true, result: result ?? null }
     } catch (err) {
       const error = toErrorShape(err)
@@ -135,7 +157,6 @@ export class BridgeDispatcher {
     if (capability && !this.deps.capabilitiesOf(pluginId).has(capability)) {
       throw new LauncherError('CAPABILITY_DENIED', `未声明能力：${capability}`)
     }
-    const storage = () => this.deps.storage.serviceFor(pluginId)
     const hostUi = () => this.deps.hostUi.serviceFor(pluginId, sid)
 
     switch (call.method) {
@@ -180,18 +201,12 @@ export class BridgeDispatcher {
         return null
 
       case 'ctx.storage.get':
-        return storage().get(str(params.key, 'key'))
       case 'ctx.storage.set':
-        await storage().set(str(params.key, 'key'), params.value)
-        return null
       case 'ctx.storage.remove':
-        await storage().remove(str(params.key, 'key'))
-        return null
       case 'ctx.storage.all':
-        return storage().all()
       case 'ctx.storage.clear':
-        await storage().clear()
-        return null
+        // 方法名转发给统一实现（与脚本侧 `storage.*` 同一处，见 PluginStorage.call）
+        return this.deps.storage.call(pluginId, 'ui', call.method.slice('ctx.storage.'.length), params)
 
       case 'ctx.hostUi.getSearchContent':
         return hostUi().getSearchContent()
