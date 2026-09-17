@@ -36,6 +36,14 @@ provider:
 - `@launcher/ui`（`packages/ui`）是工作区包：插件 `package.json` 声明 `"@launcher/ui": "workspace:*"` 后走标准解析，**不需要**再配 Vite alias / tsconfig paths。
 - Tailwind v4 不会跨界扫描：`src/styles/app.css` **必须**用 `@source` 声明插件 `src` 与 `../../packages/ui` 两个范围，否则类名不生成。
 
+## 响应式（大文档模型）
+
+- 大结构用 `shallowRef` 持有、内部对象**原地改**时：**每次改动都要换新引用**（`doc.value = { ...doc, blocks: doc.blocks.map((b) => ({ ...b })) }`），
+  不能只在原地 `push/splice` 之后补一个 `triggerRef` —— **`computed` 只在它读到的引用变了时才通知下游**，
+  原地改之后 `blocks` 还是同一个数组、`props.block` 还是同一个对象，于是「列表 / 下拉选项 / 卡片里的条目」全部停在旧值上
+  （2026-09-17 实测：新建的块在「收进块」弹窗里选不到、左栏也不出现；用 vue 响应式内核单测复现过：
+  原地改 + `triggerRef` 下游永远收不到，换新引用立刻收到）。浅拷贝足够 —— 行对象与行数组共享，不复制内容。
+
 ## UI 与样式
 
 - 表单控件写 `class="launcher-input"`（背景 / 边框 / focus 环跟着主题与主题色走）。

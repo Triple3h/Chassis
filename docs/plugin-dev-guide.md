@@ -433,6 +433,16 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **原因**：动画自身的时钟也在走，而 `animation-delay` 表达的是「本时间步已过秒数」；每秒把 delay 往前推 1 秒 = 把同一秒算了**两遍**（动画位置 = 动画存活时长 + `|delay|`）。`CDP` 单点读 `delay`/`dashoffset` 会看着"自洽"，只有连续采样才能发现速度是 2 倍。
 - **对策**：**一个时间源**。JS 每秒（对齐整秒）算目标 `stroke-dashoffset`，平滑交给 `transition: stroke-dashoffset 1s linear`；跨时间步那一帧要临时关掉过渡，否则「空 → 满」会被补间演成**倒转一整圈**（`plugins/totp/src/App.vue` 的 `ringOffset()` / `markStepReset()`）。
 
+### 5.21 `shallowRef` 里的大文档原地改，界面「改了但没反应」
+
+- **现象**：host-manager 里点「新建块」后左栏不出现新块；「收进块」弹窗的下拉里也选不到刚建的块（用户实测截图）。
+- **原因**：文档是 `shallowRef`（几万行不能深度代理）+ **原地改**（`blocks.splice/push`），改动后只补了一个 `triggerRef(doc)`。
+  但派生数据全是 `computed`，而 **computed 只在「它读到的那个引用变了」时才通知下游**：`blocks` 每次返回的还是同一个数组对象、
+  `props.block` 还是同一个对象 ⇒ 「块列表 / 下拉选项 / 卡片里的条目列表」永远停在第一次求值的结果上。
+  用 vue 响应式内核最小复现（`shallowRef` + `computed` + `push` + `triggerRef`）：下游始终收到 `[]`；换成新引用立刻收到新值。
+- **对策**：**改动出口统一换新引用**。host-manager 把「原地改 + triggerRef」改成 `doc.value = { ...doc, blocks: doc.blocks.map((b) => ({ ...b })) }`
+  （浅拷贝足够：行对象与行数组共享，不复制内容）。同文件的 `props.version` 只用来推子组件重渲染，**不能**替代引用变化。
+
 ---
 
 ## 6. 新增一个插件的检查清单
