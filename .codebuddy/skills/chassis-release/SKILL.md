@@ -8,7 +8,7 @@ disable: false
 # 打包自用版（dist-app/Chassis.app）
 
 本项目**当前自用分发**：macOS 不走 tauri-cli / 不公证 / 不打 dmg，产物 `dist-app/Chassis.app` 拖进 /Applications 即可用。
-**规划中（M5/M6，见 `docs/m5-rust-and-windows.md`）**：引入 GitHub Actions 双平台构建（`macos-latest` + `windows-latest`）与 GitHub Releases 分发；仓库届时公开（MIT）⇒ Actions 免费无额度限制，且**不要**在 CI 里跑 `make-icon.mjs`（依赖 `rsvg-convert`/`iconutil`，图标产物一律入库）。
+**M5 已落地**：内核与逻辑层插件都是随包内置的 Rust 二进制（运行时**零 Node**）；**规划中（M6，见 `docs/m5-rust-and-windows.md`）**：GitHub Actions 双平台构建（`macos-latest` + `windows-latest`）与 GitHub Releases 分发；仓库届时公开（MIT）⇒ Actions 免费无额度限制，且**不要**在 CI 里跑 `make-icon.mjs`（依赖 `rsvg-convert`/`iconutil`，图标产物一律入库）。
 装配细节在 `scripts/pack-local-app.mjs`；数据目录与迁移见规则 `chassis-core`。
 
 ## 全量打包
@@ -58,5 +58,5 @@ pnpm app:local   # 2. 重新打包（tray.png 走 include_bytes! ⇒ 换图标�
 
 ## 环境依赖
 
-- `.app` **不内嵌 Node**：依赖系统 Node ≥22（`LAUNCHER_NODE` 可覆盖）；未签名会被 macOS 杀掉 ⇒ 必须 ad-hoc（脚本已做）。
+- `.app` **运行时零 Node**：内核与逻辑层插件都是随包内置的二进制（`Contents/Resources/kernel/launcher-kernel` + 各插件的 `dist/<命令名>`）；Node 只在**开发期**需要（pnpm / Vite 工具链）。未签名会被 macOS 杀掉 ⇒ 必须 ad-hoc（脚本已做）。
 - 缺 rsvg-convert 时 `pnpm icon` 会明确报错（`brew install librsvg`）。
