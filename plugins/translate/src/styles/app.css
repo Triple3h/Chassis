@@ -1,0 +1,158 @@
+@import "tailwindcss";
+@import "../../../../packages/ui/styles/theme.css";
+
+/* Tailwind v4 不会自动跨目录扫描，必须显式声明 */
+@source "../";
+@source "../../../../packages/ui";
+
+/* 错误 / 未配置提示：底色与前景都走插件的 rgba 令牌 ——
+   不用 color-mix（Lightning CSS 会拆成「实色兜底 + 真值」两条规则，
+   老一点的 WebKit 会把整块面刷成纯色）。 */
+.tr-notice {
+  background: var(--launcher-del-bg);
+  border: 1px solid var(--launcher-del-bg);
+  color: var(--launcher-del-fg);
+}
+
+.tr-hint {
+  background: var(--launcher-panel2);
+  border: 1px solid var(--launcher-line);
+  color: var(--launcher-muted);
+}
+
+/* 输入框：多行、不手动调大小、去掉原生描边（.launcher-input 的 focus 环照旧） */
+.tr-input {
+  width: 100%;
+  min-height: 76px;
+  max-height: 220px;
+  background: transparent;
+  border: 0;
+  border-radius: 12px 12px 0 0;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  resize: none;
+}
+.tr-input::placeholder {
+  color: var(--launcher-faint);
+}
+
+/* 译文正文：与输入同字号但更松的行高，长文本自然换行 */
+.tr-output {
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* 命名风格芯片：mono 的「风格名 + 结果预览」两列 */
+.tr-variant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--launcher-line);
+  border-radius: 8px;
+  background: var(--launcher-panel-2);
+  padding: 5px 8px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--launcher-motion-instant) var(--launcher-ease-move),
+    border-color var(--launcher-motion-instant) var(--launcher-ease-move);
+}
+.tr-variant:hover {
+  background: var(--launcher-active);
+  border-color: var(--launcher-line-strong);
+}
+.tr-variant-label {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--launcher-muted);
+}
+/* 值才是主角：风格名只是标签（muted），格式化结果是可直接复制的正文（fg + 稍大） */
+.tr-variant-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--launcher-fg);
+}
+
+/* 历史翻译条目：原文一行、译文一行、元信息一行，整行可点 */
+.tr-history-item {
+  display: flex;
+  flex-direction: column;
+}
+.tr-history-main {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.tr-history-main .tr-history {
+  flex: 1;
+  min-width: 0;
+}
+/* 条目右侧的两个小动作：复制译文 / 展开命名风格 */
+.tr-history-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.tr-history-actions .launcher-btn {
+  padding: 4px 7px;
+}
+/* 展开的九宫格：复用工作台上的 .tr-variant 芯片 */
+.tr-history-variants {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+.tr-history {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--launcher-line);
+  border-radius: 8px;
+  background: var(--launcher-panel-2);
+  padding: 6px 9px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--launcher-motion-instant) var(--launcher-ease-move),
+    border-color var(--launcher-motion-instant) var(--launcher-ease-move);
+}
+.tr-history:hover {
+  background: var(--launcher-active);
+  border-color: var(--launcher-line-strong);
+}
+.tr-history-text,
+.tr-history-trans {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tr-history-text {
+  font-size: 12.5px;
+  color: var(--launcher-fg);
+}
+.tr-history-trans {
+  font-size: 12px;
+  color: var(--launcher-muted);
+}
+.tr-history-meta {
+  font-size: 11px;
+  color: var(--launcher-faint);
+}

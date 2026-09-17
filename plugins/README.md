@@ -1,6 +1,6 @@
 # 出厂插件（plugins/）
 
-出厂**预装**的 13 个插件。内核一视同仁：同一份「出厂 bundle」、可禁用、可卸载
+出厂**预装**的 14 个插件。内核一视同仁：同一份「出厂 bundle」、可禁用、可卸载
 （只有 `internal-*` 属管理面不可卸载），产物形态与 `docs/plugin-spec.md` 完全一致。
 
 | 插件 | 命令 | 视图层 | 逻辑层 |
@@ -8,6 +8,7 @@
 | `app-launcher` | `search`（script，贡献型） + `refresh`（no-view） | esbuild | Rust |
 | `file-search` | `search`（script，贡献型） | esbuild | Rust |
 | `web-open` | `web`（script，贡献型） | esbuild | Rust |
+| `translate` | `panel`（view） + `translate`（script，贡献型） | Vite + Vue | Rust |
 | `internal-settings` | `settings` + `manage`（view） | esbuild | — |
 | `totp` | `totp`（view） + `read-image`（script） | Vite + Vue | Rust |
 | `host-manager` | `hosts`（view） + `hosts-read` / `hosts-write` / `hosts-permission`（script） | Vite + Vue | Rust |
@@ -31,7 +32,7 @@
 | 构建驱动 | 根 `scripts/build-all.mjs` 按 `package.json` 的 `build:view` / `build:scripts` 驱动 | 同左 |
 
 > Vue 插件（`totp` / `host-manager` / `text-diff` / `json-tools` / `snips` / `calc-pad` /
-> `markdown-notes` / `todo` / `screen-recorder`）与内置插件同出厂流程，
+> `markdown-notes` / `todo` / `screen-recorder` / `translate`）与内置插件同出厂流程，
 > 但保留自己的 Vite + Vue 工具链，view 侧直连 `@launcher/api`，逻辑层走 Rust SDK `launcher-plugin-sdk`。
 > 插件 id 简化为 `totp` / `text-diff` / `json-tools`；hosts 后来改名为 `host-manager`。
 > 旧数据目录与历史 / 固定项由内核首次加载时接手，**改名链**（`sofast-hosts` → `hosts` → `host-manager`）

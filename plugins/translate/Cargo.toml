@@ -1,0 +1,26 @@
+[package]
+name = "launcher-plugin-translate"
+version = "0.1.0"
+edition = "2021"
+description = "聚合翻译（translate）逻辑层：选中/输入文本 → 有道 / 百度翻译 API → 结果项回启动台"
+license = "MIT"
+publish = false
+
+[lib]
+name = "launcher_plugin_translate"
+path = "src/lib.rs"
+
+# bin 名 = commands[].name（plugin-spec §2.2 的 N1 铁律）
+[[bin]]
+name = "translate"
+path = "src/main.rs"
+
+[dependencies]
+launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
+serde_json = "1"
+# 各家签名算法（有道 sha256 / 百度 md5）—— 纯 Rust，无系统依赖
+sha2 = "0.10"
+md-5 = "0.10"
+# HTTP：同步客户端。贡献型 handler 跑在 SDK 的 executor 线程、**不在任何 tokio runtime 内**，
+# 同步请求最省事（不必自建 runtime）；关掉默认特性只留 rustls，避免多拉 TLS 后端与压缩依赖。
+ureq = { version = "2", default-features = false, features = ["tls"] }

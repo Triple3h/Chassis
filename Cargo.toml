@@ -17,6 +17,7 @@ members = [
     "plugins/host-manager",
     "plugins/screen-recorder",
     "plugins/totp",
+    "plugins/translate",
     "plugins/web-open",
 ]
 exclude = ["apps/shell"]
