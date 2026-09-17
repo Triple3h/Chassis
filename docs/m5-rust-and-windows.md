@@ -562,7 +562,7 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 **为什么它属于 Windows 而不是 macOS**：
 
 - Windows 有**原生事件**：`AddClipboardFormatListener` → `WM_CLIPBOARDUPDATE`，**零轮询**；macOS 只能轮询 `NSPasteboard.changeCount`（300–500ms，无通知 API）。
-- Windows **读写剪贴板不需要任何系统授权**；macOS 粘贴要辅助功能（AX）权限（ad-hoc 重签还会重弹 TCC），且 macOS 16 据报将加"读取提示横幅"。
+- Windows **读写剪贴板不需要任何系统授权**；macOS 粘贴要辅助功能（AX）权限（该授权绑代码签名身份，用固定证书签名可跨重新打包保留，见 `scripts/make-signing-cert.mjs`），且 macOS 16 据报将加"读取提示横幅"。
 - Win10+ 自带的 Win+V 云剪贴板能力弱（条数少、依赖云、不能本地大历史），不构成替代。
 - 移动端与浏览器扩展**做不了系统级剪贴板历史**（Android 10+ 后台禁读、iOS 无后台监听）⇒ 这个能力天然属于桌面端；协议设计保持平台无关，将来要在 macOS 补做只需加壳后端。
 
@@ -614,7 +614,7 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 **要点**：
 
 - **必须走 Release 而不是 artifact**：公开仓库的 artifact 下载要登录 GitHub；Release 附件任何人都能直接下——这才是"发给同事"的通道。
-- **零 secrets**：ad-hoc 签名不需要证书 ⇒ 公开仓库不会因为 CI 而引入任何密钥（继续保持"无 secrets"状态）。
+- **零 secrets**：CI 上签不了证书（固定证书只在本机钥匙串里，由 `scripts/make-signing-cert.mjs` 创建），CI 产物回落 ad-hoc 签名 ⇒ 公开仓库不会因为 CI 而引入任何密钥（继续保持"无 secrets"状态）。
 - 缓存：`actions/setup-node` + `pnpm/action-setup`、`Swatinem/rust-cache`（两端），把 Rust 编译从 ~10 分钟压到 2–3 分钟。
 - **图标必须已在仓库里**（已确认：`apps/shell/icons/{icon.icns,icon.png,icon.svg,tray.png,tray.svg}` 均入库）——CI 上**不能**跑 `make-icon.mjs`（依赖 `rsvg-convert` + `iconutil`）；新增 Windows `.ico` 与彩色托盘 PNG 后同样入库。
 - macOS 只用 arm64（`macos-latest`）先满足自用；要 Intel 支持再加 `macos-13`（x64）矩阵。

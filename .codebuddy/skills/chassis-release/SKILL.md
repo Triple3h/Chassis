@@ -1,6 +1,6 @@
 ---
 name: chassis-release
-description: 打包自用版应用、换图标、换包安装、应用改名时使用。触发场景：打包、出个新包、重新打包、发布、app:local、换图标、图标不好看、更新 .app、安装新版本、Chassis.app 打不开。关键词：打包、发布、icon、icns、tray、ad-hoc 签名、换包、dist-app。
+description: 打包自用版应用、换图标、换包安装、应用改名时使用。触发场景：打包、出个新包、重新打包、发布、app:local、换图标、图标不好看、更新 .app、安装新版本、Chassis.app 打不开、权限老是重弹。关键词：打包、发布、icon、icns、tray、代码签名、签名证书、ad-hoc 签名、TCC 授权、换包、dist-app。
 allowed-tools:
 disable: false
 ---
@@ -14,7 +14,7 @@ disable: false
 ## 全量打包
 
 ```bash
-pnpm app:local                # build-all → 组装资源 → cargo build --release → 组装 .app → ad-hoc 签名
+pnpm app:local                # build-all → 组装资源 → cargo build --release → 组装 .app → 签名（固定证书优先，回落 ad-hoc）
 pnpm app:local --skip-build   # 前端产物没变时：跳过前端构建，只重编 Rust / 重新组装
 ```
 
@@ -24,8 +24,21 @@ pnpm app:local --skip-build   # 前端产物没变时：跳过前端构建，只
 2. 收集 `apps/shell/resources/{kernel,ui,builtin-plugins}`；
 3. `cargo build --release`（产物 `apps/shell/target/release/launcher-shell`）；
 4. 组装 `.app`（Info.plist + `MacOS/` + `Resources/`）；
-5. `codesign --force --deep --sign -`（**ad-hoc 必需**：Apple Silicon 上未签名会被系统直接杀掉）；
+5. 签名（必须：Apple Silicon 上未签名会被系统直接杀掉）—— 优先用本机自签名证书（`security find-identity -p codesigning` 里找 `Chassis Local Signing`，也可用 `LAUNCHER_SIGN_IDENTITY` 指定别的），找不到则回落 `codesign --force --deep --sign -`（ad-hoc）；
 6. 清 quarantine + `lsregister -f` 刷新 LaunchServices（换图标后不刷新，Dock / Finder 会一直显示旧图标）。
+
+## 签名证书（一次性，TCC 授权稳定的前提）
+
+ad-hoc 签名的身份 = 二进制哈希，每次重新打包都变 ⇒ 「辅助功能 / 屏幕录制 / 通知 / 自动化」这类 TCC 授权会被系统当成新应用，**换包后又弹**（典型症状：系统设置里明明勾着，实际不生效 —— TCC 日志里是 `Failed to match existing code requirement`）。建一次固定证书即可根治：
+
+```bash
+node scripts/make-signing-cert.mjs          # 幂等：已有则跳过；--force 重建（等于换身份，授权要重给一次）
+```
+
+- 做三件事：生成自签名证书（10 年、codeSigning 扩展，走配置文件写法 —— 系统自带 openssl 是 LibreSSL，不认 `-addext`）→ **分开导入**证书与私钥到登录钥匙串（`-T /usr/bin/codesign` 预授权；**别用 p12**：LibreSSL 导出的 p12 在 macOS 上必然报 `MAC verification failed`，空密码 / 3DES / AES 都不行）→ `security add-trusted-cert -p codeSign` 设为信任根（**这一步弹系统授权框**，输密码 / Touch ID）。
+- 签名后 DR 形如 `identifier "app.launcher.desktop" and certificate root = H"…"` ⇒ **不含 cdhash**，重新打包不再失配。
+- 从 ad-hoc 切到证书（或 `--force` 重建）之后：去 系统设置 → 隐私与安全性 把**旧条目删掉**、重新授权一次；之后换包不再弹。
+- CI（M6）不建证书：公开仓库继续「零 secrets」，CI 产物回落 ad-hoc（只影响下载者本机的授权体验）。
 
 ## 换图标
 
@@ -49,10 +62,12 @@ pnpm app:local   # 2. 重新打包（tray.png 走 include_bytes! ⇒ 换图标�
 1. **先退出旧实例**：同 bundle id 下旧实例不退时双击新包会被互斥接管（表现为「打不开」）。
 2. 拖 `dist-app/Chassis.app` 进 /Applications 覆盖旧的。
 3. 首次运行按提示授权「辅助功能 / 通知」；数据在数据目录原地保留。
+4. 遇到「明明授权过、换包后又弹」：系统设置 → 隐私与安全性 → 对应分类里**删掉旧条目**再重新授权 —— 旧条目对应旧签名身份，勾着也不生效（换过证书 / 用过 ad-hoc 时必然碰到一次）。
 
 ## 打包后验证
 
-- `codesign --verify --verbose=1 dist-app/Chassis.app`（ad-hoc 会有告警，正常）。
+- `codesign --verify --verbose=1 dist-app/Chassis.app`；再看身份对不对：`codesign -dv --verbose=4 dist-app/Chassis.app | grep -E "Authority|Signature"`（应为 `Authority=Chassis Local Signing`，不能是 `Signature=adhoc`）。
+- 关键一条：`codesign -d -r- dist-app/Chassis.app` 的 DR 里**不应出现 cdhash**（含 cdhash ⇒ 换包必失效，说明回落到了 ad-hoc）。
 - 双击启动：托盘图标出现 → 热键唤出窗口 → 搜一个应用能启动。
 - **零 Node 物证**：`find dist-app/Chassis.app/Contents/Resources -name '*.mjs'` 应为空；`Resources/kernel/launcher-kernel` 与各逻辑层插件的 `dist/<命令名>` 都是可执行文件（Rust 产物，0755）。
 - 改过插件：确认插件随包（`Contents/Resources/builtin-plugins/`）；需要单独分发的插件走 `pnpm pack:plugins`（zip → `plugins/release/`）。
@@ -60,5 +75,5 @@ pnpm app:local   # 2. 重新打包（tray.png 走 include_bytes! ⇒ 换图标�
 
 ## 环境依赖
 
-- `.app` **运行时零 Node**：内核与逻辑层插件都是随包内置的二进制（`Contents/Resources/kernel/launcher-kernel` + 各插件的 `dist/<命令名>`）；Node 只在**开发期**需要（pnpm / Vite 工具链）。未签名会被 macOS 杀掉 ⇒ 必须 ad-hoc（脚本已做）。
+- `.app` **运行时零 Node**：内核与逻辑层插件都是随包内置的二进制（`Contents/Resources/kernel/launcher-kernel` + 各插件的 `dist/<命令名>`）；Node 只在**开发期**需要（pnpm / Vite 工具链）。未签名会被 macOS 杀掉 ⇒ 必须签名（固定证书优先，脚本已做）。
 - 缺 rsvg-convert 时 `pnpm icon` 会明确报错（`brew install librsvg`）。

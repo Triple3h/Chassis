@@ -84,13 +84,25 @@ for (const name of ['kernel', 'ui', 'builtin-plugins']) {
 fs.writeFileSync(path.join(contents, 'Info.plist'), infoPlist())
 fs.writeFileSync(path.join(contents, 'PkgInfo'), 'APPL????')
 
-// 4) ad-hoc 签名（必需：Apple Silicon 上未签名会被内核直接杀掉）
-line('▶ codesign --force --deep --sign -（ad-hoc）')
-run('codesign', ['--force', '--deep', '--sign', '-', outApp])
+// 4) 签名：优先用固定证书（TCC 授权可跨重新打包保留），没有则回落 ad-hoc
+//    签名是必需的：Apple Silicon 上未签名会被内核直接杀掉。
+//    ad-hoc 的身份 = 二进制哈希，每次打包都变 ⇒ 辅助功能 / 屏幕录制等 TCC 授权会失效重弹；
+//    建一次固定证书即可：node scripts/make-signing-cert.mjs
+//    可用 LAUNCHER_SIGN_IDENTITY 指定别的证书（CI / 换机器）。
+const identity = process.env.LAUNCHER_SIGN_IDENTITY || detectSigningIdentity()
+if (identity) {
+  line(`▶ codesign --force --deep --sign "${identity}"`)
+  run('codesign', ['--force', '--deep', '--sign', identity, outApp])
+} else {
+  line('▶ codesign --force --deep --sign -（ad-hoc）')
+  line('  ⚠️ 没找到固定签名证书：ad-hoc 身份每次打包都变，TCC 授权（辅助功能等）会失效重弹')
+  line('     建一次即可：node scripts/make-signing-cert.mjs')
+  run('codesign', ['--force', '--deep', '--sign', '-', outApp])
+}
 try {
   run('codesign', ['--verify', '--verbose=1', outApp])
 } catch {
-  line('· 签名校验有告警（ad-hoc 签名正常现象）')
+  line('· 签名校验有告警（自签名证书的常见现象，能正常启动就行）')
 }
 
 // 5) 解除 quarantine（本地构建通常没有该属性，稳妥起见）
@@ -137,4 +149,18 @@ function infoPlist() {
 </dict>
 </plist>
 `
+}
+
+/**
+ * 找本机可用的固定签名身份（scripts/make-signing-cert.mjs 创建的证书）。
+ * 找不到就返回 null —— 调用方回落到 ad-hoc，打包流程不因此中断。
+ */
+function detectSigningIdentity() {
+  try {
+    const out = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], { encoding: 'utf8' })
+    const match = out.match(/"([^"]*Chassis Local Signing[^"]*)"/)
+    return match ? match[1] : null
+  } catch {
+    return null
+  }
 }
