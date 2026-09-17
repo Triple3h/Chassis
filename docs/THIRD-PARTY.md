@@ -56,7 +56,7 @@ SOFTWARE.
 
 - 仓库：<https://github.com/lucide-icons/lucide>
 - 许可证：ISC License, Copyright (c) 2026 Lucide Icons and Contributors；其中从 Feather 衍生的一部分图标为 MIT License, Copyright (c) 2013-present Cole Bemis（`search` / `terminal` / `check` / `trash` / `plus` / `server` 等在本仓库使用范围内）
-- 用途：**图标数据来源**（非依赖）。`apps/launcher-ui/src/lib/icons.ts` 内置的 svg 子元素取自 lucide 官方图标，渲染仍由本仓库完成（`apps/launcher-ui/src/components/IconGlyph.vue`）。
+- 用途：**图标数据来源**（非依赖）。`packages/ui/lib/icons.ts` 内置的 svg 子元素取自 lucide 官方图标，渲染仍由本仓库完成（宿主网格 `apps/launcher-ui/src/components/IconGlyph.vue`、设置页插件列表 `plugins/internal-settings` 都从这里取）。
 
 > **为什么内联而不装包**：图标是可枚举的静态数据，内联进 `lib/icons.ts` 后总体积只有几 KB，
 > 同时保持离线可用、零运行时依赖；`docs/plugin-spec.md §10.4` 据此只允许三种图标形态（lucide 名 / 相对路径 / data URL）。

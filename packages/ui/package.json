@@ -10,6 +10,7 @@
     "./UiIcon.vue": "./ui/UiIcon.vue",
     "./UiSelect.vue": "./ui/UiSelect.vue",
     "./clipboard": "./lib/clipboard.ts",
+    "./icons": "./lib/icons.ts",
     "./keys": "./lib/keys.ts",
     "./theme": "./lib/theme.ts",
     "./toast": "./lib/toast.ts",

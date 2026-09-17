@@ -38,6 +38,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@launcher/api": "workspace:*"
+    "@launcher/api": "workspace:*",
+    "@launcher/ui": "workspace:*"
   }
 }

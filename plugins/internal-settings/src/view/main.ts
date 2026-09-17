@@ -3,6 +3,7 @@
  * 用原生 DOM 渲染（体积小、无需框架），所有数据来自 `ctx.settings`（仅 internal 插件可用）。
  */
 import { host, settings } from '@launcher/api'
+import { iconSvg } from '@launcher/ui/icons'
 
 interface ConfigLike {
   hotkey: { accelerator: string }
@@ -50,6 +51,8 @@ interface PluginLike {
   version: string
   description?: string
   author?: string
+  /** 清单 `icon`：lucide 名 / `data:image/...`（插件内相对路径的图标这里够不到，见 `pluginLogo`） */
+  icon?: string
   state: string
   error?: string
   builtin: boolean
@@ -312,6 +315,8 @@ function digestOf(list: PluginLike[]): string {
       plugin.keywords ?? [],
       plugin.settings.map((setting) => [setting.key, setting.value ?? null, setting.customized]),
       plugin.commands.map((command) => [command.name, command.keywords ?? [], command.error ?? '']),
+      // icon 参与摘要：改了清单图标再重载，列表要跟着换（不给它的话轮询认不出变化）
+      plugin.icon ?? '',
     ]),
   )
 }
@@ -319,6 +324,30 @@ function digestOf(list: PluginLike[]): string {
 function stateDot(state: string): string {
   const cls = state === 'active' || state === 'degraded' ? 'ok' : state === 'disabled' ? '' : 'err'
   return `<span class="dot ${cls}"></span>`
+}
+
+/**
+ * 插件 logo 磁贴：清单 `icon`（lucide 名）→ 内置图标表；`data:` / `http(s):` 直接当图片画。
+ *
+ * 观感与宿主结果网格一致（`IconGlyph.vue`：圆角 = 22% 边长、磁贴底色 `--hover`、字形占 56%）。
+ * 画不出来的（没有 icon、名字不在表里、插件内相对路径的图标 —— iframe 的 CSP 只放行 self，
+ * 够不到别的插件端口）退回首字母磁贴，不留下空位。
+ */
+function pluginLogo(plugin: PluginLike, size: number): string {
+  const box = `width:${size}px;height:${size}px;border-radius:${Math.round(size * 0.22)}px`
+  const icon = plugin.icon
+  if (icon && /^(https?:|data:)/.test(icon)) {
+    return `<span class="plogo" style="${box}"><img src="${escapeHtml(icon)}" alt="" draggable="false" /></span>`
+  }
+  const svg = iconSvg(icon, Math.round(size * 0.56))
+  if (svg) return `<span class="plogo" style="${box}">${svg}</span>`
+  const initial = (plugin.title || plugin.id).replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '').slice(0, 1).toUpperCase() || '·'
+  return `<span class="plogo letter" style="${box};font-size:${Math.round(size * 0.42)}px">${escapeHtml(initial)}</span>`
+}
+
+/** 列表行首的「logo + 状态点」：状态点做成磁贴右下角的小角标（省一段行宽，状态跟着图标走） */
+function pluginLogoWithState(plugin: PluginLike, size: number): string {
+  return `<span class="plogo-wrap" style="width:${size}px;height:${size}px">${pluginLogo(plugin, size)}${stateDot(plugin.state)}</span>`
 }
 
 function pluginBucket(plugin: PluginLike): Exclude<PluginFilter, 'all'> {
@@ -364,7 +393,7 @@ function renderPluginList(): string {
             }"></span>`
         return `
         <button class="mitem${active}" data-select="${escapeHtml(plugin.id)}">
-          ${stateDot(plugin.state)}
+          ${pluginLogoWithState(plugin, 20)}
           <span class="mname">${escapeHtml(plugin.title)}</span>
           ${plugin.essential ? '<span class="tag">基础</span>' : ''}
           ${custom ? '<span class="mdot" title="别名被改过"></span>' : ''}
@@ -445,20 +474,25 @@ function detailTabsOf(plugin: PluginLike): Array<{ id: DetailTab; label: string;
 function renderDetailHead(plugin: PluginLike): string {
   return `
     <div class="dhead">
-      <div class="dtitle">
-        <strong>${escapeHtml(plugin.title)}</strong>
-        <span class="muted">${escapeHtml(plugin.version)}</span>
-        ${stateBadge(plugin)}
-        ${
-          plugin.essential
-            ? '<span class="badge accent">基础能力</span>'
-            : plugin.builtin
-              ? '<span class="badge">出厂自带</span>'
-              : ''
-        }
+      <div class="dhead-main">
+        ${pluginLogo(plugin, 34)}
+        <div class="dhead-text">
+          <div class="dtitle">
+            <strong>${escapeHtml(plugin.title)}</strong>
+            <span class="muted">${escapeHtml(plugin.version)}</span>
+            ${stateBadge(plugin)}
+            ${
+              plugin.essential
+                ? '<span class="badge accent">基础能力</span>'
+                : plugin.builtin
+                  ? '<span class="badge">出厂自带</span>'
+                  : ''
+            }
+          </div>
+          ${plugin.description ? `<div class="hint">${escapeHtml(plugin.description)}</div>` : ''}
+          ${plugin.error ? `<div class="hint danger-text">${escapeHtml(plugin.error)}</div>` : ''}
+        </div>
       </div>
-      ${plugin.description ? `<div class="hint">${escapeHtml(plugin.description)}</div>` : ''}
-      ${plugin.error ? `<div class="hint danger-text">${escapeHtml(plugin.error)}</div>` : ''}
     </div>
   `
 }

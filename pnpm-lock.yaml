@@ -23,6 +23,9 @@ importers:
       '@launcher/plugin-manifest':
         specifier: workspace:*
         version: link:../../packages/plugin-manifest
+      '@launcher/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       pinia:
         specifier: ^4.0.3
         version: 4.0.3(@vue/devtools-api@8.2.1)(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3))
@@ -136,6 +139,9 @@ importers:
       '@launcher/api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
+      '@launcher/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
 
   plugins/json-tools:
     dependencies:
