@@ -748,7 +748,7 @@ function renderAbout(): string {
     <h2>关于</h2>
     <div class="row"><div class="label">版本</div><span class="muted">${escapeHtml(info.version)}</span></div>
     <div class="row"><div class="label">平台</div><span class="muted">${escapeHtml(info.platform)}</span></div>
-    <div class="row"><div class="label">Node</div><span class="muted">${escapeHtml(info.node)}</span></div>
+    <div class="row"><div class="label">内核</div><span class="muted">Rust · v${escapeHtml(info.version)}</span></div>
     <div class="row"><div class="label">数据目录</div><span class="muted">${escapeHtml(info.dataRoot)}</span></div>
     <div class="card">
       <strong>底座原则</strong>

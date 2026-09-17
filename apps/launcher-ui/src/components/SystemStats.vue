@@ -60,7 +60,7 @@ const title = computed(() => {
   return [
     `启动台自身：CPU ${cpuText.value} · 内存 ${memText.value}（壳 + 内核两进程之和）`,
     `　壳（launcher-shell）${formatBytes(value.app.rssShell)}`,
-    `　内核（Node，含插件 worker）${formatBytes(value.app.rssKernel)}`,
+    `　内核（Rust，含插件进程）${formatBytes(value.app.rssKernel)}`,
     `CPU 百分比 = 两进程累计 CPU 时间差分 ÷ 墙钟 ÷ ${value.app.cores} 核（占整机；单核满载 = ${(100 / value.app.cores).toFixed(1)}%）`,
     `整机对照：CPU ${value.cpu}% · 内存 ${formatBytes(value.memUsed)} / ${formatBytes(value.memTotal)} · 负载 ${l1.toFixed(2)} / ${l5.toFixed(2)} / ${l15.toFixed(2)}`,
     '不含系统托管的 WebKit 渲染进程（界面绘制走系统共享进程）',
