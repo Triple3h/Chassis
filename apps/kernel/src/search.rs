@@ -4,7 +4,7 @@
 //! 与 v1 的差异：不做同 query 的 in-flight 复用（UI 侧 80ms debounce 之后重复请求概率极低，
 //! 复用需要共享 future，收益不抵复杂度）。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -49,6 +49,8 @@ pub struct SearchGroups {
     pub pinned: Vec<RankedResult>,
     pub best: Vec<RankedResult>,
     pub recent: Vec<RankedResult>,
+    /// 空输入时的「已安装插件」：每个插件一条入口项，按插件最近一次使用倒序
+    pub plugins: Vec<RankedResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -81,10 +83,17 @@ impl SearchEngine {
         self.deps.hub.set_current(token);
 
         if query.is_empty() {
+            // 首页：固定项 + 已安装插件（后者按「这个插件最近一次被打开」倒序）。
+            // 不发广播、不开搜索槽 —— 插件入口全部来自注册表与历史，内核自己就有。
             return SearchResponse {
                 token,
                 query: query.clone(),
-                groups: SearchGroups { pinned: self.pinned_results(""), best: Vec::new(), recent: self.recent_results("") },
+                groups: SearchGroups {
+                    pinned: self.pinned_results(""),
+                    best: Vec::new(),
+                    recent: self.recent_results(""),
+                    plugins: self.plugin_entries(),
+                },
                 pending: Vec::new(),
             };
         }
@@ -207,7 +216,7 @@ impl SearchEngine {
             }
         }
 
-        SearchResponse { token, query: query.to_string(), groups: SearchGroups { pinned, best, recent }, pending }
+        SearchResponse { token, query: query.to_string(), groups: SearchGroups { pinned, best, recent, plugins: Vec::new() }, pending }
     }
 
     /// 把补位后的完整响应推给 UI（`search/results`）。
@@ -372,6 +381,57 @@ impl SearchEngine {
         results
     }
 
+    /// 空输入时的「已安装插件」：每个插件一条入口项（`entry_commands`），
+    /// 按该插件**最近一次使用**倒序；没用过的排在后面按标题排序。
+    ///
+    /// 已固定在「已固定」分区里的入口（key 相同）不再重复出现 —— 首页两行各自不重样；
+    /// 固定项里那些非插件条目（应用 / 文件 / 网址）与本分区互不相干。
+    fn plugin_entries(&self) -> Vec<RankedResult> {
+        let recency = self.plugin_recency();
+        let mut entries: Vec<(Option<i64>, RankedResult)> = Vec::new();
+        for entry in entry_commands(self.deps.registry.list()) {
+            let key = item_key(&entry.plugin_id, &entry.decl.name, None);
+            if self.deps.history.is_pinned(&key) {
+                continue;
+            }
+            entries.push((
+                recency.get(&entry.plugin_id).copied(),
+                RankedResult {
+                    plugin_id: entry.plugin_id.clone(),
+                    plugin_title: entry.plugin_title.clone(),
+                    command: entry.decl.name.clone(),
+                    item: ResultItem {
+                        id: format!("command:{}", entry.decl.name),
+                        title: entry.decl.title.clone(),
+                        subtitle: entry.decl.subtitle.clone(),
+                        icon: self.resolve_icon(&entry.plugin_id, entry.decl.icon.as_deref()),
+                        score: None,
+                        action: json!({ "type": "command", "command": entry.decl.name }),
+                        actions: None,
+                        detail: None,
+                    },
+                    item_key: key,
+                    score: 1.0,
+                    title_match: None,
+                    pinned: Some(false),
+                    from_history: None,
+                    stale: None,
+                },
+            ));
+        }
+        sort_plugin_entries(&mut entries);
+        entries.into_iter().map(|(_, item)| item).collect()
+    }
+
+    /// 插件 id → 最近一次使用时间（`all_recent` 已按 lastUsed 倒序，首次出现即最新）。
+    fn plugin_recency(&self) -> HashMap<String, i64> {
+        let mut map = HashMap::new();
+        for item in self.deps.history.all_recent() {
+            map.entry(item.plugin_id).or_insert(item.last_used);
+        }
+        map
+    }
+
     /// 按 id 去重，保留 score 高者（requirements §7.6.4）。
     fn dedupe(&self, items: Vec<RankedResult>) -> Vec<RankedResult> {
         let mut map: std::collections::HashMap<String, RankedResult> = std::collections::HashMap::new();
@@ -421,6 +481,51 @@ impl SearchEngine {
     }
 }
 
+/// 每个插件的**入口命令** —— 首页「已安装插件」分区里那一格。
+///
+/// 条件：`mode == view`（点下去能打开插件页）、未 `hidden`。同一插件有多条时取
+/// 清单顺序里第一条 `searchable` 的（都没有可搜索的才兜底取第一条）—— 保证每插件恰好一格。
+/// 只有贡献型 / 脚本命令的插件（应用启动器、文件搜索、网址直达这类"搜索结果来源"）
+/// 没有入口，不出现在列表里：它们不是"打开一个页面"的插件。
+fn entry_commands(commands: Vec<Arc<RegisteredCommand>>) -> Vec<Arc<RegisteredCommand>> {
+    let mut ordered = commands;
+    // marker = 注册序号 = 清单顺序（`PluginManager` 按 commands 数组逐个注册）
+    ordered.sort_by_key(|entry| entry.marker);
+    let mut out: Vec<Arc<RegisteredCommand>> = Vec::new();
+    let mut picked: HashSet<String> = HashSet::new();
+    let mut fallback: HashMap<String, Arc<RegisteredCommand>> = HashMap::new();
+    for entry in ordered {
+        if entry.decl.mode != CommandMode::View || entry.decl.hidden == Some(true) {
+            continue;
+        }
+        if picked.contains(&entry.plugin_id) {
+            continue;
+        }
+        if entry.decl.searchable == Some(true) {
+            picked.insert(entry.plugin_id.clone());
+            out.push(entry);
+        } else {
+            // 不可搜索的 view 命令：万一该插件只有这一条入口，也得能在首页点开
+            fallback.entry(entry.plugin_id.clone()).or_insert(entry);
+        }
+    }
+    let mut rest: Vec<Arc<RegisteredCommand>> =
+        fallback.into_values().filter(|entry| !picked.contains(&entry.plugin_id)).collect();
+    rest.sort_by_key(|entry| entry.marker);
+    out.extend(rest);
+    out
+}
+
+/// 「已安装插件」的排序：最近打开过的按时间倒序在前，没用过的排最后、按标题给出稳定顺序。
+fn sort_plugin_entries(entries: &mut [(Option<i64>, RankedResult)]) {
+    entries.sort_by(|a, b| match (a.0, b.0) {
+        (Some(left), Some(right)) if left != right => right.cmp(&left),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        _ => a.1.item.title.cmp(&b.1.item.title),
+    });
+}
+
 fn command_target(entry: &RegisteredCommand) -> SearchTarget {
     SearchTarget {
         title: entry.decl.title.clone(),
@@ -462,6 +567,103 @@ fn is_passthrough_icon(icon: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifest::CommandDecl;
+
+    fn command(plugin_id: &str, name: &str, mode: CommandMode, searchable: bool, hidden: bool, marker: u64) -> Arc<RegisteredCommand> {
+        Arc::new(RegisteredCommand {
+            id: format!("{plugin_id}:{name}"),
+            plugin_id: plugin_id.to_string(),
+            plugin_title: plugin_id.to_string(),
+            decl: CommandDecl {
+                name: name.to_string(),
+                title: name.to_string(),
+                mode,
+                subtitle: None,
+                icon: None,
+                searchable: Some(searchable),
+                placeholder: None,
+                keywords: None,
+                contributes: None,
+                capabilities: None,
+                hidden: hidden.then_some(true),
+            },
+            capabilities: Vec::new(),
+            marker,
+        })
+    }
+
+    fn ranked(plugin_id: &str, title: &str) -> RankedResult {
+        RankedResult {
+            plugin_id: plugin_id.to_string(),
+            plugin_title: plugin_id.to_string(),
+            command: "open".to_string(),
+            item: ResultItem {
+                id: "command:open".to_string(),
+                title: title.to_string(),
+                subtitle: None,
+                icon: None,
+                score: None,
+                action: json!({ "type": "command", "command": "open" }),
+                actions: None,
+                detail: None,
+            },
+            item_key: format!("{plugin_id}:open:00000000"),
+            score: 1.0,
+            title_match: None,
+            pinned: Some(false),
+            from_history: None,
+            stale: None,
+        }
+    }
+
+    #[test]
+    fn entry_commands_keeps_one_openable_entry_per_plugin() {
+        let entries = vec![
+            command("host-manager", "hosts", CommandMode::View, true, false, 1),
+            command("host-manager", "hosts-read", CommandMode::Script, false, false, 2),
+            command("app-launcher", "search", CommandMode::Script, false, false, 3),
+            command("app-launcher", "refresh", CommandMode::NoView, true, false, 4),
+            command("internal-settings", "settings", CommandMode::View, true, false, 5),
+            command("internal-settings", "manage", CommandMode::View, true, false, 6),
+            command("odd", "panel", CommandMode::View, false, false, 7),
+        ];
+        let picked: Vec<(String, String)> =
+            entry_commands(entries).iter().map(|entry| (entry.plugin_id.clone(), entry.decl.name.clone())).collect();
+        assert_eq!(
+            picked,
+            vec![
+                ("host-manager".to_string(), "hosts".to_string()),
+                ("internal-settings".to_string(), "settings".to_string()),
+                ("odd".to_string(), "panel".to_string()),
+            ],
+            "每插件一条：view 命令优先、清单顺序里第一条可搜索的胜出；只有脚本命令的插件（应用启动器）不出现"
+        );
+    }
+
+    #[test]
+    fn entry_commands_skip_hidden_view_commands() {
+        let entries = vec![
+            command("a", "secret", CommandMode::View, true, true, 1),
+            command("a", "open", CommandMode::View, true, false, 2),
+            command("b", "hidden-only", CommandMode::View, true, true, 3),
+        ];
+        let picked: Vec<(String, String)> =
+            entry_commands(entries).iter().map(|entry| (entry.plugin_id.clone(), entry.decl.name.clone())).collect();
+        assert_eq!(picked, vec![("a".to_string(), "open".to_string())], "hidden 的 view 命令不算入口");
+    }
+
+    #[test]
+    fn plugin_entries_sort_recent_first_then_title() {
+        let mut entries = vec![
+            (None, ranked("c", "C 插件")),
+            (Some(100), ranked("a", "A 插件")),
+            (None, ranked("b", "B 插件")),
+            (Some(300), ranked("d", "D 插件")),
+        ];
+        sort_plugin_entries(&mut entries);
+        let order: Vec<&str> = entries.iter().map(|(_, item)| item.plugin_id.as_str()).collect();
+        assert_eq!(order, vec!["d", "a", "b", "c"], "打开过的按最近倒序在前，没用过的按标题排在后面");
+    }
 
     #[test]
     fn plugin_key_prefers_command_action() {

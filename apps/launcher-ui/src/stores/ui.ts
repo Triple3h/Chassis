@@ -27,7 +27,7 @@ export const useUiStore = defineStore('ui', () => {
   /** 扁平条目下标（跨分区连续，与网格行模型解耦） */
   const selected = ref(0)
   /** 分区折叠状态：默认只露「一行/两行」格子，展开后全显示 */
-  const expandedGroups = ref<Record<ResultGroup, boolean>>({ pinned: false, best: false, recent: false })
+  const expandedGroups = ref<Record<ResultGroup, boolean>>({ pinned: false, best: false, recent: false, plugins: false })
   const detailOpen = ref(false)
   const actionsOpen = ref(false)
   const actionsAnchor = ref<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -42,7 +42,7 @@ export const useUiStore = defineStore('ui', () => {
     query.value = value
     selected.value = 0
     detailOpen.value = false
-    expandedGroups.value = { pinned: false, best: false, recent: false }
+    expandedGroups.value = { pinned: false, best: false, recent: false, plugins: false }
     if (pluginView.value) closePluginView()
   }
 

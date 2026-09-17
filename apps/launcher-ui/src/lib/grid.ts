@@ -4,7 +4,7 @@ import type { RankedResult } from './types'
  * 结果网格：分区标题 + 每行 N 个「图标 + 名称」格子，方向键按格子移动。
  */
 
-export type ResultGroup = 'pinned' | 'best' | 'recent'
+export type ResultGroup = 'pinned' | 'best' | 'recent' | 'plugins'
 
 export interface GridMetrics {
   /** 图标边长 px */
@@ -34,7 +34,7 @@ export const MIN_WINDOW_HEIGHT = 320
 export const MAX_WINDOW_HEIGHT = 640
 
 /** 折叠时保留的行数；0 = 不折叠 */
-const COLLAPSE_ROWS: Record<ResultGroup, number> = { pinned: 1, best: 3, recent: 2 }
+const COLLAPSE_ROWS: Record<ResultGroup, number> = { pinned: 1, best: 3, recent: 2, plugins: 2 }
 
 /** 容器宽度 → 列数（窗口宽度固定 720，实际恒为 7；保留自适应是为了以后放开改宽） */
 export function columnsFor(width: number): number {
@@ -62,6 +62,8 @@ export interface BuildSectionsInput {
   pinned: RankedResult[]
   best: RankedResult[]
   recent: RankedResult[]
+  /** 已安装插件入口（空输入时用，内核已按最近打开倒序排好） */
+  plugins: RankedResult[]
   columns: number
   expanded: Record<ResultGroup, boolean>
 }
@@ -95,8 +97,9 @@ export function buildSections(input: BuildSectionsInput): GridSection[] {
     push('best', '最佳匹配', input.best)
     push('recent', '最近使用', input.recent)
   } else {
+    // 空输入 = 启动台首页：固定项在最上，下面是全部插件（按最近打开倒序，内核已排好）
     push('pinned', '已固定', input.pinned)
-    push('recent', '最近使用', input.recent)
+    push('plugins', '已安装插件', input.plugins)
   }
   return out
 }

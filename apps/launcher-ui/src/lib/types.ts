@@ -20,6 +20,8 @@ export interface SearchResponse {
     pinned: RankedResult[]
     best: RankedResult[]
     recent: RankedResult[]
+    /** 空输入时的「已安装插件」入口（内核按最近打开倒序排好） */
+    plugins: RankedResult[]
   }
   pending: string[]
 }

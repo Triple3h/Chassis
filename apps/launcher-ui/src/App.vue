@@ -233,6 +233,7 @@ const sections = computed(() =>
     pinned: data.pinnedResults,
     best: data.results,
     recent: data.recentResults,
+    plugins: data.pluginResults,
     columns: columns.value,
     expanded: ui.expandedGroups,
   }),
@@ -901,7 +902,7 @@ const defaultHints = computed(() => {
         <div v-else class="flex-1 flex flex-col items-center justify-center gap-1.5 text-[var(--fg-muted)]">
           <IconGlyph name="search" :size="22" />
           <span class="text-[12.5px]">{{
-            ui.query ? `没有匹配「${ui.query}」的结果` : '还没有任何记录'
+            ui.query ? `没有匹配「${ui.query}」的结果` : '还没有安装任何插件'
           }}</span>
         </div>
 

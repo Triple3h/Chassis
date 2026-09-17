@@ -23,6 +23,8 @@ export const useDataStore = defineStore('data', () => {
   const results = computed<RankedResult[]>(() => response.value?.groups.best ?? [])
   const pinnedResults = computed<RankedResult[]>(() => response.value?.groups.pinned ?? [])
   const recentResults = computed<RankedResult[]>(() => response.value?.groups.recent ?? [])
+  /** 空输入首页的「已安装插件」入口（内核按最近打开倒序排好） */
+  const pluginResults = computed<RankedResult[]>(() => response.value?.groups.plugins ?? [])
 
   async function init(): Promise<void> {
     const data = await api.bootstrap()
@@ -107,6 +109,7 @@ export const useDataStore = defineStore('data', () => {
     results,
     pinnedResults,
     recentResults,
+    pluginResults,
     init,
     loadConfig,
     refreshLists,

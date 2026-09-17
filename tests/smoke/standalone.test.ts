@@ -1,6 +1,6 @@
 /**
  * 验收口径（requirements §1.3）：
- * 「清空所有插件目录后，应用仍能启动、能唤出、能搜索（结果为空）、能显示空的「最近使用／已固定」、能安装插件。」
+ * 「清空所有插件目录后，应用仍能启动、能唤出、能搜索（结果为空）、能显示空的「已固定／已安装插件」、能安装插件。」
  * 这里用真内核 + 真 HTTP 驱动，不起壳。
  *
  * 运行时装的第三方示例是 v2 形态（逻辑层 = 可执行产物）：产物用 SDK 的 echo 示例二进制铺。
@@ -15,6 +15,7 @@ const h = await createHarness({ label: 'smoke' })
 
 interface SearchHit {
   itemKey: string
+  pluginId: string
   command: string
   stale?: boolean
   item: { title: string; action: unknown }
@@ -25,13 +26,15 @@ interface SearchResponse {
     pinned: SearchHit[]
     best: Array<{ itemKey: string; item: { title: string }; stale?: boolean }>
     recent: Array<{ itemKey: string; item: { title: string }; stale?: boolean }>
+    /** 空输入的「已安装插件」入口（每插件一条 view 入口，按最近打开倒序） */
+    plugins: SearchHit[]
   }
 }
 
 const search = async (query: string): Promise<SearchResponse> =>
   h.api<SearchResponse>('/api/search', { method: 'POST', body: JSON.stringify({ query }) })
 
-test('零插件：能启动、能搜索、结果为空、最近/固定为空', async () => {
+test('零插件：能启动、能搜索、结果为空、固定/插件入口为空', async () => {
   const bootstrap = await h.api<{ ok: boolean; snapshot: { commands: unknown[]; pinned: unknown[]; recent: unknown[] } }>(
     '/api/bootstrap',
   )
@@ -44,6 +47,7 @@ test('零插件：能启动、能搜索、结果为空、最近/固定为空', a
   assertEqual(empty.groups.best.length, 0)
   assertEqual(empty.groups.pinned.length, 0)
   assertEqual(empty.groups.recent.length, 0)
+  assertEqual(empty.groups.plugins.length, 0, '没有插件时不该有插件入口')
 
   const miss = await search('随便输点什么')
   assertEqual(miss.groups.best.length, 0, '无插件时搜索应当返回空而不是报错')
@@ -108,6 +112,53 @@ test('执行 view 命令会产生会话，执行逻辑层命令会写历史', as
   assert(
     history.items.some((item) => item.title === '后台任务'),
     `执行后应当写历史：${JSON.stringify(history.items)}`,
+  )
+})
+
+test('空输入：已安装插件以 view 入口列出（每插件一条）', async () => {
+  const empty = await search('')
+  const entries = empty.groups.plugins
+  assertEqual(entries.length, 1, `第三方示例只有一个 view 入口：${JSON.stringify(entries)}`)
+  assertEqual(entries[0]?.command, 'hello', '入口取 view 命令')
+  assertEqual(entries[0]?.item.title, '问候', '展示的仍是命令标题')
+  assert(
+    entries[0]?.itemKey.startsWith('third-party-demo:hello:'),
+    `入口 key 应当与固定/历史的 key 同源：${entries[0]?.itemKey}`,
+  )
+  assert(
+    !entries.some((entry) => entry.command === 'job'),
+    'no-view / hidden 命令不进插件入口',
+  )
+})
+
+test('固定插件入口后：从「已安装插件」移到「已固定」，不重复出现', async () => {
+  const entry = (await search('')).groups.plugins[0]
+  assert(entry, '需要先有插件入口')
+  const toggle = {
+    method: 'POST',
+    body: JSON.stringify({
+      key: entry.itemKey,
+      pluginId: entry.pluginId,
+      command: entry.command,
+      title: entry.item.title,
+    }),
+  }
+
+  await h.api('/api/pinned/toggle', toggle)
+  const pinnedView = await search('')
+  assertEqual(pinnedView.groups.pinned.length, 1, '固定后应当出现在「已固定」')
+  assert(
+    !pinnedView.groups.plugins.some((item) => item.itemKey === entry.itemKey),
+    '同一个入口不该在首页两行里各出现一次',
+  )
+
+  // 复原：取消固定，别把状态留给后面的用例
+  await h.api('/api/pinned/toggle', toggle)
+  const restored = await search('')
+  assertEqual(restored.groups.pinned.length, 0, '取消固定后「已固定」为空')
+  assert(
+    restored.groups.plugins.some((item) => item.itemKey === entry.itemKey),
+    '取消固定后入口回到「已安装插件」',
   )
 })
 
@@ -177,6 +228,10 @@ test('禁用插件：命令消失（搜不到）、历史项置灰（不是被�
 
   const empty = await search('')
   assert(empty.groups.pinned.length >= 1, '固定项应保留')
+  assert(
+    !empty.groups.plugins.some((entry) => entry.command === 'hello'),
+    '插件停用后它不再注册命令，入口也该从「已安装插件」里消失',
+  )
 })
 
 test('重新启用后命令恢复；卸载后目录与命令都消失', async () => {
