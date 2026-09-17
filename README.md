@@ -48,12 +48,26 @@ pnpm build        # 内核 + 启动台 UI + 8 个出厂插件
 pnpm app:local    # release 编译 + 组装 + ad-hoc 签名 → dist-app/Chassis.app
 ```
 
-把 `dist-app/Chassis.app` 拖进 `/Applications` 双击即可，首次运行会申请辅助功能 / 通知权限。
+把 `dist-app/Chassis.app` 拖进 `/Applications` 双击即可。
+
+### 会弹哪些系统权限（各自对应什么功能）
+
+| 系统设置里的名字 | 谁在用 | 不给会怎样 |
+|---|---|---|
+| **辅助功能** | 壳 `primitives/selection.rs`：唤出时读前台选中的文本 | 唤出不带选区，其余照常（可随时在系统设置里补授权） |
+| **屏幕录制** | 内核 `services/primitives.rs` 调 `screencapture`：`screenshot` 能力（TOTP 扫码的前置） | 截图只有壁纸、扫不出码 |
+| **自动化 / Apple 事件**（弹窗文案：「想控制此 Mac 并访问你的数据」） | `host-manager` 的提权写入：`osascript -e 'do shell script … with administrator privileges'` 把托管区写进 hosts | **只有**「写入托管区」这一个动作失败；读、预览与其它插件都不受影响 |
+| 通知 | `notify` 能力（操作完成提示） | 少提示，不影响功能 |
+| 文件与文件夹（桌面 / 图片等） | TOTP 扫截图目录、文件搜索命中受保护目录 | 对应范围搜不到 |
+
+> **前置说明**：**打开应用 / 文件 / 网址走的是 `/usr/bin/open`（LaunchServices），不需要任何权限** —— 所以「自动化」那条只在真的动 hosts 时才弹，不是启动就弹。
+> 打包用的是 **ad-hoc 签名**，而 TCC 授权是**绑代码签名**的：每次重新打包（新二进制、新签名）系统都会当成"第一次"重弹一次；自用场景下这是必然代价。
+> 弹窗里只有「拒绝 / 打开系统设置」（没有「允许」）时，说明之前拒绝过或签名已变，去 系统设置 → 隐私与安全性 → 自动化 手动勾上即可。
 
 > **为什么要 ad-hoc 签名**：Apple Silicon 上未签名的可执行文件会被内核直接杀掉（`Killed: 9`），这不是公证问题。
 > 打包脚本会自动执行 `codesign --force --deep --sign -`（免费、仅本机有效），自用**不需要** Apple Developer、公证或自动更新；
 > 本地构建的 `.app` 不带 quarantine 属性，双击即可运行。
-> 壳会依次在 homebrew / nvm / fnm / volta / asdf 等常见位置搜索 Node，也可用 `LAUNCHER_NODE` 显式指定。
+> 内核与逻辑层插件都是**随包内置的二进制**（`resources/kernel/launcher-kernel` + 各插件的 `dist/<命令名>`），运行时不需要本机装 Node 或 Rust。
 
 ### 开发模式（不起壳，浏览器里就能用）
 

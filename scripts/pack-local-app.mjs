@@ -114,7 +114,8 @@ try {
 line('')
 line(`✓ 打包完成：${path.relative(repoRoot, outApp)}`)
 line(`  安装：把 ${APP_NAME}.app 拖进 /Applications，双击运行`)
-line('  首次运行：系统会提示"辅助功能/通知"权限，按提示授权即可')
+line('  权限（都按需弹，不用到就不会问）：辅助功能=读选中文本；屏幕录制=截图；')
+line('  自动化（"想控制此 Mac"）=只在 host-manager 写 hosts 时提权；通知=操作提示')
 
 function infoPlist() {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -132,7 +133,7 @@ function infoPlist() {
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>用于打开应用、文件与网址</string>
+  <key>NSAppleEventsUsageDescription</key><string>仅在需要管理员权限写入 hosts 文件时使用（弹出系统提权对话框）</string>
 </dict>
 </plist>
 `
