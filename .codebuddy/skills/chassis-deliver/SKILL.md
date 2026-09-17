@@ -20,6 +20,7 @@ disable: false
 | 内核或插件协议 | `node scripts/smoke-real.mjs`（真内核 + 出厂插件，走「输入 → 首屏 → 执行 → 写历史」整条链路） |
 | 插件清单相关 | `pnpm spec-check`（N1–N3 / 产物 / 远程资源；N3 只做人工核对提示） |
 | Rust 壳 | `cd apps/shell && cargo check`（只编壳）/ `pnpm shell:dev`（跑） |
+| Rust（M5：内核 / 插件逻辑层 / SDK） | `cargo test`（workspace 在**仓库根** `Cargo.toml`）+ `pnpm parity:echo`（v1↔v2 协议对拍；动了 runner / SDK / 协议必跑） |
 
 要点：
 

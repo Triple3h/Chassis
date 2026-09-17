@@ -1,6 +1,6 @@
-# 启动台插件接入规范 v1
+# 启动台插件接入规范 v2
 
-> 状态：v1（已落地：8 个出厂插件按此实现）｜ 日期：2026-09-14，最后更新：2026-09-16 ｜ 配套：`docs/launcher-requirements.md`（底座需求）
+> 状态：v2（2026-09-17 起：逻辑层产物 = 可执行文件、宿主 spawn 子进程 + NDJSON；视图层规范与 v1 相同）｜ 日期：2026-09-14，最后更新：2026-09-17 ｜ 配套：`docs/launcher-requirements.md`（底座需求）
 > 读者：插件作者（含我们自己）、内核实现者、评审者
 > 本文是**对外契约**。内核实现必须能逐条对应到 §14 的校验矩阵；本文没写的字段与行为，插件不得依赖。
 
@@ -16,7 +16,7 @@
 
 | # | 不变量 | 说明 |
 |---|---|---|
-| **N1** | `no-view` / `script` 命令的产物文件名**必须**等于 `commands[].name` | 宿主只认 `<name>.mjs` / `<name>.js`（或 `workers/` 下同名） |
+| **N1** | `no-view` / `script` 命令的产物文件名**必须**等于 `commands[].name` | 宿主只认可执行产物 `<name>`（Windows `<name>.exe`；或 `workers/` 下同名）。`.mjs` / `.js` 产物自 v2 起**不再支持**（§11） |
 | **N2** | 插件**必须**把可变数据写在 `dataPath`，**不得**写进插件安装目录 | 安装目录只读；升级/重装会覆盖它 |
 | **N3** | 插件**必须**在清单里声明它用到的所有 capability | 未声明的能力在运行时**不存在**（不是"存在但被拒"） |
 
@@ -31,7 +31,7 @@
 ├── package.json        必须：清单（宿主只读顶层字段）
 ├── index.html          有 view 命令时必须有
 ├── assets/             view 的静态资源
-├── <name>.mjs          no-view / script 命令的产物
+├── <name>              no-view / script 命令的产物（可执行文件；Windows 为 <name>.exe）
 └── icon.png            可选：插件级图标
 ```
 
@@ -50,11 +50,12 @@ my-plugin/
 ├── package.json          清单（构建后会被裁剪写入 dist/）
 ├── index.html            view 入口（固定名）
 ├── vite.config.ts        base: './'，不要 manualChunks
+├── Cargo.toml            逻辑层 crate（有 no-view / script 命令时；crate 根 = 插件目录）
 ├── src/
 │   ├── main.ts           挂载 view
 │   ├── App.vue
 │   ├── core/             纯函数（可单测，无宿主依赖）
-│   └── no-view/          script / no-view 入口（每个文件一个命令）
+│   └── bin/<name>.rs     逻辑层命令入口（[[bin]] name = 命令名，每个命令一个可执行产物，见 §4.4）
 └── test/
 ```
 
@@ -65,11 +66,12 @@ my-plugin/
 | `package.json` | 总是 | 只保留 §3 的字段（剥掉 `scripts` / `devDependencies` 等） |
 | `index.html` | 有 view 命令 | 入口名固定，**不要**改 |
 | `assets/*` | 有 view 命令 | 资源路径必须相对（构建基址 `./`） |
-| `<name>.mjs` | 每个 no-view / script 命令 | 自包含；**不得**依赖 `assets/` 下的共享 chunk（N1） |
+| `<name>` | 每个 no-view / script 命令 | **可执行文件**（Windows 加 `.exe`；macOS / Linux 权限 0755）。静态链接、自包含，**不得**依赖 `assets/` 或同目录其它文件（N1） |
 | `icon.png` | 可选 | 128×128 起 |
 
-**多入口铁律**：有 **2 个及以上** no-view/script 命令时，**必须逐个入口单独构建**（每个 `.mjs` 自包含）。打包器多入口会把共用模块拆成 `assets/*.mjs`，入口里只剩相对 import，宿主只认入口文件，依赖一断命令即失效。
-验收：`grep -h '^import' dist/*.mjs` 只应出现 `node:*` 与内置模块。
+**产物查找顺序**：`<name>(.exe)` → `workers/<name>(.exe)`。找不到 → 该命令报 `ENTRY_MISSING`（错误码与 v1 相同）。
+**多入口铁律**：有 **2 个及以上** no-view/script 命令时，**每个命令必须有独立产物**（各自静态链接，不受打包器 chunk 拆分影响）。构建方式见 `docs/plugin-dev-guide.md` §7。
+验收：`file dist/<name>` 应为本机可执行格式（macOS Mach-O / Windows PE）；宿主以 0755 权限 spawn。
 
 ### 2.3 打包（zip）
 
@@ -89,7 +91,7 @@ my-plugin/
 | `name` | 必须 | string | `^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$` | 插件 id，全局唯一；同时是数据目录名 |
 | `title` | 必须 | string | 1–40 字符 | 展示名 |
 | `version` | 必须 | string | semver | 插件版本 |
-| `apiVersion` | 必须 | string | 当前只接受 `"1"` | 协议主版本；不匹配 → 拒绝加载并提示升级底座 |
+| `apiVersion` | 必须 | string | 新插件写 `"2"`（兼容规则见 §11） | 协议主版本；`"2"` = 逻辑层产物为可执行文件；不匹配 → 拒绝加载并提示升级底座 |
 | `capabilities` | 必须 | string[] | 见 §8；可为 `[]` | 空数组 = 纯前端插件 |
 | `commands` | 必须 | CommandDecl[] | 1–32 条 | 见 §3.2 |
 | `type` | 必须 | `"module"` | | 产物是 ESM |
@@ -127,7 +129,7 @@ my-plugin/
 - 至少 1 条命令；`mode: 'view'` 的命令共用同一个 `index.html`
 - `searchable: true` 与 `contributes: true` 可同时为真
 
-**别名的两层与匹配**（内核 `apps/kernel/src/overrides.ts` + `pinyin.ts`）：
+**别名的两层与匹配**（内核 `apps/kernel/src/overrides.rs` + `pinyin.rs`）：
 
 - 实际参与搜索的别名 = **插件级 ∪ 命令级**（忽略大小写去重、插件级在前，每层 ≤ 10 条）；
 - 别名与 `subtitle` 同权重 0.4（排序见 §9.1），且**同样走拼音索引**：短词会被长词包含命中
@@ -165,15 +167,15 @@ interface SettingDecl {
 声明只描述「有哪些设置、长什么样」；**用户改过的值不写清单**（插件产物是构建产物，重装 / 更新即丢）——
 内核统一存 `<dataRoot>/plugin-settings.json`（与别名的覆盖层同款）。**生效值 = 用户值 ?? `default`**。
 
-- **插件侧怎么读**：script / no-view 用 `ctx().settings`（`@launcher/api-node`）：
+- **插件侧怎么读**：script / no-view 用 `ctx.settings`（v2：Rust SDK；v1：`@launcher/api-node` 的 `ctx().settings`）：
 
-  ```ts
-  const { settings } = ctx()
-  const engine = typeof settings.engine === 'string' ? settings.engine : 'google'
+  ```rust
+  // v2（Rust SDK）；v1 写法：const { settings } = ctx()
+  let engine = ctx.settings_str("engine").unwrap_or("google");
   ```
 
-  值在 **worker 启动时快照一次** —— 用户在设置页改完，内核会重载该插件，新值随新 worker 生效；
-  长驻 worker **不得**假设设置会在自己的生命周期内变化（要动态生效就每次 `ctx()` 重新读，但拿到的仍是启动时的快照）。
+  值在**插件进程启动时快照一次** —— 用户在设置页改完，内核会重载该插件，新值随新进程生效；
+  常驻插件进程**不得**假设设置会在自己的生命周期内变化。
 - **设置页怎么改**：设置 → 插件 → 详情的**「设置」页签**（这一页**由声明激活**：没声明 `settings`
   的插件不出现）—— select 用自绘下拉 / switch / text，改完立即保存；未改过的项显示 `default`，
   改过的项提供「恢复默认」（删掉用户值、回落清单值）。
@@ -196,17 +198,118 @@ interface SettingDecl {
 
 ### 4.2 `no-view`
 
-- 出现在搜索结果；执行 = 拉起同名脚本产物（`worker_threads`）
-- 用途：用户主动触发的后台任务。**不得**长期驻留（不得用定时器常驻；要用常驻能力请提需求）
-- 参数：由 `ResultItem.action.args` 传入；在脚本里通过 `ctx().args` 读取
+- 出现在搜索结果；执行 = 宿主 spawn 同名可执行产物（子进程 + NDJSON，协议见 §4.4）
+- 用途：用户主动触发的后台任务。**不得**长期驻留（不得自行常驻；常驻请用 `contributes: true` 的搜索命令，宿主按需启停）
+- 参数：由 `ResultItem.action.args` 传入；在插件里通过 `ctx.args` 读取
 
 ### 4.3 `script`
 
 - **不**出现在搜索结果，只能被 `ctx.exec.run` 或宿主内部调用
-- 参数与返回值：`done(x)` 的 `x` 即调用方 `ctx.exec.run` 的返回值（结构化克隆限制：不可传函数/Symbol）
-- 超时：默认 10s，调用方可指定，上限 5min；超时 → `TIMEOUT`
-- 并发：同插件脚本并发上限 4；超限排队
-- 崩溃：脚本异常只影响本次调用（`fail()` / 未捕获异常 → `SCRIPT_ERROR`），连续 3 次失败会把插件标记为 `degraded`
+- 参数与返回值：`done(x)` 的 `x` 即调用方 `ctx.exec.run` 的返回值（**必须可 JSON 序列化**：不可传函数 / Symbol / 循环引用）
+- 超时：默认 10s，调用方可指定，上限 5min；超时 → `TIMEOUT`（宿主 SIGTERM → 2s 宽限 → SIGKILL）
+- 并发：同插件命令并发上限 4；超限排队
+- 崩溃：非零退出只影响本次调用（`fail()` / panic / 非零退出码 → `SCRIPT_ERROR`），连续 3 次失败会把插件标记为 `degraded`
+
+### 4.4 逻辑层运行时（`no-view` / `script`，v2）
+
+> v2 起逻辑层插件是**独立可执行文件**：宿主以子进程方式运行（`spawn` + NDJSON），机器上不需要任何 JS 运行时。官方 SDK：`packages/plugin-sdk-rs`（crate `launcher-plugin-sdk`）。
+
+**产物与查找顺序**
+
+```
+<pluginRoot>/dist/<name>          # macOS / Linux（0755）
+<pluginRoot>/dist/<name>.exe      # Windows
+<pluginRoot>/dist/workers/<name>  # 备选位置
+```
+
+查找顺序：`<name>(.exe)` → `workers/<name>(.exe)`；找不到 → 该命令报 `ENTRY_MISSING`。
+
+**启动与上下文注入**
+
+宿主 spawn：
+
+```
+launcher-plugin-<name> --mode run|search [--launcher-context <base64url JSON>]
+```
+
+`--launcher-context` 解码后的字段（与 v1 `workerData` 一一对应）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `pluginId` | string | 插件 id |
+| `command` | string | 命令名（= 产物文件名） |
+| `pluginPath` | string | 插件根目录绝对路径（只读，N2） |
+| `dataPath` | string | 插件唯一可写目录 `<dataRoot>/plugins/<id>/` |
+| `dataRoot` | string | 数据根 |
+| `mode` | `"run"` \| `"search"` | 一次性执行 / 贡献型常驻 |
+| `args` | any | `mode=run` 的入参 |
+| `settings` | object | 生效设置快照（用户值 ?? 清单默认；启动时冻结，改设置会重载插件） |
+| `host` | string | 恒为 `"launcher"`（供插件自检） |
+| `apiVersion` | number | `2` |
+
+另注入环境变量 `LAUNCHER_PLUGIN_ID` / `LAUNCHER_DATA_PATH`（便于插件在极早期自报身份）。
+
+**消息协议（NDJSON，双向）**
+
+插件 → 宿主（stdout，每行一个 JSON）：
+
+| type | 字段 | 语义 | v1 对应 |
+|---|---|---|---|
+| `result` | `data` | 递交结果（可多次） | `postMessage({type:'result'})` |
+| `done` | — | 本次执行结束（`run` 的唯一结束信号） | `done()` |
+| `log` | `level`, `message` | 日志：`debug` / `info` / `warn` / `error` | `log()` |
+| `progress` | `data` | 进度（宿主记 debug 日志） | `progress()` |
+| `rpc` | `id`, `method`, `params` | 调用宿主（`storage` 等） | RPC 消息 |
+
+宿主 → 插件（stdin）：
+
+| type | 字段 | 语义 |
+|---|---|---|
+| `query` | `token`, `query` | `mode=search`：新查询（可打断上一次） |
+| `rpc-result` | `id`, `ok`, `data?`, `error?` | RPC 应答 |
+| `shutdown` | — | 宿主要求退出（插件应尽快 exit） |
+
+**约定**：stdout 只能出现协议行（`log` 走协议，不要直接 print）；野 stdout 由宿主逐行尝试解析、失败转入日志（宽容处理，与 v1 `pipeOutput` 语义一致）；stderr 一律转发为 `warn` 日志。
+
+**SDK API（Rust，与 v1 逐条对应）**
+
+```rust
+fn main() {
+    launcher_plugin_sdk::run(|ctx| {
+        match ctx.mode {
+            Mode::Run => {
+                let args = ctx.args::<MyArgs>()?;
+                ctx.log("开始", json!({ "foo": 1 }), Level::Info);
+                ctx.progress(0.4, json!({ "step": "halfway" }));
+                ctx.done(json!({ "ok": true }))?;                        // = v1 done(x)
+            }
+            Mode::Search => ctx.on_query(|query| search(&ctx, query)),    // = v1 onQuery
+        }
+        Ok(())
+    });
+}
+```
+
+| v2（`launcher-plugin-sdk`） | v1（`@launcher/api-node`） | 说明 |
+|---|---|---|
+| `ctx.args` / `ctx.settings` / `ctx.data_path` / `ctx.plugin_id` / `ctx.mode` … | `ctx()` | 字段一一对应 |
+| `ctx.done(x)` | `done(x)` | 写 `result` + `done` |
+| `ctx.fail(err)` | `fail(err)` | 写 `{result, data:{__error}}` + `done`（宿主沿用 `isFailurePayload` 判定） |
+| `ctx.log(msg, data, level)` / `ctx.progress(p, data)` | `log` / `progress` | |
+| `ctx.on_query(cb)` | `onQuery(cb)` | 贡献型常驻循环（§9.2） |
+| `ctx.storage.*` | `storage.*` | 走 `rpc` 往返，语义不变 |
+| panic hook → `fail`（SDK 内建） | `onError()`（需显式调用） | |
+
+**生命周期、超时与降级**
+
+| 场景 | 行为 |
+|---|---|
+| `run` | spawn → 等 `done` → 回收（SIGTERM，2s 后 SIGKILL）；超时 `TIMEOUT`（默认 10s，上限 5min） |
+| `search` | 常驻；每查询写一行 `query`；空闲 5 分钟回收；同插件并发上限 4、超限排队；插件激活后预热 |
+| 崩溃 | 非零退出 → 失败计数 +1；连续 3 次 → 该命令 `degraded`（搜索结果静默置空，UI 不报错） |
+| 孤儿 | 宿主退出时关闭所有子进程 stdin 并 kill；插件应处理 stdin EOF 自行退出（SDK 内建） |
+| 输出过大 | 单行 > 1MB 截断并记 `warn`（防 OOM） |
+| 权限 | 子进程权限 = 当前用户权限（与 v1 相同；不提供额外沙箱） |
 
 ---
 
@@ -405,6 +508,7 @@ search.onQuery(({ query, token }) => {
 - 宿主按 80ms debounce 广播；插件**应当**在 **200ms** 内返回
 - 超时：本次贡献丢弃并记审计（**不得**阻塞其它插件的结果）
 - 结果项**必须**满足：`id` 稳定（同一对象每次查询返回同一 id，否则历史/固定会错位）
+- **v2 载体**：贡献型命令是常驻子进程（`mode=search`），宿主下发 `{type:'query',token,query}`、插件回 `{type:'result',token,data}`（逻辑层 SDK 映射见 §4.4；视图层 `search.onQuery` 不受影响）
 
 ### 9.3 `ResultItem`
 
@@ -485,7 +589,7 @@ v1 只要求：所有面向用户的字符串集中在 `src/locales/zh-CN.ts`（
 
 | 规则 | 内容 |
 |---|---|
-| `apiVersion` | 字符串主版本。底座必须能读 `"1"`；未来 `"2"` 需底座同时支持 1 与 2，否则拒绝加载并提示 |
+| `apiVersion` | 字符串主版本。底座接受 `"1"` 与 `"2"`：`"2"` = 逻辑层产物为**可执行文件**（当前规范）；`"1"` = 逻辑层产物为 `.mjs` —— **v2 底座不再支持 v1 的逻辑层产物**（机器上没有任何 JS 执行路径）：这类命令加载时明确报「需升级为可执行产物」。`"1"` 的 **view 命令不受影响**（视图层协议未变，见 §4.1 / §7） |
 | 能力只增不减 | 同一 `apiVersion` 内不得删除/重命名 capability 与 API；新增为 minor |
 | 弃用流程 | 标注 `@deprecated` → 至少保留一个 minor → 下一个主版本移除（写入 changelog） |
 | 插件版本 | 插件自身 semantic versioning；底座在设置页展示"插件声明需要 apiVersion X，当前底座支持 Y" |
@@ -499,12 +603,12 @@ v1 只要求：所有面向用户的字符串集中在 `src/locales/zh-CN.ts`（
 ```bash
 pnpm install
 pnpm --filter <name> dev        # vite dev server（浏览器直接调 UI；宿主能力走降级分支）
-pnpm --filter <name> build      # 产出 dist/（index.html + assets + <name>.mjs + 裁剪后的 package.json）
+pnpm --filter <name> build      # 产出 dist/（index.html + assets + 可执行产物 <name> + 裁剪后的 package.json）
 pnpm --filter <name> typecheck
-pnpm build:plugins              # 构建全部出厂插件
+pnpm build:plugins              # 构建全部出厂插件（含各自 cargo build --release）
 pnpm spec-check [name]          # 规范自检（清单 / 产物 / 能力 / 数据目录 / N1 / N2 / N3）
 pnpm pack:plugins               # 打 zip 到 plugins/release/
-pnpm test                       # 全量测试（含各插件的 core·script 用例）
+pnpm test                       # 全量测试（含各插件的 core·view 用例）；逻辑层 Rust 测试在插件目录 cargo test
 ```
 
 - **dev 注册**：`pnpm dev:kernel` 起内核（本机 control 端口 + 一次性 token），插件 dev server 把 `devUrl` 挂上去，插件页直接指向 vite ⇒ 免重启热更新
@@ -518,14 +622,14 @@ pnpm test                       # 全量测试（含各插件的 core·script �
 
 **清单**
 - [ ] `name` / 命令 `name` 符合正则；插件内唯一
-- [ ] `apiVersion: "1"`；`type: "module"`
+- [ ] `apiVersion: "2"`（新插件）；`type: "module"`
 - [ ] `capabilities` 与实际调用完全一致（`spec-check` 无差集）
-- [ ] 每个命令有 `title`；脚本命令的 `name` 等于产物文件名
+- [ ] 每个命令有 `title`；逻辑层命令的 `name` 等于产物文件名
 - [ ] `searchable` / `contributes` 按 §9.1 选对，`placeholder` 已写
 
 **产物**
 - [ ] `dist/index.html` + `assets/` 存在，资源路径相对（`base: './'`）
-- [ ] 每个 no-view/script 入口自包含：`grep -h '^import' dist/*.mjs` 只剩 `node:*`
+- [ ] 每个 no-view/script 命令有独立**可执行产物** `dist/<name>`（Windows `.exe`）；`file` 确认可执行格式
 - [ ] `dist/package.json` 只含 §3 字段（无 `scripts` / `devDependencies`）
 - [ ] wasm 随包，无 CDN 引用
 
@@ -548,7 +652,7 @@ pnpm test                       # 全量测试（含各插件的 core·script �
 | 规范条目 | 校验时机 | 内核行为 | 错误码 |
 |---|---|---|---|
 | §3.3 清单校验 | 加载时 | 拒绝加载 + 设置页显示原因 | `MANIFEST_INVALID` / `API_VERSION_UNSUPPORTED` / `CAPABILITY_UNKNOWN` |
-| N1 产物名一致 | 加载时 | 该命令标记 `error`，其余命令照常 | `ENTRY_MISSING` |
+| N1 产物名一致（可执行产物存在） | 加载时 | 该命令标记 `error`，其余命令照常 | `ENTRY_MISSING` |
 | §5.1 token | 每次调用 | 丢弃 + 审计 | 静默丢弃（记审计） |
 | §7.4 降级要求 | 无法自动校验 | 评审 + `echo-plugin` 用例覆盖 | — |
 | §8 能力声明 | 装配期 | 未授权服务不挂载 | 属性不存在 / `CAPABILITY_DENIED` |
@@ -565,8 +669,9 @@ pnpm test                       # 全量测试（含各插件的 core·script �
 hello/
 ├── package.json
 ├── index.html
-├── src/main.ts
-└── src/no-view/greet.ts        → dist/greet.mjs
+├── Cargo.toml                  → 逻辑层 crate（crate 根 = 插件目录）
+├── src/main.ts                 → 视图层（Web）
+└── src/main.rs                 → 逻辑层可执行产物 dist/greet（见 §4.4）
 ```
 
 ```jsonc
@@ -576,7 +681,7 @@ hello/
   "title": "你好",
   "version": "0.1.0",
   "type": "module",
-  "apiVersion": "1",
+  "apiVersion": "2",
   "capabilities": ["storage"],
   "commands": [
     { "name": "hello", "title": "打个招呼", "mode": "view", "searchable": true, "placeholder": "输入名字" },
@@ -603,18 +708,18 @@ if (host.isLauncher()) {
 }
 ```
 
-```ts
-// src/no-view/greet.ts
-import { ctx, log, progress, done, fail, onError } from '@launcher/api-node'
+```rust
+// src/main.rs（逻辑层入口：[[bin]] name = greet；crate 根 = 插件目录）
+use launcher_plugin_sdk::{json, Level};
 
-onError()
-const { args, dataPath } = ctx()
-log('greet 开始', { dataPath }, 'debug')
-progress(0.5)
-try {
-  done({ hello: (args as { name?: string })?.name ?? 'world' })
-} catch (e) {
-  fail(e)
+fn main() {
+    launcher_plugin_sdk::run(|ctx| {
+        ctx.log("greet 开始", json!({ "dataPath": ctx.data_path() }), Level::Debug);
+        ctx.progress(0.5, json!(null));
+        let args = ctx.args::<serde_json::Value>()?;
+        ctx.done(json!({ "hello": args.get("name").and_then(|v| v.as_str()).unwrap_or("world") }))?;
+        Ok(())
+    });
 }
 ```
 
@@ -625,6 +730,8 @@ try {
 | 术语 | 含义 |
 |---|---|
 | capability | 插件申请使用的宿主能力，必须在清单声明 |
+| 视图层插件 | `view` 命令：Vue 页面，跑在宿主 WebView 的 iframe 里 —— 始终是 Web 技术，不受 v1 / v2 影响 |
+| 逻辑层插件 | `no-view` / `script` 命令：v2 起为独立可执行文件（宿主 spawn + NDJSON，§4.4） |
 | 入口型搜索 | `searchable: true`，命令本身参与搜索 |
 | 贡献型搜索 | `contributes: true`，插件在搜索过程中返回结果项 |
 | dataPath | `<dataRoot>/plugins/<pluginId>/`，插件唯一可写目录 |

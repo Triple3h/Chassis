@@ -7,7 +7,8 @@ disable: false
 
 # 打包自用版（dist-app/Chassis.app）
 
-本项目**自用、不分发**：不走 tauri-cli、不公证、不打 dmg。产物 `dist-app/Chassis.app` 拖进 /Applications 即可用。
+本项目**当前自用分发**：macOS 不走 tauri-cli / 不公证 / 不打 dmg，产物 `dist-app/Chassis.app` 拖进 /Applications 即可用。
+**规划中（M5/M6，见 `docs/m5-rust-and-windows.md`）**：引入 GitHub Actions 双平台构建（`macos-latest` + `windows-latest`）与 GitHub Releases 分发；仓库届时公开（MIT）⇒ Actions 免费无额度限制，且**不要**在 CI 里跑 `make-icon.mjs`（依赖 `rsvg-convert`/`iconutil`，图标产物一律入库）。
 装配细节在 `scripts/pack-local-app.mjs`；数据目录与迁移见规则 `chassis-core`。
 
 ## 全量打包

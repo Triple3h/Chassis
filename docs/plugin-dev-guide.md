@@ -1,10 +1,28 @@
 # Vue 插件开发手册
 
-> 面向本仓库 `plugins/{totp,hosts,text-diff,json-tools}` 四个 Vite + Vue 插件：宿主调用直连
-> `@launcher/api`（view 侧）/ `@launcher/api-node`（script 侧）。
+> 面向本仓库 `plugins/` 下的出厂插件（view 层是 Vite + Vue；**v2 起逻辑层是 Rust**，见下方迁移说明）。
 > **平台模型（命令形态、产物契约、脚本协议、踩坑）适用于任何底座插件。**
-> 状态：现行（与 `plugins/` 下的 Vue 插件同步维护）｜ 最后更新：2026-09-16
+> 状态：现行（与 `plugins/` 下的插件同步维护）｜ 最后更新：2026-09-17
 > 快速上手看 [`../.codebuddy/skills/chassis-plugin-dev/SKILL.md`](../.codebuddy/skills/chassis-plugin-dev/SKILL.md)，硬约束看 [`../.codebuddy/rules/chassis-plugin/RULE.mdc`](../.codebuddy/rules/chassis-plugin/RULE.mdc)
+
+> **⚠️ M5（v2）已完成迁移：逻辑层全部 Rust 化（2026-09-17）**
+>
+> 本手册下半部分描述的**平台模型没有变**（命令形态、产物契约、脚本协议、安全边界、数据目录 N2）；
+> 变的是**逻辑层的语言与产物形态**：
+>
+> | | v1（本手册中的旧示例） | v2（现行） |
+> |---|---|---|
+> | 逻辑层 | TypeScript `src/no-view/*.ts` → esbuild → `dist/<name>.mjs` | **Rust** crate（`Cargo.toml` 在插件目录根，源码直接放同目录 `src/`）→ `dist/<name>`（可执行文件） |
+> | 清单 | `apiVersion: "1"` | **`apiVersion: "2"`** |
+> | 宿主通信 | Node worker（`worker_threads` / `parentPort`） | **子进程 + NDJSON**（`launcher-plugin-sdk`） |
+> | 构建 | `node scripts/build-plugin.mjs <id>` | `cargo build --release -p launcher-plugin-<id> && node scripts/build-plugin.mjs <id> --copy-scripts` |
+> | view 层 | Vue + Vite | **同左（不变）** |
+>
+> - 读代码从简到繁：`plugins/web-open/src/`（最小）→ `file-search`（两个入口 + 外部命令）→
+>   `host-manager`（提权写系统文件）→ `totp`（读图转 base64）→ `app-launcher`（并发扫描 + 本地化 + 图标缓存）。
+> - 带 view 的插件：`build:view` 走 vite、`build:scripts` 走 cargo + `--copy-scripts --keep-dist`（合并进同一 `dist/`）。
+> - 权威规格：`plugin-spec.md` §2.2 / §4.2–4.4 / §11；迁移计划与实测数据：`m5-rust-and-windows.md`。
+> - 收益：**机器上不再需要 Node**（内核与插件都是原生产物）。
 
 ---
 
@@ -85,7 +103,7 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 
 ## 2. API 速查（`@launcher/api`）
 
-> 权威定义在 `packages/plugin-api/src/index.ts`（UI 侧）/ `packages/plugin-api-node/src/index.ts`（脚本侧），
+> 权威定义在 `packages/plugin-api/src/index.ts`（view 侧）/ `packages/plugin-sdk-rs/src/`（逻辑层 Rust SDK），
 > 能力与错误码见 `docs/plugin-spec.md` §8。
 
 ### 2.1 UI 侧（`import { clipboard, commands, exec, host, hostUi, screenshot, searchResult, storage } from '@launcher/api'`）
@@ -132,7 +150,27 @@ await commands.invoke({ command, args }) / commands.close()
 
 所有调用在失败时以 `LauncherError` 拒绝（`NOT_FOUND` / `TIMEOUT` / `CAPABILITY_DENIED` / `INTERNAL`）。
 
-### 2.2 Node 侧（`import { ctx, done, fail, log, onError, onQuery, progress, storage } from '@launcher/api-node'`）
+### 2.2 逻辑层（`no-view` / `script`）
+
+v2（M5 起，Rust SDK `launcher-plugin-sdk`；完整协议与 SDK 用法见 `plugin-spec` §4.4 与本手册 §7）：
+
+```rust
+fn main() {
+    launcher_plugin_sdk::run(|ctx| {
+        let args = ctx.args::<MyArgs>()?;          // 来自调用方 exec.run({ command, args })
+        ctx.log("开始", json!({ "k": 1 }), Level::Info);
+        ctx.progress(0.5, json!(null));
+        ctx.done(json!({ "ok": true }))?;          // 正常结束并把 result 交给调用方
+        Ok(())
+    });
+}
+```
+
+- `ctx.settings` 是**生效设置快照**（启动时冻结，改设置会重载插件）；`ctx.data_path` 是唯一可写目录，`ctx.plugin_path` 只读。
+- `ctx.on_query(fn)` 用于贡献型搜索（`contributes: true`）；`ctx.storage.*` 走 RPC，与 UI 侧同一份数据（`<dataRoot>/plugins/<id>/storage.json`）。
+- panic 由 SDK 转 `fail`（v1 的 `onError()` 需显式调用）。
+
+v1（过渡期，`@launcher/api-node`）：
 
 ```ts
 onError()                                   // 先注册，兜住未处理异常
@@ -141,7 +179,7 @@ log(message, data?, level?)                 // level: info|debug|warn|error
 progress(p: 0~1, data?)
 done(result)                                // 正常结束并把 result 交给调用方
 fail(error)
-await storage.get/set/remove/all/clear      // 与 UI 侧同一份数据（<dataRoot>/plugins/<id>/storage.json）
+await storage.get/set/remove/all/clear      // 与 UI 侧同一份数据
 onQuery(fn)                                 // 贡献型搜索：清单里 contributes: true 时宿主常驻该 worker
 ```
 
@@ -149,17 +187,20 @@ onQuery(fn)                                 // 贡献型搜索：清单里 contr
 
 ### 2.3 IPC 实测协议（官方文档没写）
 
-用 `worker_threads` 直接拉起产物即可观察，本仓库对 `dist/read-image.mjs` 做过完整验证：
+v1 用 `worker_threads` 直接拉起产物即可观察（本仓库对 `dist/read-image.mjs` 做过完整验证）；v2 是子进程 + NDJSON，同一批消息语义照搬：
 
-| 调用 | 实际发出的消息 |
-|---|---|
-| `log(msg, data)` | `{ type: 'log', level, message, data }` |
-| `done(x)` | `{ type: 'result', data: x }`，随后还有一条 `{ type: 'done' }` |
+| 调用 | v1（worker 消息） | v2（stdout 一行 JSON） |
+|---|---|---|
+| `log(msg, data)` | `{ type: 'log', level, message, data }` | 同 |
+| `done(x)` | `{ type: 'result', data: x }` + `{ type: 'done' }` | 同（两行） |
+| RPC | `postMessage({ type: 'rpc', id, method, params })` | 同 |
 
-`Backend.run()` 返回的就是 `data` 本身。想脱离宿主自测脚本，用：
+`ctx.exec.run()` 返回的就是 `data` 本身。想脱离宿主自测逻辑层产物：
 
-```js
-new Worker('/abs/path/dist/xxx.mjs', { workerData: { command: 'xxx', args: {...}, pluginPath: '/tmp/plugin' } })
+```bash
+# v2：直接跑产物（stdin 喂协议行，stdout 读结果）
+echo '{"type":"query","token":1,"query":"dee"}' | ./dist/xxx --mode search --launcher-context "$CTX_B64"
+# v1：new Worker('/abs/path/dist/xxx.mjs', { workerData: { command: 'xxx', args: {...}, pluginPath: '/tmp/plugin' } })
 ```
 
 ### 2.4 降级策略（必须做）
@@ -171,13 +212,13 @@ new Worker('/abs/path/dist/xxx.mjs', { workerData: { command: 'xxx', args: {...}
 - 在宿主里：SDK 自带超时（`CallOptions.timeoutMs`），需要「失败即空值」就在调用点接 `.catch(() => null)`；
 - `storage` 只在宿主里用，本地降级写 `localStorage`，避免两份数据互相覆盖。
 
-### 2.5 Script 命令能做的事（能力边界）
+### 2.5 逻辑层命令能做的事（能力边界）
 
-- ✅ 读写任意本地文件、遍历目录、调用 Node 生态、访问网络
-- ✅ 通过 `ctx().dataPath` 读写自己的数据目录（`pluginPath` 是只读安装目录）
-- ❌ 不能弹 UI、不能长期驻留（一次性执行，`done()` 后结束）
+- ✅ 读写任意本地文件、遍历目录、调用系统命令、访问网络（v1 是 Node 生态，v2 是 Rust 生态）
+- ✅ 通过 `ctx.data_path` / `ctx().dataPath` 读写自己的数据目录（`pluginPath` 是只读安装目录）
+- ❌ 不能弹 UI、不能长期驻留（一次性执行，`ctx.done` / `done()` 后结束）
 - ⚠️ 能力越强越要自己收紧：本项目 `read-image` 只做「扫描白名单目录 + 扩展名白名单 + 文件头魔数校验 + 单文件 20MB 上限」
-- ⚠️ 需要改系统文件（如 hosts）时：**目标路径绝不能来自调用方入参**，只认平台默认路径 —— 否则「能提权写文件」的脚本就成了任意文件写入的跳板；提权一律走系统自带对话框（macOS `osascript … with administrator privileges`、Windows `-Verb RunAs`、Linux `pkexec`），并且**写前备份、写后回读逐字节校验**，提权不可用时回落到「把待生效内容落盘 + 给用户一条可复制的命令」。完整范例见 `plugins/host-manager/src/no-view/_hosts-file.ts`（它更进一步：调用方给的是**托管区文本**，写的一刻才读盘、只换标记之间那一段，区外那些行一个字节都不动）
+- ⚠️ 需要改系统文件（如 hosts）时：**目标路径绝不能来自调用方入参**，只认平台默认路径 —— 否则「能提权写文件」的脚本就成了任意文件写入的跳板；提权一律走系统自带对话框（macOS `osascript … with administrator privileges`、Windows `-Verb RunAs`、Linux `pkexec`），并且**写前备份、写后回读逐字节校验**，提权不可用时回落到「把待生效内容落盘 + 给用户一条可复制的命令」。完整范例见 `plugins/host-manager/src/lib.rs`（v1 为 `src/no-view/_hosts-file.ts`；它更进一步：调用方给的是**托管区文本**，写的一刻才读盘、只换标记之间那一段，区外那些行一个字节都不动）
 
 ---
 
@@ -189,7 +230,7 @@ new Worker('/abs/path/dist/xxx.mjs', { workerData: { command: 'xxx', args: {...}
 dist/
 ├── index.html            # view 命令入口（固定名）
 ├── assets/*              # 静态资源
-├── <command>.mjs         # no-view / script 入口，名字必须与 commands[].name 一致
+├── <command>             # 逻辑层产物（可执行文件；Windows 加 .exe），名字必须与 commands[].name 一致
 └── package.json          # 插件清单（宿主读它注册命令）
 ```
 
@@ -208,7 +249,9 @@ export default defineConfig({
 - **构建后把 `package.json` 写进 dist**（本仓库 `scripts/lib/manifest-plugin.mjs` 会自动剔除无关字段）。
 - 「一个命令一个 JS 入口」的 lib 模式是**旧模板**的玩法，新 API 不需要。
 
-### 3.3 No-View / Script 的构建
+### 3.3 No-View / Script 的构建（v1 / TS，过渡期）
+
+> v2（M5 起）逻辑层是 Rust：见 §7。以下 v1 写法在过渡期仍然有效（现有插件的 TS 产物），新插件不要再用。
 
 必须用**独立的 worker 配置**，关键三条：
 
@@ -231,7 +274,8 @@ build: {
 "build": "vue-tsc --noEmit && vite build && vite build --config vite.worker.config.ts"
 ```
 
-> 实测：`@launcher/api-node` 会被**完整内联**进 `.mjs`（它内部 import 的 `worker_threads` 才是 external 的），所以产物 ~9KB，不依赖宿主提供 node_modules。
+> **v1 历史**：那时 `@launcher/api-node` 会被完整内联进 `.mjs`（约 9KB）。v2 逻辑层是 Rust 可执行产物，这条不再适用 ——
+> 构建见 §7 / `plugins/README.md`（`cargo build --release` + `scripts/build-plugin.mjs --copy-scripts`）。
 
 ### 3.4 安装与调试
 
@@ -334,7 +378,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 
 - **现象**：给个 `/Users/x/Desktop/a.png` 没反应。
 - **原因**：iframe 受浏览器沙箱限制，没有文件系统访问权。
-- **对策**：用 `mode: "script"` 的 Node Worker 读盘，转 base64 回传（本仓库 `plugins/totp/src/no-view/read-image.ts`）。
+- **对策**：用 `mode: "script"` 的逻辑层命令（Rust 子进程）读盘，转 base64 回传（本仓库 `plugins/totp/src/bin/read_image.rs`）。
 
 ### 5.4 Script 产物不生成 / 命令面板搜不到
 
@@ -451,22 +495,94 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 [ ] plugins/<name>/package.json：apiVersion + capabilities 必填，commands 齐全、mode 正确
 [ ] package.json 提供 build:view / build:scripts（根 scripts/build-all.mjs 按这两条驱动）
 [ ] vite.config.ts：base './'，outDir dist，构建后写清单
-[ ] 有 no-view/script 命令时：vite.worker.config.ts（emptyOutDir:false）+ 文件名对齐；**有 2 个以上入口时逐入口构建**（§5.17），构建后 `grep -h '^import' dist/*.mjs` 应只见 node 内置模块
+[ ] 有 no-view/script 命令时（v2）：插件根 `Cargo.toml` + 同目录 `src/*.rs` + `build:scripts`（cargo build + `--copy-scripts`），产物名 = 命令名（§7）；v1（TS）走 vite.worker.config.ts + 逐入口构建（§3.3 / §5.17）
 [ ] tsconfig.json：extends `../../tsconfig.vue-plugin.json`（走工作区包标准解析，不需要额外 paths）
 [ ] src/styles/app.css：@import tailwindcss + theme.css，@source 覆盖 src 与 `../../packages/ui`
 [ ] 宿主调用直接 `@launcher/api` / `@launcher/api-node`，先用 `host.isLauncher()` 分流、调用点兜失败
 [ ] 大计算进 Worker、长列表虚拟滚动
-[ ] pnpm build:plugins && pnpm spec-check 全绿：dist 里 index.html + assets + package.json(+ .mjs)
+[ ] pnpm build:plugins && pnpm spec-check 全绿：dist 里 index.html + assets + package.json + 可执行产物
 [ ] 起静态服务器实机点一遍（不只是 dev server，prod 的资源路径不同）
 [ ] 敏感数据：默认不落明文，或提供口令加密
 ```
 
 ---
 
-## 7. 参考
+## 7. Rust 逻辑层插件（v2）
+
+> 适用：`no-view` / `script` 命令（M5 起）。协议权威定义见 `plugin-spec` §4.4；SDK 源码 `packages/plugin-sdk-rs`；决策背景见 `docs/decisions/ADR-0005-kernel-language.md`。
+
+### 7.1 工程结构
+
+```
+plugins/<id>/
+├── package.json
+├── Cargo.toml              # 逻辑层 crate（crate 根 = 插件目录；[[bin]] name = <命令名>，一个命令一个 bin）
+└── src/                    # 插件源码：Rust 逻辑层（main.rs / lib.rs / bin/*.rs）+ Vue 视图（有 view 命令时）
+    ├── main.rs             # 入口：launcher_plugin_sdk::run
+    ├── bin/<name>.rs       # 多命令时：一个命令一个 bin（[[bin]] path 指向这里）
+    └── ...                 # 业务模块（与视图层共享的逻辑在这里写第二份时要用 fixture 向量守护，见 §7.4）
+```
+
+- crate 由**仓库根** `Cargo.toml` 的 workspace `members` 逐个列出（`plugins/<id>`）—— 新增逻辑层插件时加一行；产物统一落在仓库根 `target/`。
+- 产物名 = `[[bin]].name` = `commands[].name`；`build:scripts` 把仓库根 `target/release/<bin>` 拷成 `dist/<name>`（0755）。
+
+### 7.2 SDK 用法
+
+```rust
+use launcher_plugin_sdk::{json, Level, Mode};
+
+#[derive(serde::Deserialize)]
+struct Args { name: Option<String> }
+
+fn main() {
+    launcher_plugin_sdk::run(|ctx| {
+        match ctx.mode {
+            Mode::Run => {
+                let args = ctx.args::<Args>()?;
+                ctx.log("开始", json!({ "name": args.name }), Level::Info);
+                ctx.progress(0.5, json!(null));
+                ctx.done(json!({ "hello": args.name.unwrap_or_else(|| "world".into()) }))?;
+            }
+            Mode::Search => ctx.on_query(|query| {
+                // 返回 ResultItem 数组（id 必须稳定，见 plugin-spec §9.3）
+                Ok(vec![json!({ "id": format!("demo:{query}"), "title": query })])
+            }),
+        }
+        Ok(())
+    });
+}
+```
+
+要点：
+
+- `ctx.args::<T>()` 反序列化 `--launcher-context` 的 `args`；`ctx.settings_str("k")` 取生效设置。
+- 结束必须 `ctx.done(x)` / `ctx.fail(e)`；`run` 是唯一入口，闭包返回 `Result<(), E>`。
+- `ctx.storage.*` 走 RPC（`storage.get/set/remove/all/clear`）；`ctx.data_path()` 是唯一可写目录。
+- panic 由 SDK 转 `fail`；但**别依赖 panic**做业务错误，用 `ctx.fail(e)` 并写清日志。
+
+### 7.3 构建与打包
+
+```json
+"build:scripts": "cargo build --release -p <crate> && node ../../scripts/build-plugin.mjs <id> --copy-scripts"
+```
+
+- `scripts/build-plugin.mjs <id> --copy-scripts`：把仓库根 `target/release/<bin>` 复制为 `dist/<name>`（0755），并写入裁剪后的清单。
+- 本机自测：`cargo test -p <crate>`；协议一致性用 `tests/fixtures/echo-plugin` 的双宿主对拍（`pnpm test`）。
+- 跨平台产物必须在各自平台编译（CI 双 job，见 `docs/m5-rust-and-windows.md` §B3.7）；`.exe` 只出现在 Windows 包内。
+
+### 7.4 v1 → v2 迁移对照
+
+| v1（TS / worker） | v2（Rust / 子进程） |
+|---|---|
+| `src/no-view/*.ts` → `dist/<name>.mjs` | `src/main.rs`（crate 根 = 插件目录）→ `dist/<name>`（可执行） |
+| `import … from '@launcher/api-node'` | `use launcher_plugin_sdk::…` |
+| `ctx()` | `ctx`（`ctx.args` / `ctx.settings` / `ctx.data_path()`） |
+| `done(x)` / `fail(e)` / `log` / `progress` / `onQuery` / `storage` | `ctx.done(x)` / `ctx.fail(e)` / `ctx.log` / `ctx.progress` / `ctx.on_query` / `ctx.storage` |
+
+## 8. 参考
 
 - 规范与架构：`docs/plugin-spec.md`（对外契约）、`docs/architecture.md`（内核实现）、`plugins/README.md`（目录与构建）
-- API 权威定义：`packages/plugin-api/src/index.ts`（UI 侧）、`packages/plugin-api-node/src/index.ts`（脚本侧）
+- API 权威定义：`packages/plugin-api/src/index.ts`（UI 侧）、`packages/plugin-sdk-rs/src/`（逻辑层 v2）、`packages/plugin-api-node/src/index.ts`（逻辑层 v1，过渡期）
 - 现有范例：
   - `plugins/totp` —— view + script + 对话框 + 口令加密（`src/core/vault.ts`）
   - `plugins/host-manager` —— 提权写系统文件、只换自己的托管区、写前备份 + 写后回读校验

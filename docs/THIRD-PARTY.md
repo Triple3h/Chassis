@@ -16,10 +16,10 @@
 
 | 本仓库文件 | 来源（ZTools） | 改造内容 |
 |---|---|---|
-| `plugins/app-launcher/src/core/scanner.ts` | `src/main/core/commandScanner/macScanner.ts`（约 432 行中的扫描主体） | 去掉 Electron 依赖：`app.getPreferredSystemLanguages()` → `defaults read -g AppleLanguages`；图标改为输出 `.icns` 路径（由 `sips` 转 PNG）；`pLimit` 改为内置保序版 |
+| `plugins/app-launcher/src/lib.rs`（v1：`src/core/scanner.ts`，已随 v1 清理删除） | `src/main/core/commandScanner/macScanner.ts`（约 432 行中的扫描主体） | 去掉 Electron 依赖：语言列表走 `defaults read -g AppleLanguages`；图标用 `.icns` 路径（由 `sips` 转 PNG）；并发用内置保序实现 |
 | `plugins/app-launcher/src/core/scanner.ts` 中的 `collectAppBundles` | 同上 | 原样移植（含符号链接解析、PWA/Office 子目录下钻一层、`.app` 命中即停止下钻） |
 | `plugins/app-launcher/src/core/scanner.ts` 中的 `bcp47ToLprojNames` / `bcp47ToLoctableKeys` / `parseStringsContent` / `readStringsFile` | 同上 | 原样移植（含 binary plist / XML plist / UTF-16 文本三种 `.strings` 格式） |
-| `apps/kernel/src/http/server.ts` 的 URL 拆分与穿越防护 | `src/main/utils/pluginUrl.ts`（`getUrlScheme` / `splitPluginUrl` 的思路） | 按本仓库的静态服务需求重写为 `resolveWithinRoot` |
+| `apps/kernel/src/http/server.rs` 的 URL 拆分与穿越防护 | `src/main/utils/pluginUrl.ts`（`getUrlScheme` / `splitPluginUrl` 的思路） | 按本仓库的静态服务需求重写为 `resolve_within_root` |
 
 **未移植**：ZTools 的插件管理、窗口管理、存储、同步、AI、支付、市场等模块（架构不同：Electron `WebContentsView` → Tauri WebView + iframe + 每插件独立端口）。
 
@@ -31,16 +31,14 @@
 
 以下 npm 包的选择参考了 ZTools 的实践（ZTools `package.json`）：
 
-| 包 | 本仓库用途 |
-|---|---|
-| `pinyin-pro` | 拼音全拼 / 首字母索引（`apps/kernel/src/pinyin.ts`） |
-| `chokidar` | 监听 `extensions/` 目录变化触发热重载（`apps/kernel/src/plugin.ts`） |
-| `adm-zip` | 插件 zip 安装（`apps/kernel/src/plugin.ts`） |
+| 包（v1 选型时） | 本仓库用途 | v2（当前实现） |
+|---|---|---|
+| `pinyin-pro` | 拼音全拼 / 首字母索引 | `pinyin` crate（`apps/kernel/src/pinyin.rs`；多音字按**读音变体**展开） |
+| `chokidar` | 监听 `extensions/` 目录变化触发热重载 | 由管理面动作触发重载（不再监听目录） |
+| `adm-zip` | 插件 zip 安装 | `zip` crate（`apps/kernel/src/plugin/admin.rs`） |
 
-> **未采用 `simple-plist`**：它在运行时 `require('bplist-creator' / 'bplist-parser')`，
-> 无法静态打包进 `<name>.mjs`，会破坏 plugin-spec N1「脚本产物自包含」。
-> 改为自研的 `plugins/app-launcher/src/core/plist.ts`（binary + XML plist 只读解析，约 200 行）。
-> 该文件为原创实现，不含第三方代码；`scripts/build-plugin.mjs` 会校验产物自包含性（只允许 `node:*`）。
+> **`simple-plist` 一直没被采用**：v1 时它运行时 `require('bplist-creator' / 'bplist-parser')`，打不进自包含产物（违反 N1），
+> 当时改为自研的 TS 解析器；v2 起由 `plugins/app-launcher/rust` 用 `plist` crate 读（binary + XML 只读）。
 
 ---
 

@@ -20,15 +20,15 @@
 |---|---|---|
 | 工具链 | `scripts/build-plugin.mjs`（esbuild，无框架） | 各自的 Vite + Vue 3 + Tailwind v4 工程 |
 | 清单 | 手写 `package.json` 精简字段 | 构建期由 `scripts/lib/manifest-plugin.mjs` 裁剪写入 `dist/package.json` |
-| 宿主调用 | 直连 `@launcher/api` / `@launcher/api-node` | 同左 |
+| 宿主调用 | view 直连 `@launcher/api`；逻辑层用 Rust SDK `launcher-plugin-sdk` | 同左（逻辑层同样走 Rust） |
 | 共享代码 | 无（各自独立） | `@launcher/ui`（工作区包，`packages/ui/`）：UI 积木 + 前端工具（构建期打进各自产物） |
 | 构建驱动 | 根 `scripts/build-all.mjs` 按 `package.json` 的 `build:view` / `build:scripts` 驱动 | 同左 |
 
 > 4 个 Vue 插件 2026-09-16 搬进本目录：与内置插件同出厂流程，
-> 但保留自己的 Vite + Vue 工具链，并直连底座 SDK（`@launcher/api` / `@launcher/api-node`）。
+> 但保留自己的 Vite + Vue 工具链，view 侧直连 `@launcher/api`，逻辑层走 Rust SDK `launcher-plugin-sdk`。
 > 插件 id 简化为 `totp` / `text-diff` / `json-tools`；hosts 后来改名为 `host-manager`。
 > 旧数据目录与历史 / 固定项由内核首次加载时接手，**改名链**（`sofast-hosts` → `hosts` → `host-manager`）
-> 见 `apps/kernel/src/legacy.ts` 的 `RENAME_CHAINS`。
+> 见 `apps/kernel/src/legacy.rs` 的改名链（`LEGACY_PLUGIN_IDS` / `LEGACY_ID_TO_CURRENT`）。
 
 ## 目录
 
@@ -71,7 +71,7 @@ pnpm --filter totp run dev        # 浏览器里调试 UI（宿主 API 会以「
 
 ## 运行时形态与数据落点
 
-- 产物 `dist/` 就是插件目录：`index.html` + `assets/` + `package.json`（+ script 命令的 `<name>.mjs`）。
+- 产物 `dist/` 就是插件目录：`index.html` + `assets/` + `package.json`（+ `no-view`/`script` 命令各自的可执行产物 `dist/<name>`，Windows 为 `<name>.exe`）。
   打包进 `.app` 时由 `scripts/lib/resources.mjs` 拷进 `Resources/builtin-plugins/`（每个插件一份）。
 - **可变数据只写 `ctx().dataPath`**（N2）：即 `<dataRoot>/plugins/<id>/`。
   `pluginPath` 是只读安装目录，写它会被 `spec-check` 拦下。
@@ -83,8 +83,9 @@ pnpm --filter totp run dev        # 浏览器里调试 UI（宿主 API 会以「
 
 - `view` —— 渲染在 **iframe** 里的静态页，入口固定为插件根的 `index.html`。一个插件可以有多个 view 命令，
   它们**共用同一个 index.html**，靠 URL 上的 `?sid=&cmd=&theme=` 区分会话与命令。
-- `no-view` / `script` —— 跑在 **Node Worker** 里的 `.mjs`，入口是 `dist/<name>.mjs`，
-  **`commands[].name` 必须与产物文件名逐字相同**（N1）。区别只在 `script` 不出现在命令面板、只能被 `exec.run` 调用。
+- `no-view` / `script` —— **独立子进程**（apiVersion 2），产物是 `dist/<name>` 可执行文件（由 `cargo build --release` 产出后拷入），
+  **`commands[].name` 必须与产物文件名逐字相同**（N1）。区别只在 `script` 不出现在命令面板、只能被 `exec.run` 调用；
+  v1 的 `.mjs`（Node worker）**不再支持**（运行时直接报「需升级为可执行产物」）。
 - 关键推论：**iframe 受浏览器沙箱限制，读不了本地文件路径**。凡是「按路径读写磁盘」的需求一律落到 `script`
   命令上（`totp` 的 `read-image` 就是为此存在），并配好 UI 侧的手工兜底路径。
 
@@ -92,8 +93,8 @@ pnpm --filter totp run dev        # 浏览器里调试 UI（宿主 API 会以「
 
 1. `vue-tsc --noEmit` 类型检查；
 2. `vite build`（UI，`emptyOutDir: true`）；
-3. 有 script 命令的插件再跑 worker 构建（**`emptyOutDir: false`**，否则会把第 2 步的产物连 `index.html` 一起删掉；
-   `external: ['worker_threads', /^node:.*/]`，`entryFileNames: '[name].mjs'`）。
+3. 有逻辑层命令的插件编译 Rust（`cargo build --release -p <crate>`），再由 `scripts/build-plugin.mjs <id> --copy-scripts`
+   把 `target/release/<bin>` 拷成 `dist/<name>`（0755）。带 view 的插件用 `--copy-scripts --keep-dist`（不删上一步的 vite 产物）。
 
 `scripts/lib/manifest-plugin.mjs` 挂在 `writeBundle`，把 `package.json` 裁剪成宿主需要的字段写进
 `dist/package.json` —— 于是 **`dist/` 本身就是一个可直接安装的插件目录**。
@@ -102,7 +103,18 @@ pnpm --filter totp run dev        # 浏览器里调试 UI（宿主 API 会以「
 
 ```ts
 import { exec, host, hostUi, screenshot, storage } from '@launcher/api'        // view 侧
-import { ctx, done, fail, log, onError, progress } from '@launcher/api-node'   // script 侧
+```
+
+逻辑层（`no-view` / `script`，Rust）：
+
+```rust
+use launcher_plugin_sdk::{run, json, Context, Result};
+
+fn main() { run(dispatch) }                 // panic 由 SDK 转 fail
+fn dispatch(ctx: &Context) -> Result<()> {
+    let args = ctx.args::<MyArgs>()?;        // ctx.args / settings / data_path / log / progress / on_query
+    ctx.done(json!({ "ok": true }))
+}
 ```
 
 几条要点：
@@ -123,16 +135,14 @@ CSP 或老 WebView 下 Worker 可能创建失败，降级分支不是可选项�
 
 - **可变数据只写 `ctx().dataPath`**（N2）；`pluginPath` 只许读。
 - 清单**必须**带 `apiVersion: "1"` 与 `capabilities`（只声明真正用到的）。
-- `commands[].name` 对 `no-view`/`script` 必须等于 `dist/<name>.mjs`。
-- 有**多个** script 入口时**逐入口各构建一次**（`host-manager/scripts/build-no-view.mjs`）：Rollup 多入口会把
-  共用模块拆成 `dist/assets/*.mjs`，入口里只剩一条相对 import，宿主只认 `dist/<name>.mjs`。
-  构建后 `grep -h '^import' dist/*.mjs` 应只见 `node:*` 与 `worker_threads`。
+- `commands[].name` 对 `no-view`/`script` 必须等于产物文件名 `dist/<name>`。
+- 逻辑层 crate 的 `[[bin]]` 名 = 命令名（单一 bin 天然自包含，不存在 v1 那种「多入口被 Rollup 拆 chunk」的问题）。
 - `vite.config.ts` 必须 `base: './'`，**不要开 `manualChunks`**。
 - `@launcher/ui` 是工作区包，走标准解析 —— **不需要**再配 Vite alias / TS paths。`vite.config.ts` 里
   `pluginAliases(root)` 只为 `vue` 去重（保证 SFC 与插件代码共用一个运行时），`devFsAllow(root)` 让 dev server 能读 `packages/ui`。
 - Tailwind v4 不会跨界扫描：每个插件的 `src/styles/app.css` 要用 `@source` 显式声明插件 `src` 与 `../../packages/ui` 两个范围。
 - 可能超 200 行的列表用虚拟滚动（`@launcher/ui/virtual`）；敏感数据（密钥、验证码）默认不落明文。
-- 危险操作（写系统文件 / 提权）**不接受调用方传入的目标路径**（参考 `host-manager/src/no-view/_hosts-file.ts`）。
+- 危险操作（写系统文件 / 提权）**不接受调用方传入的目标路径**（参考 `host-manager/src/lib.rs`）。
 
 ## 知识资产
 

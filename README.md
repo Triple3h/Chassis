@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: macOS 11+](https://img.shields.io/badge/platform-macOS%2011%2B-lightgrey.svg)
-![Node.js: ≥ 22](https://img.shields.io/badge/node-%E2%89%A5%2022-339933.svg)
+![Rust: stable](https://img.shields.io/badge/rust-stable-dea584.svg)
 
 一个 **ZTools 形态的 macOS 启动台**：全局热键唤出、输入即搜，结果以图标网格呈现，支持「最近使用」与「已固定」。
 
@@ -14,7 +14,7 @@
 - **搜索** —— 拼音 / 首字母 / 模糊匹配，多插件结果合并后按「匹配 + 最近使用 + 频率」打分；已固定与最近使用可参与搜索。
 - **图标网格** —— 分区（已固定 / 最近使用 / 最佳匹配）可折叠，列数按窗口宽度计算；键盘全网格导航、动作菜单、二级面板、固定项拖拽重排。
 - **开箱可用** —— 应用启动、Spotlight 文件搜索、网址直达、TOTP、Hosts 块管家、文本比对、JSON 工具箱、设置与插件管理。
-- **可扩展** —— 插件 = 一个目录（`package.json` 清单 + 可选 iframe 页面 + 可选 Node 脚本）；从文件夹或 zip 安装，用到的能力必须在清单里声明。
+- **可扩展** —— 插件 = 一个目录（`package.json` 清单 + 可选 iframe 页面 + 可选逻辑层可执行产物）；从文件夹或 zip 安装，用到的能力必须在清单里声明。
 - **可审计** —— 插件 → 宿主的每次调用走统一入口并落本地审计日志；未声明的 capability 在装配期就不挂载。
 
 ## 设计原则
@@ -34,9 +34,9 @@
 | | 版本 | 说明 |
 |---|---|---|
 | macOS | 11+ | 目前只支持 macOS |
-| Node.js | ≥ 22 | 内核以 sidecar 运行；打包出的 `.app` **不内嵌 Node**，依赖本机 Node |
+| Rust | stable | 内核（`apps/kernel`）+ 壳 + 逻辑层插件都要编译 |
+| Node.js | ≥ 22 | **仅开发期**（pnpm / Vite 工具链、测试运行器）；`.app` 运行时零 Node |
 | pnpm | 10 | 工作区管理器（`pnpm@10.33.0`） |
-| Rust | stable | 仅编译壳（`pnpm shell:dev` / `pnpm app:local`）时需要 |
 
 ## 安装
 
@@ -110,7 +110,7 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run / tauri dev）
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/plugin-spec.md`](docs/plugin-spec.md) | **插件接入规范 v1** —— 清单、命令形态、宿主 API、能力、检查清单（唯一必读） |
+| [`docs/plugin-spec.md`](docs/plugin-spec.md) | **插件接入规范 v2** —— 清单、命令形态、宿主 API、能力、检查清单（唯一必读） |
 | [`docs/plugin-dev-guide.md`](docs/plugin-dev-guide.md) | Vue 插件开发手册：工程搭建、构建管线、脚本协议、踩坑复盘 |
 | [`plugins/README.md`](plugins/README.md) | 出厂插件：两套工具链、目录约定、构建 / 自检 / 发布 |
 
@@ -118,9 +118,9 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run / tauri dev）
 
 ```
 ┌ 壳（Rust / Tauri 2）   窗口 · 热键 · 托盘 · 单实例 · 通知 · 剪贴板 · 打开   ← 只有系统原语
-├ 内核（Node 22 / TS）   插件运行时 · 服务总线 · 注册表 · 搜索 · 历史 · 审计
+├ 内核（Rust）           插件运行时 · 服务总线 · 注册表 · 搜索 · 历史 · 审计
 ├ 启动台 UI（Vue 3）     搜索框 · 图标网格 · 键盘导航 · 动作菜单
-└ 插件                   view = iframe 页面（每插件独立端口 ⇒ 独立 origin）；script = Node worker
+└ 插件                   view = iframe 页面（每插件独立端口 ⇒ 独立 origin）；no-view / script = 独立子进程
 ```
 
 - 壳 ↔ 内核：`stdio` + newline JSON-RPC 2.0（协议只走 stdout/stdin，日志一律 stderr）
@@ -135,22 +135,21 @@ apps/
   shell/            Rust / Tauri 2：窗口、热键、托盘、单实例、通知、剪贴板、open
     src/{main,lib,ipc,sidecar,logging}.rs + src/primitives/{window,hotkey,tray,notify,clipboard,opener}.rs
     ui-stub/        冷启动骨架页（内核就绪前显示，崩溃时变错误面板）
-  kernel/           TypeScript 内核：插件运行时 + 服务总线 + 注册表 + 搜索 + 历史 + 审计
-    src/{main,kernel,api,plugin,context,registry,pipeline,search,history,audit,config,session,jsonrpc,legacy,events,pinyin,types}.ts
-    src/services/{storage,bridge,hostUi,shell,exec,quicklink,settings,audited,kernel,types}.ts
-    src/http/{server,pluginServers}.ts
   launcher-ui/      Vue 3 + Vite + Tailwind v4：搜索框、图标网格（分区折叠 / 虚拟滚动）、
                     键盘导航、动作菜单、二级面板
+  kernel/           Rust 内核（bin: launcher-kernel）：插件运行时 + 服务总线 + 注册表 + 搜索 +
+                    历史 + 审计 + HTTP/SSE + 壳协议（src/{kernel,api,link,search,history,audit,config,
+                    session,exec/*,plugin/*,services/*,http/*}.rs）
 packages/
   plugin-manifest/  清单类型 + 校验 + 契约类型（内核 / UI / SDK 共用）
   plugin-api/       @launcher/api —— 插件页 SDK
-  plugin-api-node/  @launcher/api-node —— 脚本 SDK（ctx / log / progress / done / fail）
+  plugin-sdk-rs/    launcher-plugin-sdk —— 逻辑层 Rust SDK（ctx / done / fail / log / progress / on_query）
   ui/               @launcher/ui —— 插件 UI 套件（设计令牌 + AppShell / UiIcon / UiDialog
                     + virtual / clipboard / keys / theme / toast），构建期打进插件产物
-plugins/            8 个出厂插件（见上表；工具链分两套，产物形态一致）
+plugins/            8 个出厂插件（见上表；view 是 Vite + Vue，逻辑层是 Rust 可执行产物）
 tests/
-  fixtures/echo-plugin/  契约测试插件（覆盖宿主 API 全表）
-  unit/ contract/ smoke/ 单元 / 契约 / 验收
+  fixtures/echo-plugin/  契约测试插件（Rust 版本，逻辑层 = SDK 的 echo 示例二进制）
+  unit/ contract/ smoke/ 单元 / 契约 / 验收（harness 直接拉起真内核二进制）
 scripts/            构建 / 测试 / 打包 / 自检 / 开发脚本（lib/ 为构建期工具）
 docs/               需求、规范、架构、手册、ADR、第三方许可
 ```

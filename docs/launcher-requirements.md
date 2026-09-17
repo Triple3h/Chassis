@@ -172,29 +172,32 @@
 
 ### 4.1 进程与通信
 
+> **2026-09-17 更新（M5）**：内核与逻辑层插件的**实现语言改变、对外协议不变** —— 三条链路（壳 ↔ 内核 stdio JSON-RPC、UI ↔ 内核 HTTP/SSE、插件页 ↔ 宿主 postMessage）**字段级不变**；逻辑层插件（`no-view` / `script`）载体从 Node `worker_threads`（`.mjs`）改为**独立子进程 + NDJSON over stdio**（可执行产物）。决策与理由见 `docs/decisions/ADR-0005-kernel-language.md`。
+
 ```
 ┌──────────────────────── 壳（Rust / Tauri 2） ────────────────────────┐
 │  窗口 · 全局热键 · 托盘 · 单实例 · 通知 · 剪贴板 · open(URL/文件/应用)  │
 └───────▲──────────────────────────────────────────────┬───────────────┘
         │ Tauri command / event                         │ spawn + stdio
         │                                               ▼
-┌───────────────── 内核（Node sidecar / TypeScript） ───────────────────┐
+┌────────────── 内核（Rust sidecar，bin: launcher-kernel） ─────────────┐
 │  插件运行时 · 服务总线(seam) · 命令/搜索注册表 · 执行管线 · 历史/固定   │
 │  审计 · 默认存储 provider · 每插件一个 HTTP listener（独立 origin）    │
 └───▲───────────────────────────────┬───────────────────────────────────┘
-    │ postMessage（每会话 token）     │ worker_threads（done/log/progress）
+    │ postMessage（每会话 token）     │ spawn + NDJSON（done/log/progress）
     │                                 ▼
-┌───┴────────────┐          ┌──────────────────┐
-│ 插件 view 页    │          │ 插件 script 命令  │
-│ （iframe，独立  │          │ （dist/<name>.mjs）│
-│   origin）      │          └──────────────────┘
+┌───┴────────────┐          ┌────────────────────────┐
+│ 插件 view 页    │          │ 插件逻辑层命令           │
+│ （iframe，独立  │          │ （可执行产物 dist/<name>）│
+│   origin）      │          └────────────────────────┘
 └────────────────┘
 ```
 
 - **壳 ↔ 内核**：内核作为 Tauri sidecar 由壳拉起，走 **stdio + newline-delimited JSON-RPC 2.0**。壳只实现 §6.1 的原语方法，不实现业务。
 - **内核 ↔ 启动台 UI**：启动台 UI 由壳的 WebView 加载（Tauri 的 asset 协议），通过 Tauri 的 `invoke`/`event` 与壳通信，再由壳转发给内核；**或者**（推荐实现更简单）内核也托管启动台 UI 的静态资源（`http://127.0.0.1:<uiPort>`），WebView 直接加载该 URL。二选一，ADR 记录。
 - **内核 ↔ 插件页**：`http://127.0.0.1:<pluginPort>/index.html?sid=&cmd=&theme=&token=`，每插件一个 listener（端口不同 ⇒ origin 不同 ⇒ localStorage/IndexedDB 天然隔离）。
-- **内核 ↔ 插件脚本**：`worker_threads` 拉起 `dist/<name>.mjs`，`workerData = { command, args, pluginPath }`，子进程侧发 `{type:'log'|'progress'|'result'|'done'}`。
+- **内核 ↔ 插件逻辑层**（M5 起）：宿主 `spawn` 可执行产物（`dist/<name>`，Windows 加 `.exe`），上下文经 `--launcher-context`（base64url JSON）注入；
+  插件侧按行写 NDJSON：`{type:'log'|'progress'|'result'|'done'|'rpc'}`，宿主侧下发 `{type:'query'|'rpc-result'|'shutdown'}`。完整协议见 `docs/plugin-spec.md` §4.4。
 
 ### 4.2 谁负责什么（边界表）
 
@@ -230,31 +233,23 @@ launcher/
 │   │       │   ├── clipboard.rs      # 读/写文本（图片 v2）
 │   │       │   └── opener.rs         # open URL / 文件 / 应用
 │   │       └── sidecar.rs            # 内核进程管理（重启、日志转发、退出清理）
-│   ├── kernel/                       # TypeScript / Node 22+ (ESM)
-│   │   ├── package.json
+│   ├── kernel/                       # Rust（M5 起，bin: launcher-kernel；M0–M4 是 TypeScript / Node）
+│   │   ├── Cargo.toml
 │   │   ├── src/
-│   │   │   ├── main.ts               # 启动装配：配置 → 壳连接 → HTTP → 载插件
-│   │   │   ├── config.ts             # 配置读写（含默认值、迁移）
-│   │   │   ├── context.ts            # Context / 服务注册表 / inject / effect
-│   │   │   ├── registry.ts           # 命令·搜索源·能力 注册表（全部返回 disposer）
-│   │   │   ├── pipeline.ts           # pre-execute / execute / post-execute
-│   │   │   ├── plugin.ts             # 清单解析、加载、启停、热重载、崩溃处理
-│   │   │   ├── audit.ts              # 统一 RPC 入口 + 审计日志
-│   │   │   ├── history.ts            # 最近使用 + 已固定（持久化 + 排序）
-│   │   │   ├── search.ts             # 搜索调度（debounce、合并、排序、去重）
-│   │   │   ├── services/             # seam 的默认 provider
-│   │   │   │   ├── storage.ts
-│   │   │   │   ├── bridge.ts         # postMessage 协议 + token 校验
-│   │   │   │   ├── hostUi.ts
-│   │   │   │   ├── shell.ts
-│   │   │   │   ├── clipboard.ts
-│   │   │   │   ├── exec.ts           # script 命令运行时
-│   │   │   │   ├── notify.ts
-│   │   │   │   ├── screenshot.ts     # 可选（capability）
-│   │   │   │   └── quicklink.ts
-│   │   │   ├── http/server.ts        # 每插件 listener 池 + 静态文件 + CSP
-│   │   │   └── jsonrpc.ts            # 壳通信用
-│   │   └── test/
+│   │   │   ├── main.rs               # 启动装配：配置 → 壳连接 → HTTP → 载插件
+│   │   │   ├── kernel.rs             # 编排：start/stop、patchConfig、托盘、退出收口
+│   │   │   ├── config.rs             # 配置读写（含默认值、迁移）
+│   │   │   ├── registry.rs           # 命令·搜索源·能力 注册表（全部返回 disposer）
+│   │   │   ├── pipeline.rs           # pre-execute / execute / post-execute
+│   │   │   ├── plugin/               # 清单解析、加载、启停、热重载、zip 安装
+│   │   │   ├── audit.rs              # 统一 RPC 入口 + 审计日志
+│   │   │   ├── history.rs            # 最近使用 + 已固定（持久化 + 排序）
+│   │   │   ├── search.rs             # 搜索调度（debounce、合并、排序、去重）
+│   │   │   ├── exec.rs               # 逻辑层子进程运行时（NDJSON）
+│   │   │   ├── services/             # 宿主服务：storage / bridge / hostUi / primitives / …
+│   │   │   ├── http/                 # UI 服务 + 每插件 listener 池（静态文件 + CSP）
+│   │   │   └── link.rs               # 壳通信用（stdio JSON-RPC）
+│   │   └── tests/
 │   ├── launcher-ui/                  # Vue 3 + Vite + Pinia + Tailwind v4
 │   │   ├── index.html
 │   │   └── src/
@@ -267,9 +262,12 @@ launcher/
 │   │       ├── lib/keys.ts           # ⌘/Ctrl 归一化、快捷键表
 │   │       └── styles/app.css        # @source 声明本包 src 与 packages/ui
 │   └── ...
+├── Cargo.toml                        # M5：Rust workspace 根（成员：packages/plugin-sdk-rs、apps/kernel、各逻辑层插件 plugins/<id>；
+│                                     #     apps/shell 显式 exclude —— Cargo 要求成员位于根之下）
 ├── packages/
 │   ├── plugin-api/                   # npm: @launcher/api（UI 侧 SDK，postMessage 客户端）
-│   ├── plugin-api-node/              # npm: @launcher/api-node（ctx/log/progress/done/fail）
+│   ├── plugin-api-node/              # npm: @launcher/api-node（v1 逻辑层 SDK；M5 后由 plugin-sdk-rs 取代）
+│   ├── plugin-sdk-rs/                # M5：Rust 插件 SDK（launcher-plugin-sdk）
 │   ├── plugin-manifest/              # 清单 TS 类型 + zod 校验（内核与 CLI 共用）
 │   ├── ui/                           # npm: @launcher/ui（设计令牌 + AppShell / UiIcon / UiDialog + 前端工具）
 │   └── plugin-cli/                   # 脚手架 + 打包（create-plugin / pack）
@@ -290,7 +288,7 @@ launcher/
     ├── plugin-spec.md                # 第三方插件开发文档（面向插件作者）
     ├── architecture.md               # 内核实现细节
     ├── plugin-dev-guide.md           # 插件开发手册（Vue 工程实操）
-    └── decisions/ADR-0001~0003.md
+    └── decisions/ADR-0001~0005.md
 ```
 
 > 这棵树是 §5 的**规划口径**；实际落地的目录（含 `packages/ui` 与构建脚本分布）见 `README.md` 的「目录结构」。
@@ -345,15 +343,18 @@ launcher/
 
 ### 6.3 打包
 
-- Tauri 2；内核与 Node 运行时作为 sidecar 一起打进 app bundle（`Contents/Resources/kernel` + Node 可执行文件，或打包成单文件可执行，见 ADR）
+- Tauri 2；内核作为 sidecar 打进 app bundle（`Contents/Resources/kernel/`）。**M5 起为 Rust 二进制 `launcher-kernel`（无 Node 运行时，见 ADR-0005）**；M0–M4 过渡期是 Node sidecar + 系统 Node
 - macOS：签名 + 公证（**需第 1 周启动 Apple Developer 流程**）；更新走 `tauri-plugin-updater` + minisign
-- 目标：App 体积 ≤ 120MB（含 Node 运行时）；冷启动到可唤出 ≤ 800ms；常驻内存 ≤ 120MB
+- 目标（2026-09-17 更新为 M5 口径）：App 体积 ≤ 35MB（Rust 内核 + 5 个插件二进制 + 壳，不含 Node）；冷启动到可唤出 ≤ 800ms；常驻内存（壳 + 内核 + 常驻插件子进程，状态条口径）≤ 150MB
 
 ---
 
-## 7. 内核规格（TypeScript）
+## 7. 内核规格（语言无关）
 
-### 7.1 `context.ts` — 服务总线
+> **实现语言（2026-09-17 更新，M5）**：本节是**行为规格**，与实现语言无关。v1（M0–M4）实现为 TypeScript（`apps/kernel/src/`）；M5 起实现为 Rust（`apps/kernel/src/`，bin `launcher-kernel`）。下文代码片段用 TS 书写以便阅读 —— **字段名与语义是契约**，两份实现逐条一致。
+> v1 模块 → M5 模块（完整映射见 `docs/m5-rust-and-windows.md` §A1.1）：`registry.ts` / `pipeline.ts` / `history.ts` / `audit.ts` / `search.ts` → 同名 `.rs`；`plugin.ts` → `plugin/{manager,admin,settings}.rs`；`context.ts` 的装配职责并入 `kernel.rs` 与 `plugin/manager.rs`。
+
+### 7.1 服务总线
 
 ```ts
 export interface PluginContext {
@@ -381,7 +382,7 @@ export interface PluginContext {
 
 **装配期裁剪**：内核为每个插件构造 Context 时，**只挂载它声明且被授予的服务**。未授权 → 属性为 `undefined` 且属性名不出现在 `Object.keys`（插件侧探测 = "方法不存在"），同时写一条审计。
 
-### 7.2 `registry.ts` — 注册表
+### 7.2 注册表
 
 ```ts
 interface CommandRegistry {
@@ -402,13 +403,13 @@ interface SearchResultService {
 - 停用插件 → 其命令与搜索结果全部撤回（disposer）+ 广播 `registry/changed`
 - 冲突：两个插件注册同一 title 允许；同一 `pluginId:name` 不允许
 
-### 7.3 `pipeline.ts` — 执行管线
+### 7.3 执行管线
 
 ```
 invoke(id, args)
   → resolve：命令是否存在、插件是否启用、capability 是否足够
   → pre-execute   （中间件：权限确认 / 提权提示 / 审计 / 速率限制）
-  → execute       （view：打开插件页会话；no-view|script：worker_threads 执行）
+  → execute       （view：打开插件页会话；no-view|script：spawn 可执行产物，NDJSON 收结果）
   → post-execute  （中间件：写历史 / 审计 / 失败重试 / 结果改写）
   → ActionResult
 ```
@@ -425,20 +426,20 @@ interface ActionResult {
 ```
 中间件本身也是插件注册的（`ctx.effect(() => ctx.pipeline.use('pre-execute', fn), 'pipeline.use()')`），这就是"提权确认/审计/重试都是插件"的落点。
 
-### 7.4 `plugin.ts` — 生命周期
+### 7.4 插件生命周期
 
 状态机：`discovered → validating → loading → active → (disabled | error | crashed)`
 
 | 事件 | 行为 |
 |---|---|
-| 加载 | 读清单 → 校验 → 起 HTTP listener → 构造 Context → 装配期裁剪 → 执行 `activate(ctx)`（脚本插件）/ 注册命令（view 插件） |
+| 加载 | 读清单 → 校验 → 起 HTTP listener → 构造受限接口面 → 装配期裁剪 → 逻辑层命令校验产物（缺失 → 该命令 `error`，错误码 `ENTRY_MISSING`）/ 注册命令（view 插件） |
 | 停用 | 逆序回滚所有 disposer → 关 listener → 清理会话（`session/closed` 带 `reason: disable`） |
 | 重载（热重载） | 停用（`reason: reload`）→ 重新读盘 → 加载 → 广播 `plugin/reloaded { pluginId, commands, ok }`；**保持历史与固定项不变**。原来开着的插件页会话必然失效（旧 listener 端口已停），由 UI 按 `commands` 用同一命令重开（新会话 / 新端口）——插件在自己的页面里重载自己也不会把页面打死 |
 | 崩溃（view 页崩） | 标记 `crashed` → 命令置灰 + 可"重试"按钮，不影响其它插件 |
 | 崩溃（脚本异常） | 只让该次调用 `fail()`，不改变插件状态（除非连续 N 次 = 3） |
 | 目录变化 | 监听 `extensions/`（chokidar）→ 新增/更新/删除自动热重载 |
 
-### 7.5 `history.ts` — 最近使用与已固定
+### 7.5 最近使用与已固定
 
 ```ts
 /** 能力无关：不出现任何"应用/文件"概念 */
@@ -474,9 +475,9 @@ interface PinnedItem extends Omit<HistoryItem, 'lastUsed' | 'count'> {
   - 插件自评 `score` 存在时：`final = 0.6 * pluginScore + 0.4 * kernelScore`
 - 固定项恒在最前（按 `order`），不受搜索影响（但高亮命中）
 - 失效项（插件已卸载/命令已不存在）保留展示但置灰，设置里提供"清理失效项"
-- 插件改过 id（`apps/kernel/src/legacy.ts`）时，启动装配期把条目的 `pluginId` 与 key 前缀一次性迁到新 id（同 key 合并）——否则老条目会被置灰判定当成"插件不可用"
+- 插件改过 id（改名链模块：v1 `apps/kernel/src/legacy.ts` / M5 `apps/kernel/src/legacy.rs`）时，启动装配期把条目的 `pluginId` 与 key 前缀一次性迁到新 id（同 key 合并）——否则老条目会被置灰判定当成"插件不可用"
 
-### 7.6 `search.ts` — 搜索调度
+### 7.6 搜索调度
 
 1. 输入（debounce 80ms）→ 生成 `queryToken`（自增）
 2. 广播 `search/query` 给所有 `searchable` 命令所属插件 + 内置的拼音索引
@@ -485,7 +486,7 @@ interface PinnedItem extends Omit<HistoryItem, 'lastUsed' | 'count'> {
 5. **防抖稳定**：新结果到达时若已显示的项集合不变，只更新分数不改顺序（避免列表抖动）
 6. 空输入：不发广播，直接返回 `pinned + recent`
 
-### 7.7 `audit.ts` — 审计
+### 7.7 审计
 
 ```ts
 interface AuditRecord {
@@ -626,18 +627,23 @@ window.parent.postMessage({ __launcher: 1, token, id, method, params }, '*')
 
 错误统一为 `{ code, message }`：`CAPABILITY_DENIED` / `NOT_FOUND` / `TIMEOUT` / `BAD_ARGS` / `INTERNAL`。
 
-### 8.7 Node 侧 API（script / no-view 产物内）
+### 8.7 插件运行时 API（逻辑层：`no-view` / `script`）
 
-```ts
-import { onError, ctx, log, progress, done, fail, storage } from '@launcher/api-node'
-onError()                                   // 先注册，兜住未处理异常
-const { command, args, pluginPath, dataPath } = ctx()
-log('开始', { foo: 1 }, 'info')              // info | debug | warn | error
-progress(0.4, { step: 'halfway' })
-done({ ok: true })                          // 正常结束，返回值交给 ctx.exec.run
-fail('boom')                                // 异常结束
+> **2026-09-17 更新（M5）**：逻辑层载体从 Node `worker_threads`（v1，`@launcher/api-node` + `.mjs`）改为**独立子进程 + NDJSON over stdio**（v2，Rust SDK `launcher-plugin-sdk`）。API 形状与消息语义逐条对齐 v1；完整协议（上下文注入 / 双向消息表 / 生命周期与超时降级 / v1→v2 迁移）见 `docs/plugin-spec.md` §4.4。
+
+```rust
+// Rust SDK（v2）：与 v1 的 ctx / log / progress / done / fail / onError / onQuery / storage 一一对应
+fn main() {
+    launcher_plugin_sdk::run(|ctx| {
+        let args = ctx.args::<MyArgs>()?;
+        ctx.log("开始", json!({ "foo": 1 }), Level::Info);
+        ctx.progress(0.4, json!({ "step": "halfway" }));
+        ctx.done(json!({ "ok": true }))?;      // 正常结束，返回值交给 ctx.exec.run
+        Ok(())
+    });
+}
 ```
-消息协议：`{type:'log',level,message,data}` / `{type:'progress',p,data}` / `{type:'result',data}` + `{type:'done'}`。
+消息协议（NDJSON）：插件 → 宿主 `{type:'log'|'progress'|'result'|'done'|'rpc'}`；宿主 → 插件 `{type:'query'|'rpc-result'|'shutdown'}`。
 
 ### 8.8 ResultItem 与 ActionDecl
 
@@ -771,6 +777,22 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 **交付**：打包、签名、公证、`tauri-plugin-updater` + minisign、CI（macOS arm64 + x64）、`docs/plugin-spec.md`。
 **验收**：另一台机器下载 `.dmg` 安装 → 首次启动不报安全警告 → 装插件 → 自动更新到下一版。
 
+### M5 — Rust 内核（2–3 周，2026-09-17 立项）
+**交付**：`ADR-0005`（内核语言决策）、`packages/plugin-sdk-rs`（Rust 插件 SDK）、`apps/kernel`（bin `launcher-kernel`）、5 个出厂插件的逻辑层 Rust 化、构建与打包链路改造（免 Node）。
+**验收**：
+- `echo` fixture 在 v1 / v2 宿主上输出逐字段一致（协议一致性测试，作为全程回归门）
+- UI 与插件视图**零改动**（28 个 HTTP 端点 + 12 个 SSE 事件清单不变），搜索 / 启动 / 插件页全部可用
+- 从 PATH 移除 `node` 后全流程可用；`builtin-plugins/*/dist/` 内既无 `.mjs` 也无 `node_modules`
+- 现网数据副本对拍：历史 / 固定 / 设置 / 别名 / 禁用状态逐项一致（无 schema 变化）
+- `pnpm app:local` 出包并换包日常使用；常驻内存（壳 + 内核 + 常驻插件子进程）≤ 150MB
+
+### M6 — Windows 平台（3–5 周，M5 之后）
+**交付**：壳平台分支（热键默认值与回退链 / 彩色托盘图 / UIA 选中文本 / `app.usage` / 数据目录统一）、`app-launcher` 与 `file-search` 的 Windows 后端、`scripts/pack-win.mjs` + NSIS 安装包 + 便携版、README 安装说明、GitHub Actions 双平台构建与 Releases 分发。
+**验收**（Windows 10/11 实机）：
+- 双击安装 / 解压即用；首次运行无 Node 依赖报错；热键唤出、搜索（应用 / 文件 / 网页）、启动应用、选中文本带入
+- hosts 插件 UAC 提权读写、区外字节不动；托盘 / 状态条 / 设置生效；退出无残留进程
+- 交付给使用 Windows 的同事日常使用
+
 ---
 
 ## 14. 待拍板项（已给默认值，未反对即按默认执行）
@@ -780,8 +802,8 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 | 1 | 代码放哪 | **单仓库**（本仓库）：底座 + 出厂插件 + 插件 SDK（`packages/*`）一起维护；需求源就是 `docs/launcher-requirements.md` |
 | 2 | 是否兼容第三方旧协议 | **否**（2026-09-16 起）：底座只认原生协议 `@launcher/api` |
 | 3 | 存储后端 | **JSON 文件 + 原子写**；历史 > 2000 条再评估 SQLite |
-| 4 | 平台 | **先 macOS（arm64）**，Windows 在 M4 之后单独立项 |
-| 5 | Node sidecar | **接受体积代价**；构建期把 Node 运行时裁到最小 |
+| 4 | 平台 | **macOS（arm64）+ Windows 10/11**（2026-09-17 更新）。Windows 由「M4 之后单独立项」提升为 **M6**（动机：分享给使用 Windows 的同事）；两端均在各自平台上原生构建 |
+| 5 | Node sidecar | **2026-09-17 更新：不内嵌 Node，且 M5 起不再需要 Node**（内核与逻辑层插件 Rust 化）。开发期依赖系统 Node ≥ 22 只是过渡态；交付物（macOS 换包 / Windows 安装包）不含 Node |
 | 6 | UI 框架 | **Vue 3 + Vite + Pinia + Tailwind v4**（与现有插件资产一致，可直接复用组件与设计令牌） |
 | 7 | 默认热键 | `⌥Space` |
 | 8 | 插件数据目录 | `<dataRoot>/plugins/<pluginId>/`，`dataRoot = ~/Library/Application Support/<AppName>` |

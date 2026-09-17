@@ -14,12 +14,12 @@
 2. 宿主是**启动时**扫描 `extensions/`，装完必须重启。
 3. `searchable: true` 才会进全局搜索；`script` 命令本来就**不应该**出现在面板里，那是正常的。
 
-## Script 命令不生效 / `Backend.run` 返回 null
+## 逻辑层命令（no-view / script）不生效 / `exec.run` 返回 null
 
-1. `ls dist/*.mjs` —— 产物存在吗？名字和 `commands[].name` **逐字相同**吗（大小写、连字符）？
-2. 产物是不是被 UI 构建清掉了：worker 配置必须 `emptyOutDir: false`，且构建顺序 UI → worker。
-3. 宿主版本是否 ≥ v0.9.0（script 是新 Worker API 的一部分）。
-4. 用 `references/scaffold-templates.md` 末尾的 `worker_threads` 脚本直接拉起产物，能跑通说明产物没问题，问题在宿主侧调用。
+1. `ls -l dist/<name>` —— 产物存在吗？**可执行吗**？名字和 `commands[].name` **逐字相同**吗（大小写、连字符）？
+2. 产物是不是被 UI 构建清掉了：带 view 的插件要用 `node scripts/build-plugin.mjs <id> --copy-scripts --keep-dist`（先 vite 后补逻辑层产物）。
+3. 清单 `apiVersion` 是不是 `"2"` —— v1 的 `.mjs` 产物**不再支持**（内核会明确报「需升级为可执行产物」）。
+4. 用 `references/scaffold-templates.md` 末尾的手工拉起命令跑一次产物，能跑通说明产物没问题，问题在宿主侧调用。
 
 ## 页面能打开但 JS/CSS 404
 
@@ -92,6 +92,6 @@ npm 11 默认拦截依赖的 postinstall（如 `esbuild`）。**通常不影响�
 ```bash
 cd plugins/<name>
 npm run typecheck && npm run build && npm test
-find dist -type f | sort          # index.html / assets/* / package.json(+ *.mjs)
+find dist -type f | sort          # index.html / assets/* / package.json（+ no-view/script 的可执行产物 <name>）
 python3 -m http.server 5233 --directory dist   # 再实机点一遍，别只信 dev server
 ```

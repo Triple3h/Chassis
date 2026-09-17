@@ -43,9 +43,11 @@ plugins/<name>/
   ],
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit -p tsconfig.json && vite build && vite build --config vite.worker.config.ts",
+    "build": "npm run build:view && npm run build:scripts",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:scripts": "cargo build --release -p launcher-plugin-<id> && node ../../scripts/build-plugin.mjs <id> --copy-scripts --keep-dist",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "node ../../scripts/run-ts.mjs test/core.test.ts",
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts && cargo test -p launcher-plugin-<id>",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -64,7 +66,7 @@ plugins/<name>/
 }
 ```
 
-没有 script/no-view 命令时，`build` 去掉最后一段；不要 `@types/node`。
+没有 no-view/script 命令时：`build` 只留 `build:view`，也不要 `Cargo.toml` 与 `@types/node`。
 
 ## vite.config.ts（UI）
 
@@ -96,97 +98,20 @@ export default defineConfig({
 })
 ```
 
-## vite.worker.config.ts（no-view / script）
+## 逻辑层构建（no-view / script → Rust 可执行产物）
 
-> 一个配置只打**一个**入口，入口由环境变量 `PLUGIN_WORKER_ENTRY` 选，批量构建交给 `scripts/build-no-view.mjs`。
->
-> **为什么不用 Rollup 的多入口**：两个脚本共用的模块（比如 `_hosts-file.ts`）会被拆成 `dist/assets/*.mjs`，入口里只剩一条相对 import。宿主只把 `dist/<name>.mjs` 当 Worker 入口拉起，这条跨文件依赖一旦因为复制、打包遗漏而断掉，命令就整个废了。逐入口各构建一次，才能保证「一个文件就是一个命令」。
->
-> 只有**一个** script 命令时可以直接 `vite build --config vite.worker.config.ts`，不会拆 chunk。
+`package.json` 的两条脚本（根 `scripts/build-all.mjs` 按它们驱动构建）：
 
-```ts
-import { readdirSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vite'
-
-const root = path.dirname(fileURLToPath(import.meta.url))
-
-function discoverEntries(): string[] {
-  const dir = path.join(root, 'src', 'no-view')
-  let items: ReturnType<typeof readdirSync> = []
-  try {
-    items = readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return []
-  }
-  return items
-    .filter((item) => item.isFile() && item.name.endsWith('.ts') && !item.name.endsWith('.d.ts'))
-    .map((item) => item.name.replace(/\.ts$/, ''))
-    .filter((name) => !name.startsWith('_'))   // 下划线开头是纯辅助模块，只被入口内联
-}
-
-const entries = discoverEntries()
-if (!entries.length) throw new Error('src/no-view 下没有可构建的脚本入口')
-
-const wanted = process.env.PLUGIN_WORKER_ENTRY?.trim()
-const entry = wanted && entries.includes(wanted) ? wanted : entries[0]
-
-export default defineConfig({
-  root,
-  build: {
-    outDir: path.resolve(root, 'dist'),
-    emptyOutDir: false,                        // ★ 不能清掉 UI 产物
-    target: 'node20',
-    minify: false,
-    lib: {
-      entry: path.join(root, 'src', 'no-view', `${entry}.ts`),
-      formats: ['es'],
-      fileName: () => `${entry}.mjs`,          // ★ 产物名必须与 commands[].name 一致
-    },
-    rollupOptions: {
-      external: ['worker_threads', /^node:.*/], // ★ Node 内置模块保持 external
-      output: { manualChunks: undefined },
-    },
-  },
-})
+```json
+"build:view": "vue-tsc --noEmit && vite build",
+"build:scripts": "cargo build --release -p launcher-plugin-<id> && node ../../scripts/build-plugin.mjs <id> --copy-scripts --keep-dist"
 ```
 
-## scripts/build-no-view.mjs（有 2 个以上 script 入口时必需）
+- crate 根 = 插件目录（`Cargo.toml` 与 `package.json` 同层），源码在 `src/`；`[[bin]] name` = `commands[].name`；`cargo build --release` 产出仓库根 `target/release/<bin>`（新插件记得把 `plugins/<id>` 加进根 `Cargo.toml` members）。
+- `scripts/build-plugin.mjs <id> --copy-scripts` 把它拷成 `dist/<name>`（0755）；`--keep-dist` = 别删上一步 vite 的产物（**顺序：先 view 后 scripts**）。
+- 一个 bin 天然自包含：v1 时代那套「逐入口构建、防止 Rollup 拆 chunk」的配置整段作废。
 
-`package.json` 的 `build` 末段改成 `node scripts/build-no-view.mjs`。
-
-```js
-import { execFileSync } from 'node:child_process'
-import { readdirSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-/** 逐个构建 src/no-view/*.ts，保证每个 dist/<name>.mjs 自包含（不产生跨文件 import） */
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const srcDir = path.join(root, 'src', 'no-view')
-const viteBin = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js')
-
-const entries = readdirSync(srcDir)
-  .filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts') && !name.startsWith('_'))
-  .map((name) => name.replace(/\.ts$/, ''))
-
-if (!entries.length) {
-  console.error('src/no-view 下没有可构建的脚本入口')
-  process.exit(1)
-}
-
-for (const name of entries) {
-  execFileSync(process.execPath, [viteBin, 'build', '--config', 'vite.worker.config.ts'], {
-    cwd: root,
-    stdio: 'inherit',
-    env: { ...process.env, PLUGIN_WORKER_ENTRY: name },
-  })
-}
-```
-
-> 验证自包含：构建完 `grep -h '^import' dist/*.mjs`，应该只看得到 `node:*` 与 `worker_threads`。
-> 另外 Vite 的 `defineConfig` **不接受配置数组**（CLI 报 `config must export or return an object`），多配置只能像上面这样在脚本里循环。
+> v1 历史：`.mjs` 产物用 `vite.worker.config.ts` + `PLUGIN_WORKER_ENTRY` 逐入口构建；底座从 M5 起**不再支持** `.mjs`（`apiVersion` 必须是 `"2"`）。
 
 ## tsconfig.json
 
@@ -240,48 +165,61 @@ import App from './App.vue'
 createApp(App).mount('#app')
 ```
 
-## script 命令入口（`src/no-view/<name>.ts`）
+## 逻辑层命令（Rust crate：crate 根 = 插件目录）
 
-```ts
-/// <reference types="node" />
-import { ctx, done, log, onError } from '@launcher/api-node'
-import { readSomething } from './find-something'   // 纯逻辑放同目录的辅助模块，便于单测
+`Cargo.toml`（插件根）：
 
-onError()
+```toml
+[package]
+name = "launcher-plugin-<id>"
+version = "0.1.0"
+edition = "2021"
 
-void (async () => {
-  const { args, pluginPath } = ctx()
-  try {
-    const result = readSomething(String((args as { path?: string })?.path ?? ''))
-    log('<name>: 完成', { pluginPath })
-    done({ ok: true, files: [result] })
-  } catch (err) {
-    done({ ok: false, files: [], error: err instanceof Error ? err.message : String(err) })
-  }
-})()
+[dependencies]
+launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
+
+[[bin]]
+name = "<name>"                        # = commands[].name（产物就是 dist/<name>）
+path = "src/bin/<name>.rs"
 ```
 
-## 用 worker_threads 端到端验证 script 产物（脱离宿主）
+`src/lib.rs` 放纯逻辑（可单测），`src/bin/<name>.rs` 是胶水：
 
-```js
-// node tools/run-script.mjs <dist/xxx.mjs 绝对路径> '<args json>'
-import { Worker } from 'node:worker_threads'
-const [entry, argsJson] = process.argv.slice(2)
-const worker = new Worker(entry, {
-  workerData: { command: '<name>', args: JSON.parse(argsJson ?? '{}'), pluginPath: '/tmp/fake-plugin' },
-})
-const timer = setTimeout(() => { console.error('TIMEOUT'); process.exit(1) }, 15000)
-worker.on('message', (m) => {
-  if (m.type === 'log') { console.log('LOG', m.message, JSON.stringify(m.data)); return }
-  if (m.type !== 'result') return            // done(x) 会发 { type:'result', data:x }
-  clearTimeout(timer)
-  console.log('RESULT', JSON.stringify(m.data).slice(0, 500))
-  worker.terminate()
-})
-worker.on('error', (e) => { clearTimeout(timer); console.error('WORKER-ERROR', e.message); process.exit(1) })
+```rust
+use launcher_plugin_sdk::{json, run, Context, Level, Result};
+
+fn main() {
+    run(dispatch)                       // Err / panic 由 SDK 自动转 fail，不用自己兜
+}
+
+fn dispatch(ctx: &Context) -> Result<()> {
+    let path = ctx.raw_args().get("path").and_then(|value| value.as_str()).unwrap_or_default();
+    let files = launcher_plugin_<id>::read_something(path)?;
+    ctx.log("<name>: 完成", Some(&json!({ "pluginPath": ctx.plugin_path().to_string_lossy() })), Level::Info)?;
+    ctx.done(json!({ "ok": true, "files": files }))
+}
 ```
 
-> 注意 `new Worker()` 的第一个参数必须是**绝对路径**；传 `file://` 字符串会抛 `ERR_WORKER_PATH`。
+要点：
+
+- 一次性执行（`run`）：`ctx.done` 之后必须返回/退出；**不要**自己 daemon 化。
+- 常驻搜索源（`contributes: true`）：用 `ctx.on_query(|query, token| Ok(vec![...]))`，见 `packages/plugin-sdk-rs/examples/echo.rs` 的 `feed`。
+- 设置项：`ctx.settings_str("key")` / `ctx.settings_bool("key")`（由宿主启动时注入快照）；私有数据写 `ctx.data_path()`。
+- stdout **只准**协议行：日志走 `ctx.log`，别裸 `println!`。
+
+## 手工拉起逻辑层产物（脱离宿主）
+
+宿主做的事就是「spawn `dist/<name>` + 注入 base64 上下文」，手工复现：
+
+```bash
+CTX=$(printf '%s' '{"command":"<name>","args":{"path":"/tmp/x"},"pluginId":"demo","pluginPath":"'"$PWD"'","dataPath":"/tmp/demo-data"}' | base64)
+LAUNCHER_PLUGIN_ID=demo LAUNCHER_DATA_PATH=/tmp/demo-data \
+  ./dist/<name> --mode run --launcher-context "$CTX"
+```
+
+> `--launcher-context` 是 **base64(JSON)**（URL-safe 与标准两种都认），缺失字段用 `LAUNCHER_PLUGIN_ID` / `LAUNCHER_DATA_PATH` 兜底；
+> 常驻搜索源加 `--mode search`（stdin 收 `{"type":"query",...}`）。
+> 输出是 NDJSON 协议行：`{"type":"log"|"progress"|"result"|"done",...}` —— 能打出 `"type":"result"` 就说明产物没问题，问题在宿主侧调用。
 
 ## UI 侧调用 script
 

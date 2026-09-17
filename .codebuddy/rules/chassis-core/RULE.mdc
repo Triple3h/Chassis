@@ -7,15 +7,16 @@ provider:
 
 # 底座开发铁律（apps/ 与 packages/）
 
-`apps/shell`（Rust 壳）/ `apps/kernel`（TS 内核）/ `apps/launcher-ui`（Vue UI）/ `packages/*` 的硬约束。
-每条都是「不遵守就一定出问题」的；原理与复盘见 `docs/architecture.md` 与 `docs/decisions/`（ADR-0001~0004）。
+`apps/shell`（Rust 壳）/ `apps/kernel`（Rust 内核，bin `launcher-kernel`；ADR-0005 —— M0–M4 是 TS 实现，M5 起同目录换成 Rust）/ `apps/launcher-ui`（Vue UI）/ `packages/*` 的硬约束。
+每条都是「不遵守就一定出问题」的；原理与复盘见 `docs/architecture.md` 与 `docs/decisions/`（ADR-0001~0005）。
 插件侧约束见规则 `chassis-plugin`；收尾验证见技能 `chassis-deliver`。
 
 ## 职责边界（三铁律）
 
 - **内核零能力**：扫描应用 / 读写文件 / 启动 / 连网全在插件；内核 diff 里出现能力词（app / file / network）= 越界。
 - 出厂插件与第三方插件走**同一机制**（可禁用可卸载）；未声明 capability 的调用装配期就不挂载。
-- **协议只走 stdout，日志一律 stderr**（壳 ↔ 内核 = stdio + newline JSON-RPC）。
+- **协议只走 stdout，日志一律 stderr**（壳 ↔ 内核 = stdio + newline JSON-RPC；逻辑层插件 = spawn + NDJSON，同款约定）。
+- **逻辑层插件（v2，M5 起）= 可执行产物**：宿主 `spawn`，`.mjs` 产线不再支持（ADR-0005）；`commands[].name` = 产物文件名（`dist/<name>`，Windows `.exe`），查找顺序 `<name>(.exe)` → `workers/<name>(.exe)`。
 - 新增槽位 / 字段 / 协议行为：先改 `docs/launcher-requirements.md`（需求唯一源）与 `docs/plugin-spec.md`（对外契约），再实现。
 
 ## 窗口显隐与动效（踩坑最多，动它前读完）
@@ -37,7 +38,7 @@ provider:
 - 缩放把手 `z-index` 必须高于拖拽条（角上缩放优先于拖动）；边把手宽度保持 6px（再宽会压住插件页 iframe 的滚动条）。
 - 「恢复默认大小」按钮有两个落点：宿主态在搜索栏右侧（只有图标）、插件页在宿主 footer 右侧（带文字）—— 插件页没有搜索栏可挂，别只在一边加。
 - 无边框窗口的系统调用：`start_resize_dragging` 只长在 `Window` 上（`WebviewWindow` 没有）⇒ `main_window(app)?.as_ref().window()`；方向类型来自 `tauri-runtime`（版本必须与 tauri 依赖的一致）。
-- 状态条（CPU / 内存）是**内核自用**数据（`services/systemStats.ts`，`node:os` 差分采样），**不进插件 API**；UI 显示**绝对量**而不是百分比（macOS `freemem` 不含可回收缓存，百分比常年八九十，写出来只会吓人）。
+- 状态条（CPU / 内存）是**内核自用**数据（`apps/kernel/src/services/system_stats.rs`，`sysinfo` 差分采样），**不进插件 API**；UI 显示**绝对量**而不是百分比（macOS `freemem` 不含可回收缓存，百分比常年八九十，写出来只会吓人）。
 
 ## 配置与事件
 
@@ -49,7 +50,7 @@ provider:
 
 - **postMessage 是结构化克隆**：Vue 的 `reactive` / `ref`（Proxy）混进 payload 抛 `DataCloneError` ⇒ 消息根本发不出去（表现为「点按钮没反应、审计无记录、SDK 只超时」）。SDK `post()` 已内置 JSON 展平兜底；插件侧写库前 `map((x) => ({ ...x }))`。
 - **插件页主题**：手动 > 宿主 `?theme=` > `data-theme` > 系统；**只有手动切换才写 localStorage**（自动判定落盘 = 把首次打开时的主题永久钉死）；系统变化只在来源是 system 时跟随。
-- **插件页 CSP**：`script-src 'self' 'wasm-unsafe-eval'`（放行随包 wasm 编译，必须随包、禁 CDN；JS `eval` 仍禁）；受 `tests/unit/security.test.ts` 守护。
+- **插件页 CSP**：`script-src 'self' 'wasm-unsafe-eval'`（放行随包 wasm 编译，必须随包、禁 CDN；JS `eval` 仍禁）；受 `apps/kernel/src/http/plugin_servers.rs` 的 `plugin_page_csp_allows_wasm_but_not_eval` 守护。
 - **插件重载会打死它自己的插件页**：`session/closed{reason}` + `plugin/reloaded` ⇒ UI 用同一命令换新会话重开；其余 reason 直接卸载 iframe。
 - **插件视图的退出入口是宿主的责任**（顶栏由插件自己画）：footer 最左「返回」+ `Esc` / `⌘W`，三条路径统一走 `leavePluginView()`（close → `nextTick()` → focus）。焦点在 iframe 里时宿主收不到按键（事件不跨文档冒泡）⇒ **SDK 把没人消费的 Esc 交还宿主**（`commands.close` → `session/closed{reason:'ui'}` → 同一条收尾，含焦点归位）；插件消费 Esc 要 `preventDefault()` / `stopPropagation()`。受 `tests/unit/plugin-api-escape.test.ts` 守护。
 - v1 view 会话打开时**没有搜索框** ⇒ `watchSearchContent` 不触发；入口型插件用 `getSearchContent()` 取初始输入；footer 的 keys 只展示、不派发。

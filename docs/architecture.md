@@ -1,7 +1,7 @@
 # 内核实现细节与差异记录
 
 > 读者：实现者、评审者 ｜ 需求源：`docs/launcher-requirements.md`（本文件不复制需求，只写"怎么实现"与"哪里不一样"）
-> 最后更新：2026-09-16
+> 最后更新：2026-09-17（M5：内核换成 Rust，见 ADR-0005）
 > 约定：**遇到需求没写的行为，先补本文件再写代码。**
 
 ---
@@ -12,46 +12,50 @@
 ┌──────────── 壳（Rust / Tauri 2，apps/shell）────────────┐
 │ main.rs → lib.rs：窗口 · 单实例 · 托盘 · 热键 · 失焦通知   │
 │ ipc.rs：stdio + newline JSON-RPC 2.0                    │
-│ sidecar.rs：拉起/监督/重启/回收 Node 内核                 │
+│ sidecar.rs：拉起/监督/重启/回收内核二进制                  │
 │ primitives/{window,hotkey,tray,notify,clipboard,opener} │
 └───────▲────────────────────────────────────┬────────────┘
-        │ JSON-RPC（内核→壳：原语；壳→内核：通知）  │ spawn node kernel.mjs
+        │ JSON-RPC（内核→壳：原语；壳→内核：通知）  │ spawn launcher-kernel
         │                                        ▼
-┌──────────── 内核（TS / Node 22+，apps/kernel）───────────┐
-│ kernel.ts 装配 → api.ts 路由 → http/server.ts(UiServer)  │
-│ registry · pipeline · plugin · search · history · audit  │
-│ services/{storage,bridge,hostUi,shell,exec,quicklink,    │
-│           settings} + http/pluginServers.ts              │
+┌──────────── 内核（Rust，apps/kernel）────────────────────┐
+│ kernel.rs 装配 → api.rs 路由 → http/server.rs(UiServer)   │
+│ registry · pipeline · plugin/* · search · history · audit │
+│ services/{storage,bridge,host_ui,shell,quicklink,         │
+│           settings,system_stats} + http/plugin_servers.rs │
 └───▲────────────────▲───────────────────────┬────────────┘
-    │ HTTP + SSE      │ postMessage（经 UI 转发）│ worker_threads
+    │ HTTP + SSE      │ postMessage（经 UI 转发）│ 子进程 + NDJSON
     │                 │                        ▼
 ┌───┴──────────┐  ┌───┴──────────────┐  ┌─────────────────┐
-│ 启动台 UI     │  │ 插件 view 页      │  │ 插件 script 命令 │
-│ (uiPort)     │  │ (每插件一端口)      │  │ dist/<name>.mjs │
+│ 启动台 UI     │  │ 插件 view 页      │  │ 插件逻辑层命令    │
+│ (uiPort)     │  │ (每插件一端口)      │  │ dist/<name>      │
 └──────────────┘  └──────────────────┘  └─────────────────┘
 ```
 
-- **壳 ↔ 内核**：`stdio + newline-delimited JSON-RPC 2.0`。第 1 条约定：**协议只走 stdout/stdin，内核所有日志走 stderr**（`apps/kernel/src/main.ts` 开头就把 `console.*` 重定向到 stderr）。
+- **壳 ↔ 内核**：`stdio + newline-delimited JSON-RPC 2.0`。第 1 条约定：**协议只走 stdout/stdin，内核所有日志走 stderr**（Rust 侧由 `logging.rs` 的宏固定打到 stderr）。
 - **内核 ↔ UI**：HTTP `/api/*` + SSE `/api/events`（见 ADR-0001）。
-- **内核 ↔ 插件页**：每插件一个 `http.createServer().listen(0, '127.0.0.1')`，端口由系统分配后读回 ⇒ origin 天然隔离。
-- **内核 ↔ 插件脚本**：`worker_threads`，`workerData = { command, args, pluginPath, pluginId, dataPath, dataRoot, mode }`。
+- **内核 ↔ 插件页**：每插件一个 axum listener，端口 0 由系统分配后读回 ⇒ origin 天然隔离。
+- **内核 ↔ 插件逻辑层**：**独立子进程 + NDJSON over stdio**（ADR-0005 / plugin-spec §4.4），上下文经启动参数注入（`command / args / pluginId / pluginPath / dataPath / dataRoot / mode`）。
 
 ## 2. 目录 → 模块映射
 
+> v1（TS，`apps/kernel`）→ v2（Rust，`apps/kernel`）的逐模块映射与迁移细节见 `docs/m5-rust-and-windows.md` §A1.1；
+> 下表是当前实现（Rust）落在哪里。
+
 | 需求（§5/§7） | 实现 | 备注 |
 |---|---|---|
-| `main.ts` | `apps/kernel/src/main.ts` | 参数解析、`console → stderr`、信号处理 |
-| `config.ts` | `apps/kernel/src/config.ts` | `Config` 类型在 `@launcher/plugin-manifest`（UI 也要用），本文件有默认值 + 迁移 + 净化 |
-| `context.ts` | 同 | 装配期裁剪 + `effect/inject/on` |
-| `registry.ts` | 同 | `CommandRegistry` + `SearchResultHub`（token 新鲜度） |
-| `pipeline.ts` | 同 | 洋葱模型，中间件可来自插件 |
-| `plugin.ts` | 同 | 扫描/加载/停用/热重载/崩溃/降级/安装/卸载 + chokidar 监听 |
-| `audit.ts` | 同 | 环形缓冲 500 + jsonl 滚动 7 天 + 敏感字段打码 |
-| `history.ts` | 同 | 历史 + 固定，debounce 500ms + 原子写 |
-| `search.ts` | 同 | 广播 / 合并 / 去重 / 稳定排序 |
-| `services/*` | 同（合并了 `hostUi`/`shell`/`clipboard`/`notify`） | `notify`/`screenshot` 在 `primitives.ts` 与 `shell.ts` 里 |
-| `http/server.ts` | `http/server.ts` + `http/pluginServers.ts` | UI 宿主服务与插件 listener 池分开 |
-| `jsonrpc.ts` | 同 | `ShellLink` |
+| `main.ts` | `lib.rs` + `cli.rs` + `main.rs` | 参数解析、日志初始化、信号处理 |
+| `config.ts` | `config.rs` | `Config` 类型在 `@launcher/plugin-manifest`（UI 也要用）与 `contract.rs`（Rust 侧），本文件有默认值 + 迁移 + 净化 |
+| `context.ts` | `plugin/*` + `exec.rs` | 装配期裁剪 + 子进程上下文注入 |
+| `registry.ts` | `registry.rs` | `CommandRegistry` + `SearchResultHub`（token 新鲜度） |
+| `pipeline.ts` | `pipeline.rs` | 洋葱模型，中间件可来自插件 |
+| `plugin.ts` | `plugin/manager.rs` + `plugin/admin.rs` | 扫描/加载/停用/热重载/崩溃/降级/安装/卸载 |
+| `audit.ts` | `audit.rs` | 环形缓冲 500 + jsonl 滚动 7 天 + 敏感字段打码 |
+| `history.ts` | `history.rs` + `legacy.rs` | 历史 + 固定（原子写）；插件改名的条目迁移 |
+| `search.ts` | `search.rs` + `pinyin.rs` | 广播 / 合并 / 去重 / 稳定排序；拼音多读音变体（R1 校准） |
+| `services/*` | `services/*.rs` | `storage` / `bridge` / `host_ui` / `quicklink` / `settings` / `system_stats` + `primitives.rs`（壳原语） |
+| `http/server.ts` | `http/server.rs` + `http/plugin_servers.rs` | UI 宿主服务（含 SSE）与插件 listener 池分开 |
+| `jsonrpc.ts` | `link.rs` | `ShellLink`（协议语义逐条对齐 v1） |
+| 会话 / 显隐 | `session.rs` / `window_visibility.rs` | 会话状态机；显隐广播 + 隐藏回执（`HIDE_AT_MS`、兜底与撤销） |
 
 > 需求 §5 的 `services/` 是功能清单，本实现按文件合并落位：`bridge` / `hostUi` / `shell` / `clipboard` / `exec` / `storage` / `quicklink` / `settings` 各一个文件；
 > `notify` 与 `screenshot` 合入 `shell.ts`（底层走 `primitives.ts` 与壳原语）；另有 `audited.ts`（审计包装）与 `kernel.ts`（内核服务）。
@@ -97,7 +101,7 @@ UI 输入 → debounce 80ms → POST /api/search
   → 返回 { token, groups:{pinned,best,recent}, pending }
 ```
 
-打分（`apps/kernel/src/pinyin.ts`）：
+打分（`apps/kernel/src/pinyin.rs`；多音字按**读音变体**展开，见 R1 校准）：
 
 - `match`：标题前缀 1.0 / 包含 0.7 / 拼音全拼 0.6 / 首字母 0.5 / 副标题与 keywords 0.4（拼音索引只在查询串以 ASCII 为主时启用，避免中文误命中）
 - `recency = exp(-Δh/72)`、`frequency = min(1, log2(count+1)/5)`
@@ -126,7 +130,7 @@ active → degraded（脚本连续失败 3 次）
 
 - **插件根识别**：若 `<dir>/dist/package.json` 存在，则 `<dir>/dist` 即插件根（源码工程形态）；否则 `<dir>` 本身（zip 安装后的形态）。`scan()` 与 `installFromDirectory()` 用同一条规则。
 - **清单校验**：`@launcher/plugin-manifest` 的纯函数 `validateManifest()`（错误码：`MANIFEST_INVALID` / `API_VERSION_UNSUPPORTED` / `CAPABILITY_UNKNOWN`），产物校验用 `checkEntries()`（`ENTRY_MISSING`）。
-- **目录变化**：chokidar 监听 `<dataRoot>/extensions/`，400ms 去抖后按插件粒度热重载；重载**不动** history/pinned/storage。
+- **目录变化**：按插件粒度重载（`<dataRoot>/extensions/` 的插件由管理面动作触发；重载**不动** history/pinned/storage）。
 - **安装**：`installFromDirectory` / `installFromZip`（拒绝绝对路径、`..`、单文件 > 50MB、解压后 > 200MB；允许一层包裹目录）。
 - **卸载**：禁用 → 删目录 → 清记录；出厂插件（`builtin: true`）拒绝卸载、允许禁用。
 
@@ -208,7 +212,7 @@ active → degraded（脚本连续失败 3 次）
 | # | 需求条目 | 实现 | 原因 |
 |---|---|---|---|
 | D1 | §4.1 UI 托管二选一 | 选方案 B（内核托管） | ADR-0001 |
-| D2 | §9.2 贡献型搜索只有 `search.onQuery`（UI 侧） | 增加「script 常驻搜索 worker」载体，Node 侧 SDK 增加 `onQuery` | ADR-0002（否则索引型插件无法工作） |
+| D2 | §9.2 贡献型搜索只有 `search.onQuery`（UI 侧） | 增加「常驻搜索源」载体（v1：worker；v2：常驻子进程），逻辑层 SDK 增加 `on_query` | ADR-0002（否则索引型插件无法工作） |
 | D3 | §3.4 设置面板是 internal 插件，但 §8.6 API 表无配置读写 | 新增 `ctx.settings`，仅 `internal-*` 注入 | ADR-0003 |
 | D4 | §5 写「`plugin-manifest` 用 zod 校验」 | 手写校验器（无运行时依赖） | 错误码要精确映射到 `MANIFEST_INVALID` / `CAPABILITY_UNKNOWN` / `API_VERSION_UNSUPPORTED`，且要产出人话消息；手写比 zod + 映射更直接，也少一个依赖 |
 | D5 | §8.1 目录树是「安装后形态」（`<name>.mjs` 在插件根） | 增加「`<dir>/dist` 即插件根」的识别规则 | 源码工程与产物必须分离；否则出厂插件要么污染源码目录、要么无法扫描 |
@@ -220,14 +224,14 @@ active → degraded（脚本连续失败 3 次）
 | D11 | §6.3 打包体积/冷启动指标 | 未做基准；自用版（`pnpm app:local`）已实机运行 | 需要真机 `tauri build` 才能量体积；自用不分发，暂不阻塞 |
 | D12 | §8.10 与第三方旧宿主的兼容层 | **不做兼容**（2026-09-16 起）：桥只认原生信封 `__launcher: 1`，清单校验不放过 `apiVersion` / `capabilities` 缺省，旧布局数据迁移一并移除 | 半兼容的代价是长期维护两套语义，还会把"未实现的能力"伪装成"能用"；底座与插件同仓库，没有历史包袱要背 |
 | D13 | §7.5 「拼音匹配」 | 用 `pinyin-pro`（ZTools 同选型） | 需求 §12 风险对策明确要求"用成熟库" |
-| D14 | 未规定 plist 读取方式 | 自研 `plugins/app-launcher/src/core/plist.ts`（binary + XML 只读） | `simple-plist` 内部是运行时 `require`，打不进自包含产物（违反 N1）；`build-plugin.mjs` 现在会校验产物只含 `node:*` 依赖 |
+| D14 | 未规定 plist 读取方式 | v2 由 `plugins/app-launcher/rust` 用 `plist` crate 读（binary + XML 只读）；v1 是自研 TS 解析器 | v1 的 `simple-plist` 内部是运行时 `require`，打不进自包含产物；v2 换 Rust 后由 crate 承担 |
 | D15 | §7.6「插件在 200ms 内回结果」 | 插件激活后**延迟 800ms 预热**贡献型搜索 worker | 否则用户第一次输入必然吃一次 worker 冷启动 + 索引加载而超时（体验上就是"第一次搜不到"） |
 | D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
 | D17 | §3.1 只规定「隐藏」的触发条件，未规定显隐过程 | 窗口显隐拆成**广播 + 落地**两步：内核先 `emit('shell/visibility')` 让 UI 播动画，**等 UI 回执「离场最后一帧画出来了」再落地**（`HIDE_FALLBACK_MS`=500ms 兜底；壳侧另有 800ms 兜底防内核失联）；显隐的**裁决权仍在壳**（`window/toggled` 方向不变） | ADR-0004。透明无边框窗口的弹出感只能在 CSS 里做，而 UI 得先知道"要隐藏了"才播得了离场；固定时长会被不可控的广播延迟砍在淡出中途（半透明的一帧留在窗口里 = 下次唤出闪一下） |
-| D18 | §6.1「壳只提供系统原语」 | `screenshot`（区域截图 → 系统剪贴板）**由内核直接 `execFile('screencapture')` 完成**，没有下沉到壳（`apps/shell/src/primitives/` 现有 clipboard / hotkey / notify / opener / tray / window，无 screenshot） | 交互式截图（`-i`）无法自动化验证，改壳＝改协议 + 重打包实机确认，收益不抵风险；先记录现状，等做「壳原语补全」时与其它系统调用一起下沉。**边界上这是内核唯一一处直接执行系统命令的地方**（`apps/kernel/src/services/shell.ts` 的 `screenshotFor`） |
+| D18 | §6.1「壳只提供系统原语」 | `screenshot`（区域截图 → 系统剪贴板）**由内核直接执行 `screencapture` 完成**，没有下沉到壳（`apps/shell/src/primitives/` 现有 clipboard / hotkey / notify / opener / tray / window，无 screenshot） | 交互式截图（`-i`）无法自动化验证，改壳＝改协议 + 重打包实机确认，收益不抵风险；先记录现状，等做「壳原语补全」时与其它系统调用一起下沉。**边界上这是内核唯一一处直接执行系统命令的地方**（`apps/kernel/src/services/primitives.rs` 的截图实现） |
 | D19 | §3.1「选中文本带入」（2026-09-17 新增） | 读取由**壳**完成（`selection.read`，macOS Accessibility API），时机是 `window.show` 内部、**真正上屏之前**；结果随 `window.show` 返回值 / `window/toggled` 通知回到内核，由内核决定"填不填"（搜索框非空就不覆盖，见 `Kernel.applySelection`） | 窗口一显示，前台 App 就是自己，`AXFocusedUIElement` 拿到的选区随之消失 —— 这件事只有壳在 show 的那一刻做得到。策略（何时用、怎么用）留在内核，壳只提供"此刻前台选中了什么"这个事实 |
 | D20 | §3.1「尺寸记忆」（2026-09-17 新增，同日由"仅本会话"改为"持久记忆"） | 记忆值存**内核 config**：`windowSizes.host` / `.plugin`（各 `{width,height}`）；UI 负责"什么时候读/写"（缩放结束后 debounce 提交、唤出/进插件页时应用），内核只做 `patchConfig` 与钳制 | 一开始写在 UI 侧且只活在本次会话（离场复位）；用户随后要求"下次打开仍是这个大小" ⇒ **必须落盘**，而 UI 的 localStorage 随内核端口变化（每次启动都变）不可用。放 config 还顺带让尺寸跟着 `config/changed` 广播走已有的同步链路 |
-| D21 | §3.1「状态显示」（2026-09-17 新增） | 状态条显示的是**启动台自身**的占用：内核报自己（`process.memoryUsage.rss` / `process.cpuUsage`），壳用新原语 `app.usage` 报另一半（`task_info(MACH_TASK_BASIC_INFO)` 的 resident_size + user/system time），内核合并并差分出"占整机百分比"；UI 每 3s 拉 `/api/system/stats`；**不进插件 API**（底座自用，与 `app.info` 同级） | 用户要判断的是"这个启动台轻不轻"，所以要的是两个进程之和，不是整机负载 —— 整机数字（`node:os`）只留作 tooltip 里的对照。跨进程的"另一半"只有壳给得了（内核自己的 `os` 看不到壳的 RSS） |
+| D21 | §3.1「状态显示」（2026-09-17 新增） | 状态条显示的是**启动台自身**的占用：内核报自己（`sysinfo` 读本进程 RSS + 累计 CPU），壳用新原语 `app.usage` 报另一半（`task_info(MACH_TASK_BASIC_INFO)` 的 resident_size + user/system time），内核合并并差分出"占整机百分比"；UI 每 3s 拉 `/api/system/stats`；**不进插件 API**（底座自用，与 `app.info` 同级） | 用户要判断的是"这个启动台轻不轻"，所以要的是两个进程之和，不是整机负载 —— 整机数字（`sysinfo`）只留作 tooltip 里的对照。跨进程的"另一半"只有壳给得了（内核自己的 `os` 看不到壳的 RSS） |
 
 ---
 
@@ -235,7 +239,7 @@ active → degraded（脚本连续失败 3 次）
 
 | 面 | 现状 | 说明 |
 |---|---|---|
-| 脚本沙箱 | `script` / `no-view` 产物跑在 `worker_threads` 里，拥有完整 Node 权限（可读写文件、起子进程） | 这是"脚本命令"这一形态的固有代价（与 uTools/ZTools 一致）。审计记录调用，但无法阻止脚本自行 `child_process`。缓解：安装时展示 `exec.spawn` 高风险能力、可拒绝（拒绝后脚本无法被 `ctx.exec.run` 拉起，但用户仍可通过命令直接触发）。**若要真正沙箱化，需要给 worker 加 `--experimental-permission` 或换进程级沙箱，属于 v2 议题。** |
+| 脚本沙箱 | `no-view` / `script` 产物是**独立子进程**，拥有当前用户的完整权限（可读写文件、起子进程） | 这是"逻辑层命令"这一形态的固有代价（与 uTools/ZTools 一致，v2 文档已明说"不引入额外沙箱承诺"）。审计记录宿主侧调用，但无法阻止脚本自行起进程。缓解：安装时展示 `exec.spawn` 高风险能力、可拒绝（拒绝后脚本无法被 `ctx.exec.run` 拉起，但用户仍可通过命令直接触发）。**要真正沙箱化需要 WASM 或平台沙箱，属于独立议题。** |
 | 插件页网络 | CSP `connect-src 'self' https:` + `default-src 'self'`，禁止访问 `127.0.0.1` | 防止插件探测本机服务 |
 | 插件页与宿主 | iframe `sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"` | 需要 `allow-same-origin` 才能用 `localStorage` / `ctx.storage` |
 | 审计旁路 | 没有：所有插件→宿主调用都过 `BridgeDispatcher`（UI 侧）或 `ScriptRuntime.handleRpc`（脚本侧） | P6。唯一例外：底座基础能力（`essential` 出厂插件，不可禁用）的调用经 `AuditLog.setExempt` 豁免，不进环形缓冲与日志文件 |

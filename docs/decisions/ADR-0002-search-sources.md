@@ -4,6 +4,10 @@
 - 日期：2026-09-14
 - 相关：`docs/plugin-spec.md` §9.2、`docs/launcher-requirements.md` §7.6
 
+> **2026-09-17（M5）**：决策本身不变（贡献型搜索由「常驻载体」承担），换的是载体实现 ——
+> v1 是 Node `worker_threads`，v2 是**常驻子进程**（ADR-0005 / plugin-spec §4.4，SDK 侧对应 `ctx.on_query`）。
+> 协议（query → result 多次往返、不 done）逐条一致。
+
 ## 背景
 
 plugin-spec §9.1 / §9.2 把搜索分成两种模式：
