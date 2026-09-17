@@ -6,7 +6,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "apiVersion": "1",
+  "apiVersion": "2",
   "icon": "server",
   "categories": [
     "tool"
@@ -40,17 +40,17 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit -p tsconfig.json && vite build && node scripts/build-no-view.mjs",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build && npm run build:scripts",
     "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
-    "build:scripts": "node scripts/build-no-view.mjs",
+    "build:scripts": "cargo build --release -p launcher-plugin-host-manager && node ../../scripts/build-plugin.mjs host-manager --copy-scripts --keep-dist",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "node ../../scripts/run-ts.mjs test/core.test.ts && node ../../scripts/run-ts.mjs test/blocks.test.ts && node ../../scripts/run-ts.mjs test/script.test.ts",
-    "preview": "vite preview"
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts && node ../../scripts/run-ts.mjs test/blocks.test.ts",
+    "preview": "vite preview",
+    "test:scripts": "cargo test -p launcher-plugin-host-manager"
   },
   "dependencies": {
     "@launcher/ui": "workspace:*",
     "@launcher/api": "workspace:*",
-    "@launcher/api-node": "workspace:*",
     "vue": "^3.5.42"
   },
   "devDependencies": {
