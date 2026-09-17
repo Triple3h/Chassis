@@ -2100,6 +2100,7 @@ name = "launcher-shell"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "core-foundation",
  "open",
  "serde",
  "serde_json",
@@ -2111,6 +2112,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tauri-runtime",
 ]
 
 [[package]]

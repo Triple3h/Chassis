@@ -27,9 +27,9 @@ pub fn run() {
     let builder = tauri::Builder::default()
         // 单实例：第二次启动只唤起已运行实例
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            let _ = primitives::window::show(app, &json!({ "focus": true }));
-            // 这条路径以前只 show 不回报：UI 若停在"已隐藏"的透明态，窗口唤出来会是空的
-            primitives::window::notify_toggled(app, true);
+            // 这条路径以前只 show 不回报：UI 若停在"已隐藏"的透明态，窗口唤出来会是空的。
+            // 走 `show_and_report` 与热键同一条路：结果 + 选中文本一起回报给内核
+            primitives::window::show_and_report(app, true);
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
@@ -170,7 +170,7 @@ pub fn run() {
                     // 与热键 / 托盘同一条规矩：**先报告、等 UI 演完离场，内核再落地**。
                     // 立刻 hide 会让 webview 冻结在「半透明面板」那一帧，下次唤出先闪一下旧画面；
                     // 同时谁真正改了显隐，谁就把结果报给内核。
-                    primitives::window::notify_toggled(window.app_handle(), false);
+                    primitives::window::notify_toggled(window.app_handle(), false, None);
                     primitives::window::arm_hide_fallback(window.app_handle());
                 }
                 _ => {}
@@ -194,10 +194,15 @@ pub fn run() {
 }
 
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
+    // `resizable(true)` + `min_inner_size`：无边框窗口要能拖动 / 缩放（requirements §6.2）。
+    // 无边框 ⇒ 系统没有可抓的标题栏与边框，拖动与四边/四角缩放都由 UI 画把手、
+    // 调 `window.startDragging` / `window.startResizeDragging` 交给系统接管；
+    // maximizable/minimizable 仍然关掉（启动台不做最大化/最小化，面板形态是靠拖的）。
     let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
         .title("Chassis")
         .inner_size(720.0, 480.0)
-        .resizable(false)
+        .min_inner_size(480.0, 240.0)
+        .resizable(true)
         .maximizable(false)
         .minimizable(false)
         .decorations(false)

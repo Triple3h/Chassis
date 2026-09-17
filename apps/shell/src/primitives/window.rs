@@ -1,4 +1,4 @@
-//! 窗口原语（requirements §6.1 / §6.2）：显隐、可见性、高度，以及「居中于鼠标所在屏」。
+//! 窗口原语（requirements §6.1 / §6.2）：显隐、可见性、高度、拖动/缩放，以及「居中于鼠标所在屏」。
 
 use crate::ipc::Link;
 use crate::logging::log;
@@ -7,10 +7,20 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow};
+// `start_resize_dragging` 只长在 `Window` 上（`WebviewWindow` 没有），方向类型住在 tauri-runtime
+use tauri_runtime::ResizeDirection;
 
+/// 内容自适应的宽度（`window.setHeight` 固定用它）与高度钳制
 pub const DEFAULT_WIDTH: f64 = 720.0;
 pub const MIN_HEIGHT: f64 = 320.0;
 pub const MAX_HEIGHT: f64 = 640.0;
+
+/// **用户记忆尺寸**的钳制（`window.setSize`）：与内容自适应那套分开 ——
+/// 自适应是"紧凑弹窗"，记忆尺寸是"用户想拉多大"，区间宽得多（requirements §6.2 最小 480×240）
+pub const USER_MIN_WIDTH: f64 = 480.0;
+pub const USER_MAX_WIDTH: f64 = 2000.0;
+pub const USER_MIN_HEIGHT: f64 = 240.0;
+pub const USER_MAX_HEIGHT: f64 = 1400.0;
 
 /// 唤出后的"防抖窗口"：这段时间内的失焦一律忽略。
 /// 原因：窗口从隐藏变可见时会先收到一次 `Focused(false)`（此时 set_focus 还没生效），
@@ -95,6 +105,8 @@ pub fn show(app: &AppHandle, params: &Value) -> Result<Value, String> {
     // 唤出要把还排在队里的那次隐藏作废（热键连按不能被上一次隐藏偷走窗口）
     cancel_pending_hide();
     center_on_cursor_screen(app, &window);
+    // 选中文本**必须在窗口上屏之前**读：窗口一显示，前台 App 就成了自己（见 selection.rs）
+    let selection = crate::primitives::selection::read_for_show(app);
     window.show().map_err(|err| err.to_string())?;
     // 诊断（临时）：唤起时窗口的真实尺寸 vs 页面自报视口
     let (w, h, scale) = match (window.inner_size(), window.scale_factor()) {
@@ -117,6 +129,36 @@ pub fn show(app: &AppHandle, params: &Value) -> Result<Value, String> {
             let _ = window.unminimize();
         }
     }
+    // 唤出时前台 App 里选中的文本（读不到就是 null）：内核决定要不要填进搜索框
+    Ok(json!({ "selection": selection }))
+}
+
+/// 无边框窗口的「按住面板拖动」：UI 在拖拽区 mousedown 时调用，之后的移动交给系统。
+/// 一次性调用（不是每帧发位置）：系统接管鼠标后直到松开都不会再回来。
+pub fn start_dragging(app: &AppHandle) -> Result<Value, String> {
+    let window = main_window(app)?;
+    window.start_dragging().map_err(|err| err.to_string())?;
+    Ok(json!(null))
+}
+
+/// 无边框窗口的四边 / 四角缩放（系统拖拽区不存在，把手由 UI 自己画）。
+pub fn start_resize_dragging(app: &AppHandle, params: &Value) -> Result<Value, String> {
+    // 走 `Window` 而不是 `WebviewWindow`：`start_resize_dragging` 只在 `Window` 上（tauri 2.11），
+    // 而 `Manager::get_window` 要先开 `unstable` feature —— 从 webview 这一侧拿就不必开
+    let window = main_window(app)?.as_ref().window();
+    let raw = params.get("direction").and_then(|v| v.as_str()).unwrap_or("");
+    let direction = match raw {
+        "north" => ResizeDirection::North,
+        "south" => ResizeDirection::South,
+        "east" => ResizeDirection::East,
+        "west" => ResizeDirection::West,
+        "northEast" => ResizeDirection::NorthEast,
+        "northWest" => ResizeDirection::NorthWest,
+        "southEast" => ResizeDirection::SouthEast,
+        "southWest" => ResizeDirection::SouthWest,
+        other => return Err(format!("未知缩放方向：{other}")),
+    };
+    window.start_resize_dragging(direction).map_err(|err| err.to_string())?;
     Ok(json!(null))
 }
 
@@ -178,7 +220,8 @@ pub fn arm_hide_fallback(app: &AppHandle) {
 pub fn toggle(app: &AppHandle) {
     if has_pending_hide() {
         cancel_pending_hide();
-        notify_toggled(app, true);
+        // 窗口本来就还看得见，这次只是"撤销离场"：不需要（也不该）重读选区
+        notify_toggled(app, true, None);
         log("[window] toggle → 取消排队中的隐藏");
         return;
     }
@@ -189,28 +232,68 @@ pub fn toggle(app: &AppHandle) {
     if visible {
         // 先报告、再排兜底：内核收到 UI 的回执后调 `window/hide` 落地；
         // 这里只保证「内核没起来 / 失联」时窗口不会永远赖着不走
-        notify_toggled(app, false);
+        notify_toggled(app, false, None);
         arm_hide_fallback(app);
     } else {
-        let _ = show(app, &json!({ "focus": true }));
-        notify_toggled(app, true);
+        // 唤出：走"显示 + 回报"这一条（选区随之带回内核，见 show_and_report）
+        show_and_report(app, true);
     }
     log(&format!("[window] toggle → visible={}", !visible));
+}
+
+/// 显示窗口 + 把结果（含"上屏之前读到的选中文本"）回报给内核。
+///
+/// 热键 / 托盘 / 单实例三条用户路径必须走同一个函数：选区是 `show()` 的返回值，
+/// 谁调用 `show()` 谁就得负责把它转交给内核 —— 各写一遍一定会漏（实测：热键那条路
+/// 一开始就是把返回值丢掉，表现为"选中了文本按热键却不带"）。
+pub fn show_and_report(app: &AppHandle, focus: bool) {
+    let selection = show(app, &json!({ "focus": focus }))
+        .ok()
+        .and_then(|value| value.get("selection").and_then(|v| v.as_str()).map(str::to_string));
+    notify_toggled(app, true, selection);
 }
 
 /// 用户主动切换显隐后，把**结果**告诉内核（内核只广播状态，绝不能再 toggle 一次）。
 ///
 /// 只在用户触发的路径调用：全局热键、托盘左键。
 /// 内核自己发起的 `window.show` / `window.hide` 不回报，否则会形成"自己通知自己"的回环。
-pub fn notify_toggled(app: &AppHandle, visible: bool) {
+///
+/// `selection` = 这次显示**之前**前台 App 里选中的文本（`None` = 没读到 / 不该带）。
+pub fn notify_toggled(app: &AppHandle, visible: bool, selection: Option<String>) {
     if let Some(link) = app.try_state::<Arc<Link>>() {
-        link.notify("window/toggled", json!({ "visible": visible }));
+        let mut params = json!({ "visible": visible });
+        if let Some(text) = selection {
+            params["selection"] = json!(text);
+        }
+        link.notify("window/toggled", params);
     }
 }
 
 pub fn is_visible(app: &AppHandle) -> Result<Value, String> {
     let window = main_window(app)?;
     Ok(json!(window.is_visible().unwrap_or(false)))
+}
+
+/// 用户记忆的窗口尺寸（requirements §6.1 `window.setSize`）：宽高一起给。
+/// 内容自适应那条路仍走 `set_height`（宽度固定回 `DEFAULT_WIDTH`），两者别混用 ——
+/// 否则"恢复默认大小"会被一次内容变化又拉回 720 宽。
+pub fn set_size(app: &AppHandle, params: &Value) -> Result<Value, String> {
+    let window = main_window(app)?;
+    let width = params
+        .get("width")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(DEFAULT_WIDTH)
+        .clamp(USER_MIN_WIDTH, USER_MAX_WIDTH);
+    let height = params
+        .get("height")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(MIN_HEIGHT)
+        .clamp(USER_MIN_HEIGHT, USER_MAX_HEIGHT);
+    window
+        .set_size(Size::Logical(LogicalSize::new(width, height)))
+        .map_err(|err| err.to_string())?;
+    log(&format!("[window] set_size {width:.0}x{height:.0}（用户记忆尺寸）"));
+    Ok(json!({ "width": width, "height": height }))
 }
 
 pub fn set_height(app: &AppHandle, params: &Value) -> Result<Value, String> {

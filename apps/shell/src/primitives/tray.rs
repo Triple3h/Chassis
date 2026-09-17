@@ -28,9 +28,9 @@ pub fn ensure(app: &AppHandle) -> Result<(), String> {
                 return;
             }
             if id == "show" {
-                let _ = super::window::show(app, &json!({ "focus": true }));
-                // 显隐的**结果**一样要回报：UI 靠它决定播放入场动画还是维持现状
-                super::window::notify_toggled(app, true);
+                // 显隐的**结果**一样要回报（UI 靠它决定播放入场动画还是维持现状），
+                // 且与热键走同一条：选区随之带回内核
+                super::window::show_and_report(app, true);
                 return;
             }
             if let Some(link) = app.try_state::<Arc<Link>>() {

@@ -26,6 +26,15 @@ serde_json = "1"
 arboard = { version = "3", default-features = false }
 open = "5"
 
+# `Window::start_resize_dragging` 的方向类型住在 tauri-runtime 里（tauri 没有 re-export）。
+# 版本必须与 tauri 依赖的 tauri-runtime 对齐，否则类型是两个 crate（编译期就报错）。
+tauri-runtime = "2"
+
+# Accessibility API（选中文本原语 `selection.read`）的 CF 类型包装。
+# 版本与 tauri 依赖树里的 core-foundation 对齐，避免同一 crate 编译两份。
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+
 [features]
 default = []
 custom-protocol = ["tauri/custom-protocol"]

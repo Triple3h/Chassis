@@ -5,7 +5,9 @@ pub mod clipboard;
 pub mod hotkey;
 pub mod notify;
 pub mod opener;
+pub mod selection;
 pub mod tray;
+pub mod usage;
 pub mod window;
 
 use serde_json::{json, Value};
@@ -18,6 +20,11 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value, 
         "window.hide" => window::hide(app),
         "window.isVisible" => window::is_visible(app),
         "window.setHeight" => window::set_height(app, params),
+        "window.setSize" => window::set_size(app, params),
+        "window.startDragging" => window::start_dragging(app),
+        "window.startResizeDragging" => window::start_resize_dragging(app, params),
+
+        "selection.read" => selection::read(app, params),
 
         "hotkey.register" => hotkey::register(app, params),
         "hotkey.unregister" => hotkey::unregister(app),
@@ -35,6 +42,7 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value, 
 
         "app.setAutostart" => set_autostart(app, params),
         "app.info" => app_info(app),
+        "app.usage" => usage::usage(),
         "app.quit" => {
             crate::shutdown(app);
             Ok(json!(null))
