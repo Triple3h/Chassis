@@ -28,4 +28,7 @@ export const MANIFEST_KEYS = [
   'history',
   // 插件设置声明（设置页渲染通用表单）
   'settings',
+  // 平台 / 架构白名单（省略 = 不限制；plugin-spec §3.5）
+  'platforms',
+  'arch',
 ]

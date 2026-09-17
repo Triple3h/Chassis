@@ -493,6 +493,10 @@ impl PluginManager {
                                 id = candidate_id.to_string();
                             }
                         }
+                        if let Some((level, message)) = platform_skip_reason(&id, &value, builtin) {
+                            self.log(level, &message);
+                            continue;
+                        }
                     }
                 }
                 // 与 v1 行为一致：extensions 不覆盖同 id 的出厂 bundle
@@ -820,6 +824,13 @@ impl PluginManager {
         let source_dir =
             if path_exists(&source_input.join("dist").join("package.json")) { source_input.join("dist") } else { source_input.to_path_buf() };
         let manifest = read_manifest(&source_dir).await.map_err(|issue| KernelError::new(issue.code, issue.message))?;
+        // 安装是显式动作：平台不匹配要**明确报错**（不是静默跳过），否则用户不知道装没装上
+        if let Some(reason) = manifest.unsupported_reason() {
+            return Err(KernelError::new(
+                "PLATFORM_MISMATCH",
+                format!("插件 {} 不支持当前运行环境：{reason}", manifest.name),
+            ));
+        }
         let id = manifest.name.clone();
 
         let _ = ensure_dir(&self.deps.data_root.join("extensions"));
@@ -1066,6 +1077,19 @@ pub async fn read_manifest(dir: &Path) -> std::result::Result<PluginManifest, Ma
     validate_manifest(&value)
 }
 
+/// 扫描期的平台过滤判定（plugin-spec §3.5）：返回 `Some((级别, 说明))` = **跳过**。
+///
+/// 只在「声明合法且明确不含当前运行环境」时跳过；声明写得非法 ⇒ `None`
+/// （留给 `load()` 里的 `validate_manifest()` 报 `MANIFEST_INVALID`，用户在设置页看得见，
+/// 好过插件无声无息地消失）。出厂基础插件被过滤是异常 ⇒ 提到 `warn`。
+fn platform_skip_reason(id: &str, raw: &Value, builtin: bool) -> Option<(&'static str, String)> {
+    let reason = crate::manifest::raw_platform_mismatch(raw)?;
+    let essential = builtin && raw.get("essential").and_then(Value::as_bool) == Some(true);
+    let level = if essential { "warn" } else { "info" };
+    let suffix = if essential { "（出厂基础插件被平台过滤，请核对出厂 bundle）" } else { "" };
+    Some((level, format!("跳过插件 {id}：{reason}{suffix}")))
+}
+
 /// 清单 + 用户覆盖层合并（keywords = 插件级 ∪ 命令级）。
 pub fn merge_command_decls(manifest: &PluginManifest, override_store: Option<&PluginOverride>) -> Vec<CommandDecl> {
     let plugin_keywords = plugin_keywords_of(manifest.keywords.as_ref(), override_store);
@@ -1210,6 +1234,36 @@ mod tests {
         let merged = merge_command_decls(&manifest, None);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].keywords.as_deref().unwrap(), vec!["命令别名".to_string()]);
+    }
+
+    #[test]
+    fn scan_skips_plugins_that_declare_other_platforms() {
+        use crate::manifest::{current_platform, PLATFORMS};
+        let other = PLATFORMS.iter().find(|name| **name != current_platform()).copied().unwrap();
+
+        // 声明其它平台 ⇒ 跳过（info）
+        let mut raw = manifest_value("demo", json!([{ "name": "show", "title": "Show", "mode": "view" }]));
+        raw["platforms"] = json!([other]);
+        let (level, message) = platform_skip_reason("demo", &raw, false).expect("应当跳过");
+        assert_eq!(level, "info");
+        assert!(message.contains(other), "说明里要有声明值：{message}");
+
+        // 出厂基础插件被过滤是异常 ⇒ warn
+        raw["essential"] = json!(true);
+        let (level, _) = platform_skip_reason("demo", &raw, true).unwrap();
+        assert_eq!(level, "warn");
+        // 第三方插件写了 essential 也不算数（与装载规则一致）
+        let (level, _) = platform_skip_reason("demo", &raw, false).unwrap();
+        assert_eq!(level, "info");
+
+        // 声明含当前平台 / 未声明 / 声明非法 ⇒ 不跳过
+        raw = manifest_value("demo", json!([{ "name": "show", "title": "Show", "mode": "view" }]));
+        raw["platforms"] = json!([other, current_platform()]);
+        assert!(platform_skip_reason("demo", &raw, false).is_none());
+        raw["platforms"] = json!([]);
+        assert!(platform_skip_reason("demo", &raw, false).is_none(), "空数组交给 validate_manifest 报错");
+        raw["platforms"] = json!("windows");
+        assert!(platform_skip_reason("demo", &raw, false).is_none());
     }
 
     #[test]

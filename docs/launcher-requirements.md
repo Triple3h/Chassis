@@ -431,6 +431,7 @@ interface ActionResult {
 
 | 事件 | 行为 |
 |---|---|
+| 扫描（加载前） | 识别插件根 → **平台 / 架构过滤**（`platforms` / `arch`，省略 = 不限制；不匹配 ⇒ 整包跳过，不进状态机，见 plugin-spec §3.5）；出厂基础插件被过滤记 `warn` |
 | 加载 | 读清单 → 校验 → 起 HTTP listener → 构造受限接口面 → 装配期裁剪 → 逻辑层命令校验产物（缺失 → 该命令 `error`，错误码 `ENTRY_MISSING`）/ 注册命令（view 插件） |
 | 停用 | 逆序回滚所有 disposer → 关 listener → 清理会话（`session/closed` 带 `reason: disable`） |
 | 重载（热重载） | 停用（`reason: reload`）→ 重新读盘 → 加载 → 广播 `plugin/reloaded { pluginId, commands, ok }`；**保持历史与固定项不变**。原来开着的插件页会话必然失效（旧 listener 端口已停），由 UI 按 `commands` 用同一命令重开（新会话 / 新端口）——插件在自己的页面里重载自己也不会把页面打死 |
@@ -552,6 +553,7 @@ interface AuditRecord {
 | `capabilities` | ✅ | 可为空数组（= 纯前端插件，只能用自己的 UI + `ctx.commands`） |
 | `commands[]` | ✅ | 至少 1 条 |
 | `icon` | ❌ | 相对路径 |
+| `platforms` / `arch` | ❌ | 支持的操作系统 / CPU 架构白名单（**省略 = 不限制**）；见 plugin-spec §3.5。内核在**扫描期**过滤，不匹配的插件整包跳过（不注册命令、不进设置页）；安装时直接报 `PLATFORM_MISMATCH` |
 
 ### 8.3 命令声明
 

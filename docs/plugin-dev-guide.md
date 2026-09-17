@@ -88,6 +88,13 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 | `commands[].mode` | `view` / `no-view` / `script`（官方说明 `background` 未来支持） |
 | `commands[].searchable` | 是否参与全局搜索（只对 view / no-view 有意义） |
 | `commands[].placeholder` | `searchable: true` 时搜索框里的提示文案 |
+| `platforms` | 可选；支持的操作系统白名单 `["macos" \| "windows" \| "linux"]`，**省略 = 全平台** |
+| `arch` | 可选；支持的 CPU 架构白名单 `["x64" \| "arm64"]`，**省略 = 不限制** |
+
+**只在一个平台上能跑的插件请务必声明 `platforms`**：内核在扫描期就把它整包跳过（不注册命令、不进设置页），
+用户不会看到"点开没反应"的插件；安装（拖目录 / zip）时也会直接报 `PLATFORM_MISMATCH`。
+写法注意：这里的取值是 `macos` / `windows`（照 Rust `target_os` 写），**不是** `host.info().platform` 的 `darwin` / `win32`。
+详见 plugin-spec §3.5。
 
 发布时 `dist/package.json` 会被宿主直接读取，**只保留上面这些字段就够**（本仓库的构建会自动剔除 `scripts` / `devDependencies` 等）。
 

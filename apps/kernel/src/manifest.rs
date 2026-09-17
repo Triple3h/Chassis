@@ -49,6 +49,31 @@ pub fn script_entry_candidates(name: &str) -> Vec<String> {
     vec![name.to_string(), format!("{name}.exe"), format!("workers/{name}"), format!("workers/{name}.exe")]
 }
 
+/// 平台标识（plugin-spec §3.5）：与 Rust `std::env::consts::OS` 同口径，
+/// 便于作者照 `#[cfg(target_os = "windows")]` 的心智写清单。
+/// 注意**不等于** `host.info().platform`（那是 Node 口径 `darwin` / `win32`，为兼容契约保留）。
+pub const PLATFORMS: [&str; 3] = ["macos", "windows", "linux"];
+
+/// CPU 架构标识（`std::env::consts::ARCH` 归一：`x86_64` → `x64`、`aarch64` → `arm64`）。
+pub const ARCHS: [&str; 2] = ["x64", "arm64"];
+
+/// 声明列表的长度上限（防畸形清单；合法值只有有限个，此上限只是兜底）
+const MAX_PLATFORM_ITEMS: usize = 8;
+
+/// 当前操作系统（`PLATFORMS` 取值之一；未知系统原样返回，天然不匹配任何显式声明）。
+pub fn current_platform() -> &'static str {
+    std::env::consts::OS
+}
+
+/// 当前 CPU 架构（`ARCHS` 取值之一；未知架构原样返回）。
+pub fn current_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    }
+}
+
 /// 全局命令 id：`${pluginId}:${name}`。
 pub fn global_command_id(plugin_id: &str, name: &str) -> String {
     format!("{plugin_id}:{name}")
@@ -162,6 +187,119 @@ pub struct PluginManifest {
     pub history: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<Vec<SettingDecl>>,
+    /// 支持的操作系统白名单（plugin-spec §3.5）；`None` = 不限制
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platforms: Option<Vec<String>>,
+    /// 支持的 CPU 架构白名单；`None` = 不限制
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arch: Option<Vec<String>>,
+}
+
+impl PluginManifest {
+    /// 平台 / 架构两个维度是否都匹配当前运行环境（未声明的维度不限制）。
+    pub fn supports_runtime(&self) -> bool {
+        dimension_matches(self.platforms.as_deref(), current_platform()) && dimension_matches(self.arch.as_deref(), current_arch())
+    }
+
+    /// 不匹配时的人话原因（给日志与安装失败提示用）；匹配则返回 `None`。
+    pub fn unsupported_reason(&self) -> Option<String> {
+        if !dimension_matches(self.platforms.as_deref(), current_platform()) {
+            return Some(describe_mismatch("platforms", self.platforms.as_deref(), current_platform()));
+        }
+        if !dimension_matches(self.arch.as_deref(), current_arch()) {
+            return Some(describe_mismatch("arch", self.arch.as_deref(), current_arch()));
+        }
+        None
+    }
+}
+
+/// `None` = 没声明 ⇒ 不限制；`Some(list)` = 命中任一即通过。
+fn dimension_matches(declared: Option<&[String]>, current: &str) -> bool {
+    match declared {
+        None => true,
+        Some(list) => list.iter().any(|item| item == current),
+    }
+}
+
+fn describe_mismatch(field: &str, declared: Option<&[String]>, current: &str) -> String {
+    let list = declared.unwrap_or_default().join(", ");
+    format!("{field} 声明 [{list}]，当前是 {current}")
+}
+
+/// 宽容判定（给 `scan()` 在校验之前用）：只有「声明合法且明确不含当前运行环境」才返回原因。
+///
+/// 写得非法（`platforms: "windows"` / 空数组 / 未知值）一律返回 `None` ⇒ **不跳过**，
+/// 交给 `load()` 里的 `validate_manifest()` 报 `MANIFEST_INVALID`，
+/// 这样用户在设置页能看见"清单写错了"，而不是插件无声无息地消失。
+pub fn raw_platform_mismatch(raw: &Value) -> Option<String> {
+    match raw_dimension_mismatch(raw, "platforms", &PLATFORMS, current_platform()) {
+        // 声明非法：不跳过，交给 validate_manifest 报 MANIFEST_INVALID
+        Err(()) => None,
+        Ok(Some(reason)) => Some(reason),
+        Ok(None) => match raw_dimension_mismatch(raw, "arch", &ARCHS, current_arch()) {
+            Ok(Some(reason)) => Some(reason),
+            _ => None,
+        },
+    }
+}
+
+/// 返回 `Ok(Some(原因))` = 不匹配；`Ok(None)` = 没声明或声明非法（不参与过滤）。
+fn raw_dimension_mismatch(
+    raw: &Value,
+    field: &str,
+    known: &[&str],
+    current: &str,
+) -> std::result::Result<Option<String>, ()> {
+    let Some(value) = raw.get(field) else { return Ok(None) };
+    let Some(items) = value.as_array() else { return Err(()) };
+    if items.is_empty() {
+        return Err(());
+    }
+    let mut list: Vec<String> = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(text) = item.as_str() else { return Err(()) };
+        if !known.contains(&text) {
+            return Err(());
+        }
+        list.push(text.to_string());
+    }
+    if list.iter().any(|item| item == current) {
+        Ok(None)
+    } else {
+        Ok(Some(describe_mismatch(field, Some(&list), current)))
+    }
+}
+
+/// 平台 / 架构声明的校验（plugin-spec §3.5）：可选；给了就必须是**非空**的已知值数组。
+fn validate_platform_list(
+    raw: &serde_json::Map<String, Value>,
+    field: &str,
+    known: &[&str],
+) -> std::result::Result<Option<Vec<String>>, ManifestIssue> {
+    let Some(value) = raw.get(field) else { return Ok(None) };
+    let Some(items) = value.as_array() else {
+        return Err(ManifestIssue::new("MANIFEST_INVALID", format!("{field} 必须是非空数组（省略 = 不限制）")));
+    };
+    if items.is_empty() {
+        return Err(ManifestIssue::new("MANIFEST_INVALID", format!("{field} 必须是非空数组（省略 = 不限制）")));
+    }
+    if items.len() > MAX_PLATFORM_ITEMS {
+        return Err(ManifestIssue::new("MANIFEST_INVALID", format!("{field} 不得超过 {MAX_PLATFORM_ITEMS} 项")));
+    }
+    let mut list = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(text) = item.as_str() else {
+            return Err(ManifestIssue::new("MANIFEST_INVALID", format!("{field} 必须是字符串数组")));
+        };
+        if !known.contains(&text) {
+            return Err(ManifestIssue::new(
+                "MANIFEST_INVALID",
+                format!("{field} 含未知取值：{text}（已知：{}）", known.join(", ")),
+            ));
+        }
+        list.push(text.to_string());
+    }
+    Ok(Some(list))
 }
 
 #[derive(Debug, Clone)]
@@ -281,6 +419,8 @@ pub fn validate_manifest(raw: &Value) -> std::result::Result<PluginManifest, Man
         essential: None,
         history: None,
         settings: None,
+        platforms: None,
+        arch: None,
     };
 
     if let Some(value) = object.get("description") {
@@ -353,6 +493,9 @@ pub fn validate_manifest(raw: &Value) -> std::result::Result<PluginManifest, Man
         }
         manifest.settings = Some(settings);
     }
+    // 平台 / 架构声明（plugin-spec §3.5）：可选，给了就必须是已知值的非空数组
+    manifest.platforms = validate_platform_list(object, "platforms", &PLATFORMS)?;
+    manifest.arch = validate_platform_list(object, "arch", &ARCHS)?;
 
     Ok(manifest)
 }
@@ -668,6 +811,96 @@ mod tests {
 
         raw["settings"] = json!([{ "key": "engine", "type": "select", "title": "引擎" }]);
         assert!(validate_manifest(&raw).unwrap_err().message.contains("必须提供 options"));
+    }
+
+    #[test]
+    fn platform_declaration_is_optional_and_validated() {
+        // 不声明 = 不限制（现有 8 个插件一行都不用改）
+        let manifest = validate_manifest(&manifest_json()).expect("未声明平台应当通过");
+        assert_eq!(manifest.platforms, None);
+        assert_eq!(manifest.arch, None);
+        assert!(manifest.supports_runtime());
+        assert!(manifest.unsupported_reason().is_none());
+
+        let mut raw = manifest_json();
+        raw["platforms"] = json!(["windows"]);
+        raw["arch"] = json!(["x64"]);
+        let manifest = validate_manifest(&raw).expect("合法声明应当通过");
+        assert_eq!(manifest.platforms, Some(vec!["windows".to_string()]));
+        assert_eq!(manifest.arch, Some(vec!["x64".to_string()]));
+
+        // 空数组 = 非法（语义歧义：全平台还是全不支持？一律拒绝）
+        raw["platforms"] = json!([]);
+        assert!(validate_manifest(&raw).unwrap_err().message.contains("platforms 必须是非空数组"));
+        // 未知取值
+        raw["platforms"] = json!(["win"]);
+        assert!(validate_manifest(&raw).unwrap_err().message.contains("platforms 含未知取值"));
+        // 非数组
+        raw["platforms"] = json!("windows");
+        assert!(validate_manifest(&raw).unwrap_err().message.contains("platforms 必须是非空数组"));
+        // 非字符串元素
+        raw["platforms"] = json!([1]);
+        assert!(validate_manifest(&raw).unwrap_err().message.contains("platforms 必须是字符串数组"));
+        // arch 同样校验
+        raw = manifest_json();
+        raw["arch"] = json!(["arm"]);
+        assert!(validate_manifest(&raw).unwrap_err().message.contains("arch 含未知取值"));
+    }
+
+    #[test]
+    fn supports_runtime_matches_current_environment() {
+        // 声明含当前环境 ⇒ 通过；不含 ⇒ 给出人话原因
+        let mut raw = manifest_json();
+        raw["platforms"] = json!([current_platform()]);
+        assert!(validate_manifest(&raw).unwrap().supports_runtime());
+
+        raw["platforms"] = json!(["macos", "windows", "linux"]);
+        assert!(validate_manifest(&raw).unwrap().supports_runtime());
+
+        // 反向取值：拿一个「不是当前平台」的已知值
+        let other = PLATFORMS.iter().find(|name| **name != current_platform()).copied().unwrap();
+        raw["platforms"] = json!([other]);
+        let manifest = validate_manifest(&raw).unwrap();
+        assert!(!manifest.supports_runtime());
+        let reason = manifest.unsupported_reason().unwrap();
+        assert!(reason.contains(other) && reason.contains(current_platform()), "原因要带上声明与现状：{reason}");
+
+        // 两个维度独立：平台匹配但架构不匹配
+        let other_arch = ARCHS.iter().find(|name| **name != current_arch()).copied().unwrap();
+        raw["platforms"] = json!([current_platform()]);
+        raw["arch"] = json!([other_arch]);
+        let manifest = validate_manifest(&raw).unwrap();
+        assert!(!manifest.supports_runtime());
+        assert!(manifest.unsupported_reason().unwrap().starts_with("arch"));
+    }
+
+    #[test]
+    fn raw_platform_mismatch_only_skips_when_declaration_is_valid() {
+        let mut raw = manifest_json();
+
+        // 未声明 ⇒ 不跳过
+        assert!(raw_platform_mismatch(&raw).is_none());
+
+        // 声明合法且不含当前平台 ⇒ 跳过（带原因）
+        let other = PLATFORMS.iter().find(|name| **name != current_platform()).copied().unwrap();
+        raw["platforms"] = json!([other]);
+        assert!(raw_platform_mismatch(&raw).unwrap().contains(other));
+
+        // 声明合法且含当前平台 ⇒ 不跳过
+        raw["platforms"] = json!([other, current_platform()]);
+        assert!(raw_platform_mismatch(&raw).is_none());
+
+        // 声明非法 ⇒ 不跳过（留给 validate_manifest 报错，用户在设置页看得见）
+        for bad in [json!("windows"), json!([]), json!(["win"]), json!([1])] {
+            raw["platforms"] = bad;
+            assert!(raw_platform_mismatch(&raw).is_none(), "非法声明不该被静默跳过");
+        }
+
+        // 平台通过、架构不匹配 ⇒ 仍然跳过
+        raw = manifest_json();
+        let other_arch = ARCHS.iter().find(|name| **name != current_arch()).copied().unwrap();
+        raw["arch"] = json!([other_arch]);
+        assert!(raw_platform_mismatch(&raw).unwrap().starts_with("arch"));
     }
 
     #[test]

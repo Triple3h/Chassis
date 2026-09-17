@@ -1,5 +1,5 @@
 import { assert, assertEqual, run, test } from '../helpers/assert'
-import { checkEntries, validateManifest } from '../../packages/plugin-manifest/src/index'
+import { checkEntries, supportsRuntime, validateManifest } from '../../packages/plugin-manifest/src/index'
 
 const VALID = {
   name: 'my-plugin',
@@ -113,6 +113,50 @@ test('settings：非法声明一律拒绝（key / type / options / default / 重
     assert(!result.ok, `${JSON.stringify(patch)} 应当失败`)
     assertEqual(result.code, 'MANIFEST_INVALID', JSON.stringify(patch))
   }
+})
+
+test('platforms / arch：省略 = 不限制；给了就必须是已知值的非空数组', () => {
+  const absent = validateManifest(VALID)
+  assert(absent.ok, '未声明应当通过')
+  assertEqual(absent.manifest.platforms, undefined)
+  assertEqual(absent.manifest.arch, undefined)
+
+  const declared = validateManifest({ ...VALID, platforms: ['windows'], arch: ['x64'] })
+  assert(declared.ok, '合法声明应当通过')
+  assertEqual(declared.manifest.platforms?.join(','), 'windows')
+  assertEqual(declared.manifest.arch?.join(','), 'x64')
+
+  for (const patch of [
+    { platforms: [] },
+    { platforms: 'windows' },
+    { platforms: ['win'] },
+    { platforms: [1] },
+    { arch: [] },
+    { arch: ['arm'] },
+  ]) {
+    const result = validateManifest({ ...VALID, ...patch })
+    assert(!result.ok, `${JSON.stringify(patch)} 应当失败`)
+    assertEqual(result.code, 'MANIFEST_INVALID', JSON.stringify(patch))
+  }
+})
+
+test('supportsRuntime：声明命中运行环境才通过（未声明的维度不限制）', () => {
+  // 模拟一个 Windows x64 环境
+  const win: { platform: 'windows'; arch: 'x64' } = { platform: 'windows', arch: 'x64' }
+
+  const absent = validateManifest(VALID)
+  assert(absent.ok && supportsRuntime(absent.manifest, win), '未声明 ⇒ 任何环境都通过')
+
+  const windowsOnly = validateManifest({ ...VALID, platforms: ['windows'] })
+  assert(windowsOnly.ok && supportsRuntime(windowsOnly.manifest, win), 'windows 插件在 win 上通过')
+  assert(!supportsRuntime(windowsOnly.manifest, { platform: 'macos', arch: 'arm64' }), '在 mac 上不通过')
+
+  const macArm = validateManifest({ ...VALID, platforms: ['macos'], arch: ['arm64'] })
+  assert(macArm.ok && supportsRuntime(macArm.manifest, { platform: 'macos', arch: 'arm64' }))
+  assert(!supportsRuntime(macArm.manifest, { platform: 'macos', arch: 'x64' }), '架构不匹配也不通过')
+
+  const all = validateManifest({ ...VALID, platforms: ['macos', 'windows', 'linux'], arch: ['x64', 'arm64'] })
+  assert(all.ok && supportsRuntime(all.manifest, win) && supportsRuntime(all.manifest, { platform: 'linux', arch: 'arm64' }))
 })
 
 test('apiVersion "1" 与 "2" 都接受；未知版本报 API_VERSION_UNSUPPORTED', () => {

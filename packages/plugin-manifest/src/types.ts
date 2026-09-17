@@ -2,6 +2,15 @@
 
 export type CommandMode = 'view' | 'no-view' | 'script'
 
+/** 操作系统标识（plugin-spec §3.5）：与 Rust `std::env::consts::OS` 同口径 */
+export type Platform = 'macos' | 'windows' | 'linux'
+
+/** CPU 架构标识：`std::env::consts::ARCH` 归一（`x86_64` → `x64`、`aarch64` → `arm64`） */
+export type Arch = 'x64' | 'arm64'
+
+export const PLATFORMS: Platform[] = ['macos', 'windows', 'linux']
+export const ARCHS: Arch[] = ['x64', 'arm64']
+
 export interface CommandDecl {
   /** 插件内唯一；脚本命令必须等于产物文件名（N1） */
   name: string
@@ -81,6 +90,14 @@ export interface PluginManifest {
   history?: boolean
   /** 插件设置（≤16 条）：设置页的「插件 → 插件设置」按声明渲染，用户改完重载插件生效 */
   settings?: SettingDecl[]
+  /**
+   * 支持的操作系统白名单（plugin-spec §3.5）；**省略 = 不限制**。
+   * 取值与 Rust `std::env::consts::OS` 同口径（照 `#[cfg(target_os)]` 的心智写即可），
+   * **不是** `host.info().platform`（那是 Node 口径 `darwin` / `win32`）。
+   */
+  platforms?: Platform[]
+  /** 支持的 CPU 架构白名单；**省略 = 不限制**。取值 `x64` / `arm64`。 */
+  arch?: Arch[]
 }
 
 /** 全局命令 id：`${pluginId}:${name}` */

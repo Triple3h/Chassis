@@ -2,11 +2,15 @@ import { CAPABILITIES, isKnownCapability } from './capabilities'
 import type { ManifestErrorCode } from './errors'
 import {
   API_VERSIONS_SUPPORTED,
+  ARCHS,
   COMMAND_NAME_RE,
+  PLATFORMS,
   PLUGIN_ID_RE,
   scriptEntryCandidates,
+  type Arch,
   type CommandDecl,
   type CommandMode,
+  type Platform,
   type PluginManifest,
   type SettingDecl,
   type SettingOption,
@@ -300,8 +304,49 @@ export function validateManifest(raw: unknown): ManifestValidation {
     }
     manifest.settings = settings
   }
+  // 平台 / 架构声明（plugin-spec §3.5）：可选；给了就必须是已知值的非空数组
+  const platforms = validateDimension(raw.platforms, 'platforms', PLATFORMS)
+  if (typeof platforms === 'string') return fail('MANIFEST_INVALID', platforms)
+  manifest.platforms = platforms
+  const arch = validateDimension(raw.arch, 'arch', ARCHS)
+  if (typeof arch === 'string') return fail('MANIFEST_INVALID', arch)
+  manifest.arch = arch
 
   return { ok: true, manifest, warnings }
+}
+
+/**
+ * 平台 / 架构维度校验：省略（`undefined`）= 不限制；给了就必须是**非空**的已知值数组
+ * （空数组语义歧义 —— 是"全平台"还是"全不支持"？一律拒绝）。
+ * 返回错误文案字符串表示失败。
+ */
+function validateDimension<T extends string>(value: unknown, field: string, known: readonly T[]): T[] | undefined | string {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) return `${field} 必须是非空数组（省略 = 不限制）`
+  if (value.length === 0) return `${field} 必须是非空数组（省略 = 不限制）`
+  if (value.length > 8) return `${field} 不得超过 8 项`
+  const pool: readonly string[] = known
+  for (const item of value) {
+    if (typeof item !== 'string') return `${field} 必须是字符串数组`
+    if (!pool.includes(item)) return `${field} 含未知取值：${item}（已知：${pool.join(', ')}）`
+  }
+  return value as T[]
+}
+
+/**
+ * 清单是否匹配给定运行环境（未声明的维度不限制）。
+ *
+ * 纯函数、不读 `process` —— 本包是**环境无关**的契约包（没有 `@types/node`），
+ * 真正的运行时探测在内核 `manifest.rs`（`current_platform()` / `current_arch()`）里。
+ * 调用方（Node 侧）自行传：`{ platform: process.platform === 'darwin' ? 'macos' : … , arch: process.arch }`。
+ */
+export function supportsRuntime(
+  manifest: Pick<PluginManifest, 'platforms' | 'arch'>,
+  current: { platform: Platform; arch: Arch },
+): boolean {
+  const platformOk = !manifest.platforms || manifest.platforms.includes(current.platform)
+  const archOk = !manifest.arch || manifest.arch.includes(current.arch)
+  return platformOk && archOk
 }
 
 export interface EntryCheckResult {
