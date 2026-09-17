@@ -32,10 +32,16 @@ export interface HarnessOptions {
 export interface FakeShell {
   /** 内核发给壳的请求方法名（按发出顺序） */
   sent: string[]
+  /** 内核发给壳的请求（方法 + 参数），按发出顺序 —— 要断言"发出去的值对不对"时用它 */
+  calls: Array<{ method: string; params: Record<string, unknown> }>
   /** 模拟壳发来一条通知（不是请求，不期望应答） */
   notify: (method: string, params?: Record<string, unknown>) => void
   /** 等内核发出某个请求；已发过则立刻返回 */
   waitFor: (method: string, timeoutMs?: number) => Promise<void>
+  /** 真壳会在 `window.show` 里带回"上屏之前读到的前台选中文本"，这里模拟它 */
+  showSelection: string | null
+  /** 假壳对 `app.usage` 的回答（状态条要拼"启动台一共占多少"的壳那一半） */
+  usage: { rss: number; cpuMs: number }
   /** 断开假壳（harness 收尾用） */
   close: () => void
 }
@@ -65,8 +71,11 @@ function attachFakeShell(kernel: Kernel): FakeShell {
   const toKernel = new PassThrough()
   const fromKernel = new PassThrough()
   const sent: string[] = []
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = []
   const waiters: Array<{ method: string; resolve: () => void }> = []
   let buffer = ''
+  let showSelection: string | null = null
+  const shellUsage = { rss: 96 * 1024 * 1024, cpuMs: 1234 }
 
   const settle = (method: string): void => {
     for (let index = waiters.length - 1; index >= 0; index -= 1) {
@@ -86,12 +95,20 @@ function attachFakeShell(kernel: Kernel): FakeShell {
       buffer = buffer.slice(index + 1)
       index = buffer.indexOf('\n')
       if (!line) continue
-      const message = JSON.parse(line) as { id?: number; method?: string }
+      const message = JSON.parse(line) as { id?: number; method?: string; params?: Record<string, unknown> }
       if (!message.method) continue
       sent.push(message.method)
+      calls.push({ method: message.method, params: message.params ?? {} })
       // 假壳必须应答，否则内核要等满 3s 超时；返回值够测试用即可
       if (message.id !== undefined) {
-        const result = message.method === 'window.isVisible' ? true : null
+        const result =
+          message.method === 'window.isVisible'
+            ? true
+            : message.method === 'window.show'
+              ? { selection: showSelection }
+              : message.method === 'app.usage'
+                ? { ok: true, rss: shellUsage.rss, cpuMs: shellUsage.cpuMs }
+                : null
         toKernel.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`)
       }
       settle(message.method)
@@ -103,6 +120,14 @@ function attachFakeShell(kernel: Kernel): FakeShell {
 
   return {
     sent,
+    calls,
+    get showSelection() {
+      return showSelection
+    },
+    set showSelection(value: string | null) {
+      showSelection = value
+    },
+    usage: shellUsage,
     notify: (method, params) => {
       toKernel.write(`${JSON.stringify({ jsonrpc: '2.0', method, ...(params ? { params } : {}) })}\n`)
     },

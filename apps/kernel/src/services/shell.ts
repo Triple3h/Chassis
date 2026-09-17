@@ -89,12 +89,28 @@ export class Primitives {
   }
 
   // ── 宿主内部（UI / 内核自己调用，不审计插件）────────────────
-  async showWindow(focus = true): Promise<void> {
-    await this.link.request('window.show', { focus })
+  /**
+   * 显示窗口。返回壳在**上屏之前**读到的前台选中文本（读不到就是 undefined）。
+   * 时机只有壳抓得住：窗口一显示，前台 App 就成了自己（requirements §3.1）。
+   */
+  async showWindow(focus = true): Promise<{ selection?: string }> {
+    const res = await this.link.request<{ selection?: unknown }>('window.show', { focus })
+    const selection = typeof res?.selection === 'string' ? res.selection : ''
+    return selection ? { selection } : {}
   }
 
   async hideWindow(): Promise<void> {
     await this.link.request('window.hide')
+  }
+
+  /** 无边框窗口：UI 在拖拽区 mousedown 时调用（系统接管后续移动） */
+  async startDragging(): Promise<void> {
+    await this.link.request('window.startDragging')
+  }
+
+  /** 无边框窗口的四边 / 四角缩放（方向见 `window.rs` 的映射表） */
+  async startResizeDragging(direction: string): Promise<void> {
+    await this.link.request('window.startResizeDragging', { direction })
   }
 
   /**
@@ -115,6 +131,37 @@ export class Primitives {
 
   async setHeight(height: number): Promise<void> {
     await this.link.request('window.setHeight', { height })
+  }
+
+  /**
+   * 用户记忆的窗口尺寸（宽高一起给）。与 `setHeight` 是两条路：
+   * 前者是内容自适应的紧凑弹窗，这个是"用户拉过、我们记住了"的形态。
+   * 越界值由壳与配置两侧各自钳制（壳是最后一道，防止 UI 算错）。
+   */
+  async setSize(width: number, height: number): Promise<void> {
+    await this.link.request('window.setSize', { width, height })
+  }
+
+  /**
+   * 壳进程自身的占用（常驻内存 + 累计 CPU 毫秒）—— 状态条要"启动台一共占多少"，
+   * 内核算得了自己那一半，壳那一半只有壳知道（见 `primitives/usage.rs`）。
+   *
+   * 壳没连上 / 老版本壳不认这个原语 / 超时：一律返回 `null`，
+   * 由调用方退化成"只报内核" —— 状态条不能因为这个数字拿不到就整个消失。
+   */
+  async appUsage(): Promise<{ rss: number; cpuMs: number } | null> {
+    if (!this.link.connected) return null
+    try {
+      // 800ms：它串在 3s 一次的状态条请求里，别用默认 3s 超时拖住整次采样
+      const res = await this.link.request<{ ok?: boolean; rss?: unknown; cpuMs?: unknown }>('app.usage', {}, 800)
+      if (!res || res.ok === false) return null
+      const rss = Number(res.rss)
+      const cpuMs = Number(res.cpuMs)
+      if (!Number.isFinite(rss) || !Number.isFinite(cpuMs) || rss <= 0) return null
+      return { rss, cpuMs }
+    } catch {
+      return null
+    }
   }
 
   async registerHotkey(

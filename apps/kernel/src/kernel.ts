@@ -25,6 +25,7 @@ import { createSettingsService, type SettingsHost, type SettingsService } from '
 import { createSettingsHost } from './services/settingsHost'
 import { PluginAdmin } from './pluginAdmin'
 import { WindowVisibility } from './windowVisibility'
+import { SystemStatsSampler } from './services/systemStats'
 import type { ExecContext } from './types'
 import { pluginDataPath } from './util/fsx'
 import { itemKey } from './util/text'
@@ -32,6 +33,14 @@ import { itemKey } from './util/text'
 // 显隐时序常量与状态机都在 `WindowVisibility`（`windowVisibility.ts`）；
 // 这里 re-export 保持既有导入路径（tests/contract/shell-link.test.ts）继续可用
 export { HIDE_FALLBACK_MS, SHOW_ANIMATION_MS } from './windowVisibility'
+
+/**
+ * 唤出时带入的选中文本长度上限。
+ *
+ * 用户在前台选了一整篇文档再按热键时，把它塞进搜索框只会变成一次必然搜不到的查询，
+ * 还得手动删掉 —— 所以宁可当作"没有选中文本"。
+ */
+export const SELECTION_MAX_CHARS = 400
 
 export interface KernelOptions {
   dataRoot: string
@@ -88,6 +97,8 @@ export class Kernel {
   readonly uiServer: UiServer
   /** 窗口显隐（广播 + 等回执 + 兜底）：状态机与常量都在 `WindowVisibility` */
   readonly visibility: WindowVisibility
+  /** 自身占用采样（CPU / 内存）：底座自用，只喂启动台状态条（architecture D21） */
+  readonly stats: SystemStatsSampler
   /** 插件管理动作（托盘 / 设置面板 / HTTP API 共用） */
   readonly admin: PluginAdmin
   private binder!: ReturnType<typeof createServiceBinder>
@@ -108,6 +119,8 @@ export class Kernel {
     this.quicklinks = new QuicklinkStore(opts.dataRoot, this.audit)
     this.primitives = new Primitives(this.link, this.audit)
     this.hostUi = new HostUiBridge(this.bus, this.audit, () => this.hideWindowAnimated())
+    // 状态条要"启动台一共占多少"：壳那一半得点名要（`app.usage`），所以用延迟求值注入
+    this.stats = new SystemStatsSampler({ shellUsage: () => this.primitives.appUsage() })
 
     this.exec = new ScriptRuntime({
       resolvePluginDir: (pluginId) => this.plugins?.dirOf(pluginId),
@@ -281,6 +294,9 @@ export class Kernel {
     await this.applyHotkey(config)
     if (config.autostart) await this.primitives.setAutostart(true).catch(() => undefined)
 
+    // 状态条第一次被读到时就能给出有意义的差分（否则首个 CPU 读数只能是 0）
+    this.stats.warmup()
+
     this.log('info', `内核就绪：UI http://127.0.0.1:${this.uiServer.address}，数据目录 ${this.opts.dataRoot}`)
   }
 
@@ -377,7 +393,27 @@ export class Kernel {
 
   /** 显示窗口：先落地，再等窗口真的能画了才广播（见 `SHOW_ANIMATION_MS`） */
   async showWindowAnimated(focus = true): Promise<void> {
-    await this.visibility.show(focus)
+    const { selection } = await this.visibility.show(focus)
+    this.applySelection(selection)
+  }
+
+  /**
+   * 唤出时把前台选中的文本带进搜索框（requirements §3.1）。
+   *
+   * 只填**搜索框为空**时的：用户已经开始打字（或开了「保留上次输入」）时覆盖输入是最伤人的
+   * 行为 —— 选中文本大多只是"顺带的上下文"，而正在输的内容是明确意图。
+   * 超过 `SELECTION_MAX_CHARS` 的同样不带（选了一整篇文档 ⇒ 必然搜不到的查询）。
+   *
+   * 返回是否真的填了（热键路径与测试都要用）。
+   */
+  applySelection(text: unknown): boolean {
+    if (typeof text !== 'string') return false
+    const value = text.trim()
+    if (!value || value.length > SELECTION_MAX_CHARS) return false
+    if (this.hostUi.state.searchContent.trim()) return false
+    this.hostUi.state.searchContent = value
+    this.bus.emit('ui/searchContent', { value })
+    return true
   }
 
   /** 「显示」这条广播要晚一点发：等窗口上屏、webview 恢复绘制之后再让 UI 起入场动画 */

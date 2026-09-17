@@ -22,7 +22,15 @@ export const DEFAULT_CONFIG: Config = {
   disabled: [],
   denied: {},
   devPlugins: {},
+  // 尺寸记忆从空开始：没拖过把手就走内容自适应 / 默认高度
+  windowSizes: {},
 }
+
+/** 窗口尺寸记忆的允许区间（与壳侧的钳制同源；`MIN_*` 也与 requirements §6.2 的最小尺寸一致） */
+export const MIN_WINDOW_WIDTH = 480
+export const MIN_WINDOW_HEIGHT = 240
+export const MAX_WINDOW_WIDTH = 2000
+export const MAX_WINDOW_HEIGHT = 1400
 
 /**
  * 内核自己算数据目录时的默认位置（standalone / 没传 `--data-root`）。
@@ -117,6 +125,32 @@ export function sanitizeConfig(cfg: Config): Config {
   out.historyInSearch = cfg.historyInSearch !== false
   if (!/^#[0-9a-fA-F]{3,8}$/.test(String(cfg.accent))) out.accent = DEFAULT_CONFIG.accent
   if (!cfg.hotkey?.accelerator) out.hotkey = { accelerator: DEFAULT_CONFIG.hotkey.accelerator }
+  out.windowSizes = sanitizeWindowSizes(cfg.windowSizes)
+  return out
+}
+
+/**
+ * 尺寸记忆的清洗：只认「两个模式之一 + 一对落在允许区间里的完整数字」。
+ *
+ * 这里是**唯一**决定什么算合法记忆的地方（UI 提交、落盘、广播都过它）——
+ * 半个尺寸（只有宽没有高）、负数、越界值一律丢掉那一项，让窗口回落默认形态，
+ * 而不是拿着一个脏数字去 `setSize`（表现会是"窗口拉到一个诡异的尺寸"）。
+ */
+export function sanitizeWindowSizes(raw: unknown): Config['windowSizes'] {
+  const out: Config['windowSizes'] = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const mode of ['host', 'plugin'] as const) {
+    const entry = (raw as Record<string, unknown>)[mode] as { width?: unknown; height?: unknown } | undefined
+    if (!entry || typeof entry !== 'object') continue
+    const width = Math.round(Number(entry.width))
+    const height = Math.round(Number(entry.height))
+    if (!Number.isFinite(width) || !Number.isFinite(height)) continue
+    if (width < MIN_WINDOW_WIDTH || height < MIN_WINDOW_HEIGHT) continue
+    out[mode] = {
+      width: clamp(width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH),
+      height: clamp(height, MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT),
+    }
+  }
   return out
 }
 

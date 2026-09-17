@@ -59,14 +59,20 @@ export class WindowVisibility {
   /**
    * 显示窗口：先落地，再等窗口真的能画了才广播（见 `SHOW_ANIMATION_MS`）。
    * 广播放在 `finally` 里：敲壳失败时 UI 更不能停在「隐藏态」（那正好是一块透明窗口）。
+   *
+   * 返回值透传壳读到的**前台选中文本**（`selection`）：那是"显示之前"那一瞬的事实，
+   * 只有壳抓得住（见 `selection.rs`）；这里只负责把它原样交给调用方。
    */
-  async show(focus = true): Promise<void> {
+  async show(focus = true): Promise<{ selection?: string }> {
     this.cancelPendingHide()
+    let selection: string | undefined
     try {
-      await this.deps.primitives.showWindow(focus)
+      const res = await this.deps.primitives.showWindow(focus)
+      selection = res?.selection
     } finally {
       await this.emitVisible()
     }
+    return selection ? { selection } : {}
   }
 
   /** 「显示」这条广播要晚一点发：延迟期间又来了隐藏 / 新的显示，这一次就作废 */

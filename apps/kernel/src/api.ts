@@ -1,7 +1,15 @@
 import type { ActionDecl, Config, ResultItem } from '@launcher/plugin-manifest'
 import { LauncherError } from '@launcher/plugin-manifest'
+import {
+  MAX_WINDOW_HEIGHT,
+  MAX_WINDOW_WIDTH,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+} from './config'
 import type { Kernel } from './kernel'
 import type { HttpRequestContext } from './http/server'
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, Math.round(value)))
 
 function body<T extends Record<string, unknown>>(ctx: HttpRequestContext): T {
   return (ctx.body ?? {}) as T
@@ -233,6 +241,39 @@ export function registerApi(kernel: Kernel): void {
     await kernel.primitives.setHeight(Math.min(640, Math.max(320, Math.round(value))))
     return { ok: true }
   })
+  /**
+   * 用户记忆的窗口尺寸（requirements §3.1「尺寸记忆」）：UI 在唤出 / 进入插件页时用来还原。
+   * 记忆值本身存在 config（`windowSizes`），这里只负责"设一次窗口大小"。
+   */
+  server.post('/api/window/setSize', async (ctx) => {
+    const { width, height } = body<{ width?: number; height?: number }>(ctx)
+    const rawWidth = Number(width)
+    const rawHeight = Number(height)
+    if (!Number.isFinite(rawWidth) || !Number.isFinite(rawHeight)) {
+      throw new LauncherError('BAD_ARGS', 'width / height 必须是数字')
+    }
+    const safeWidth = clamp(rawWidth, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH)
+    const safeHeight = clamp(rawHeight, MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT)
+    await kernel.primitives.setSize(safeWidth, safeHeight)
+    return { ok: true, width: safeWidth, height: safeHeight }
+  })
+  /**
+   * 无边框窗口的拖动：UI 在拖拽区 mousedown 时调一次，
+   * 之后的移动由系统接管（直到松开都不会再回来）—— 所以这不是每帧请求。
+   */
+  server.post('/api/window/startDrag', async () => {
+    await kernel.primitives.startDragging()
+    return { ok: true }
+  })
+  /** 四边 / 四角缩放：方向由 UI 的把手给出（north / south / east / west / northEast / …） */
+  server.post('/api/window/startResize', async (ctx) => {
+    const { direction } = body<{ direction?: string }>(ctx)
+    await kernel.primitives.startResizeDragging(required(direction, 'direction'))
+    return { ok: true }
+  })
+
+  /** 状态条数据：CPU / 内存占用（约 3s 一次，UI 自己在窗口隐藏时停轮询） */
+  server.get('/api/system/stats', async () => ({ ok: true, stats: await kernel.stats.read() }))
   server.post('/api/app/quit', async () => {
     // 不 await：`quit()` 会停掉 UI 服务，之后再写响应就来不及了 —— 先让本次响应出去，再收尾
     void kernel.quit()
@@ -267,6 +308,8 @@ export function registerApi(kernel: Kernel): void {
     if (visible) {
       // 重新唤出要把还排在队里的那次隐藏作废：热键连按不能被上一次隐藏偷走窗口
       kernel.cancelPendingHide()
+      // 壳在窗口上屏**之前**读到的前台选中文本（读不到就是 undefined，自然跳过）
+      kernel.applySelection(params.selection)
       // 显示晚一点广播：等窗口上屏 + webview 恢复绘制，否则入场动画会被吞
       await kernel.emitVisibleAnimated()
     } else {

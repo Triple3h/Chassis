@@ -124,6 +124,12 @@ export interface Config {
   denied: Record<string, string[]>
   /** 开发模式插件：pluginId → devUrl */
   devPlugins: Record<string, string>
+  /**
+   * 用户调过（拖过把手）的窗口尺寸，**按模式分别记忆**：
+   * `host` = 启动台搜索态、`plugin` = 插件页；缺省 ⇒ 内容自适应 / 默认高度。
+   * 由启动台 UI 读写（`Kernel.patchConfig` 收口），内核只做钳制。
+   */
+  windowSizes: Partial<Record<'host' | 'plugin', { width: number; height: number }>>
 }
 
 export interface HostInfo {

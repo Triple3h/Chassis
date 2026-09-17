@@ -21,7 +21,7 @@
  */
 import { assert, assertEqual, run, test } from '../helpers/assert'
 import { createHarness } from '../helpers/harness'
-import { HIDE_FALLBACK_MS, SHOW_ANIMATION_MS } from '../../apps/kernel/src/kernel'
+import { HIDE_FALLBACK_MS, SELECTION_MAX_CHARS, SHOW_ANIMATION_MS } from '../../apps/kernel/src/kernel'
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -204,6 +204,76 @@ test('敲壳唤出失败（壳没连上）时，仍必须广播 visible=true', a
   } finally {
     await bare.stop()
   }
+})
+
+/**
+ * 唤出时带上「前台选中的文本」（requirements §3.1）。
+ *
+ * 两件事必须一起成立，缺一个都是坏体验：
+ *  - **带得上**：用户在别的 App 里选了一段文字再按热键，就是想让启动台拿它去搜；
+ *  - **不越界**：搜索框里已经有用户打了一半的字时**绝不覆盖** ——
+ *    选区大多数时候只是顺带的上下文，正在输的内容才是明确意图。
+ *
+ * 读取只能发生在**窗口上屏之前**（壳侧 `selection.rs`）：窗口一显示，前台就是自己，
+ * 选区随之消失。所以选区是随 `window.show` 的返回值 / `window/toggled` 通知回来的，
+ * 不是内核回头去问。
+ */
+test('唤出时把选中文本带进搜索框（壳读、内核决定填不填）', async () => {
+  const seen: string[] = []
+  const off = h.kernel.bus.on('ui/searchContent', (payload) => {
+    seen.push(String((payload as { value?: string } | undefined)?.value ?? ''))
+  })
+
+  // 热键路径：壳在 window/toggled 里把"上屏之前"读到的选区一起带回来
+  h.kernel.hostUi.state.searchContent = ''
+  shell.notify('window/toggled', { visible: true, selection: 'createLogger' })
+  await sleep(SHOW_ANIMATION_MS + 120)
+  assertEqual(seen.length, 1, `应当广播一次搜索框内容，实际 ${seen.length} 次`)
+  assertEqual(seen[0], 'createLogger', '选中文本应当被填进搜索框')
+
+  // 内核自己唤出的路径（托盘 / `/api/window/show`）：选区来自 window.show 的返回值
+  shell.showSelection = 'from-show-result'
+  h.kernel.hostUi.state.searchContent = ''
+  seen.length = 0
+  await h.api('/api/window/show', { method: 'POST' })
+  assertEqual(seen.length, 1, `window.show 路径也应当带上，实际 ${seen.length} 次`)
+  assertEqual(seen[0], 'from-show-result', 'window.show 返回值里的选区同样要带上')
+
+  // 搜索框非空 ⇒ 不覆盖（用户已经开始打字）
+  shell.showSelection = 'should-not-replace'
+  h.kernel.hostUi.state.searchContent = '用户打了一半'
+  seen.length = 0
+  await h.api('/api/window/show', { method: 'POST' })
+  assertEqual(seen.length, 0, '搜索框非空时不得覆盖用户输入')
+
+  // 超长（选了一整篇文档）⇒ 不带：那只会变成一次必然搜不到的查询
+  shell.showSelection = 'x'.repeat(SELECTION_MAX_CHARS + 1)
+  h.kernel.hostUi.state.searchContent = ''
+  seen.length = 0
+  await h.api('/api/window/show', { method: 'POST' })
+  assertEqual(seen.length, 0, `超过 ${SELECTION_MAX_CHARS} 字的选中文本不带`)
+
+  off()
+  shell.showSelection = null
+  h.kernel.hostUi.state.searchContent = ''
+})
+
+/**
+ * 状态条要回答的是"启动台一共占多少"：内存必须是**壳 + 内核两进程之和**，
+ * 而壳那一半只有壳自己知道（`app.usage`）。
+ *
+ * 少了它的后果不是少一个数字，而是让用户低估占用 —— 而"轻不轻"正是这个数字存在的理由。
+ */
+test('状态条把壳的那一半算进去（app.usage → /api/system/stats）', async () => {
+  const res = await h.api<{
+    ok: boolean
+    stats: { app: { rss: number; rssShell: number; rssKernel: number } }
+  }>('/api/system/stats')
+
+  assertEqual(res.stats.app.rssShell, shell.usage.rss, '壳的内存应当来自 app.usage')
+  assert(res.stats.app.rssKernel > 0, '内核自己那一半也要报出来')
+  assertEqual(res.stats.app.rss, res.stats.app.rssShell + res.stats.app.rssKernel, '总量必须是两进程之和')
+  assert(shell.sent.includes('app.usage'), '内核必须真的去问壳要占用，而不是只报自己')
 })
 
 const failed = await run('壳 ↔ 内核 通知契约')
