@@ -96,9 +96,9 @@ export function splitGlobalCommandId(id: string): { pluginId: string; name: stri
 
 export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
 export const COMMAND_NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/
-export const API_VERSIONS_SUPPORTED: readonly string[] = ['1']
+export const API_VERSIONS_SUPPORTED: readonly string[] = ['1', '2']
 
-/** 脚本/无视图命令的产物查找顺序（宿主的唯一入口规则） */
+/** 逻辑层命令的产物查找顺序（宿主的唯一入口规则；apiVersion 2 = 可执行产物，与 Rust 侧 `script_entry_candidates` 保持一致） */
 export function scriptEntryCandidates(name: string): string[] {
-  return [`${name}.mjs`, `${name}.js`, `workers/${name}.mjs`, `workers/${name}.js`]
+  return [name, `${name}.exe`, `workers/${name}`, `workers/${name}.exe`]
 }

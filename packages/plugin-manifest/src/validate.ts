@@ -201,7 +201,7 @@ export function validateManifest(raw: unknown): ManifestValidation {
   // apiVersion：必填
   let apiVersion: string
   if (raw.apiVersion === undefined) {
-    return fail('MANIFEST_INVALID', 'apiVersion 必填（当前只接受 "1"）')
+    return fail('MANIFEST_INVALID', 'apiVersion 必填（接受 "1" 与 "2"）')
   } else if (typeof raw.apiVersion !== 'string') {
     return fail('MANIFEST_INVALID', 'apiVersion 必须是字符串')
   } else {
@@ -327,7 +327,7 @@ export function checkEntries(manifest: PluginManifest, files: Iterable<string>):
   for (const decl of manifest.commands) {
     if (decl.mode === 'view') continue
     const found = scriptEntryCandidates(decl.name).some((c) => set.has(c))
-    if (!found) missing[decl.name] = `缺少 ${decl.name}.mjs`
+    if (!found) missing[decl.name] = `缺少 ${decl.name}（可执行产物）`
   }
   return { missing }
 }

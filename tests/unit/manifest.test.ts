@@ -6,7 +6,7 @@ const VALID = {
   title: '我的插件',
   version: '0.1.0',
   type: 'module',
-  apiVersion: '1',
+  apiVersion: '2',
   capabilities: ['storage'],
   commands: [
     { name: 'hello', title: '打个招呼', mode: 'view', searchable: true, placeholder: '输入名字' },
@@ -115,10 +115,16 @@ test('settings：非法声明一律拒绝（key / type / options / default / 重
   }
 })
 
-test('未知 apiVersion 报 API_VERSION_UNSUPPORTED', () => {
-  const result = validateManifest({ ...VALID, apiVersion: '2' })
-  assert(!result.ok)
-  assertEqual(result.code, 'API_VERSION_UNSUPPORTED')
+test('apiVersion "1" 与 "2" 都接受；未知版本报 API_VERSION_UNSUPPORTED', () => {
+  const v1 = validateManifest({ ...VALID, apiVersion: '1' })
+  assert(v1.ok, 'apiVersion 1 仍可加载（视图层不受版本影响）')
+
+  const v2 = validateManifest({ ...VALID, apiVersion: '2' })
+  assert(v2.ok, 'apiVersion 2 应当通过')
+
+  const unknown = validateManifest({ ...VALID, apiVersion: '3' })
+  assert(!unknown.ok)
+  assertEqual(unknown.code, 'API_VERSION_UNSUPPORTED')
 })
 
 test('未知 capability 报 CAPABILITY_UNKNOWN（插件级与命令级都查）', () => {
@@ -166,19 +172,19 @@ test('缺 apiVersion / capabilities 一律拒绝（无兼容放行）', () => {
   assert(!noCaps.ok, '缺 capabilities 应当失败')
 })
 
-test('产物校验：view 缺 index.html、脚本缺同名产物都报 ENTRY_MISSING', () => {
+test('产物校验：view 缺 index.html、逻辑层缺同名可执行产物都报 ENTRY_MISSING', () => {
   const result = validateManifest(VALID)
   assert(result.ok)
   const { missing } = checkEntries(result.manifest, ['hello.mjs'])
   assertEqual(missing.hello, '缺少 index.html')
-  assertEqual(missing.job, '缺少 job.mjs')
-  assertEqual(missing.compute, '缺少 compute.mjs')
+  assertEqual(missing.job, '缺少 job（可执行产物）')
+  assertEqual(missing.compute, '缺少 compute（可执行产物）')
 
   const { missing: ok } = checkEntries(result.manifest, [
     'index.html',
     'assets/app.js',
-    'job.mjs',
-    'workers/compute.mjs',
+    'job',
+    'workers/compute.exe',
   ])
   assertEqual(Object.keys(ok).length, 0, `不应有缺失：${JSON.stringify(ok)}`)
 })
