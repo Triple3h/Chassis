@@ -421,6 +421,18 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **对策**：SDK 已内置兜底（首发失败时 JSON 往返展平后重发一次，见 `packages/plugin-api` 的 `post()`）；
   插件侧仍建议在写库 / 提交前展开一层（`list.map((x) => ({ ...x }))`）或 `toRaw()`，并给写操作补 `try/catch + toast.err`，别让失败被静默吞掉。
 
+### 5.19 插件页里按 `Esc` 没反应（或者该留的退了）
+
+- **现象**：焦点在插件页里时按 `Esc`，宿主像没收到（退回不了启动台）；或插件自己画的弹层关了、页面也跟着退了一层。
+- **原因**：iframe 是独立文档，宿主挂在顶层 window 上的键盘监听**收不到**插件页里的按键。`@launcher/api` 因此兜底：**没人消费**的 `Esc` 自动交还宿主（等价 `commands.close()`，见 plugin-spec §10.2）。
+- **对策**：插件消费 `Esc`（关自己画的弹层 / 清空搜索框）时必须 `preventDefault()`（`stopPropagation()` 同样有效）——`UiDialog` / `UiSelect` 已经这么做了，自己叠面板时要照做。
+
+### 5.20 倒计时环一轮转了两圈（CSS 动画的双时钟）
+
+- **现象**：环的进度比真实时间快一倍 —— 30s 的 TOTP 周期，环走完两整圈；页面停留越久偏差越大。
+- **原因**：动画自身的时钟也在走，而 `animation-delay` 表达的是「本时间步已过秒数」；每秒把 delay 往前推 1 秒 = 把同一秒算了**两遍**（动画位置 = 动画存活时长 + `|delay|`）。`CDP` 单点读 `delay`/`dashoffset` 会看着"自洽"，只有连续采样才能发现速度是 2 倍。
+- **对策**：**一个时间源**。JS 每秒（对齐整秒）算目标 `stroke-dashoffset`，平滑交给 `transition: stroke-dashoffset 1s linear`；跨时间步那一帧要临时关掉过渡，否则「空 → 满」会被补间演成**倒转一整圈**（`plugins/totp/src/App.vue` 的 `ringOffset()` / `markStepReset()`）。
+
 ---
 
 ## 6. 新增一个插件的检查清单

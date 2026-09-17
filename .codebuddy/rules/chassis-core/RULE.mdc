@@ -40,7 +40,7 @@ provider:
 - **插件页主题**：手动 > 宿主 `?theme=` > `data-theme` > 系统；**只有手动切换才写 localStorage**（自动判定落盘 = 把首次打开时的主题永久钉死）；系统变化只在来源是 system 时跟随。
 - **插件页 CSP**：`script-src 'self' 'wasm-unsafe-eval'`（放行随包 wasm 编译，必须随包、禁 CDN；JS `eval` 仍禁）；受 `tests/unit/security.test.ts` 守护。
 - **插件重载会打死它自己的插件页**：`session/closed{reason}` + `plugin/reloaded` ⇒ UI 用同一命令换新会话重开；其余 reason 直接卸载 iframe。
-- **插件视图的退出入口是宿主的责任**（顶栏由插件自己画）：footer 最左「返回」+ `Esc` / `⌘W`，三条路径统一走 `leavePluginView()`（close → `nextTick()` → focus）。
+- **插件视图的退出入口是宿主的责任**（顶栏由插件自己画）：footer 最左「返回」+ `Esc` / `⌘W`，三条路径统一走 `leavePluginView()`（close → `nextTick()` → focus）。焦点在 iframe 里时宿主收不到按键（事件不跨文档冒泡）⇒ **SDK 把没人消费的 Esc 交还宿主**（`commands.close` → `session/closed{reason:'ui'}` → 同一条收尾，含焦点归位）；插件消费 Esc 要 `preventDefault()` / `stopPropagation()`。受 `tests/unit/plugin-api-escape.test.ts` 守护。
 - v1 view 会话打开时**没有搜索框** ⇒ `watchSearchContent` 不触发；入口型插件用 `getSearchContent()` 取初始输入；footer 的 keys 只展示、不派发。
 
 ## 插件策略（内核侧）

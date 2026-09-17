@@ -41,6 +41,8 @@ provider:
 - 表单控件写 `class="launcher-input"`（背景 / 边框 / focus 环跟着主题与主题色走）。
 - **下拉框用 `@launcher/ui/UiSelect.vue`，不要写原生 `<select>`**：它的弹出菜单由 macOS 系统（NSMenu）绘制，不跟主题、不跟主题色。用法 `:model-value` + `@update:model-value`（`v-model` 可，数字字段自己 `Number()` 转）。
 - 弹窗用 `@launcher/ui/UiDialog.vue`（自带遮罩 / Esc 关闭 / 进场），别自己叠一层。
+- **消费 `Esc` 必须 `preventDefault()`**（`stopPropagation()` 也算）：没被消费的 Esc 由 SDK 自动交还宿主（退回启动台）。`UiDialog` / `UiSelect` 已内建，自己画的弹层 / 清空搜索框要照做。
+- **进度类动画（倒计时环、进度条）只准有一个时间源**：JS 算目标值 + `transition` 补间；**不要**用 CSS 动画再每秒重设 `animation-delay`（动画自身时钟也在走 = 把同一秒算两遍，环一轮转两圈）。跨周期那一帧要临时关过渡，否则补间会把「空 → 满」演成倒转一整圈（参考 `plugins/totp/src/App.vue` 的 `ringOffset` / `markStepReset`）。
 - 主题色派生的**半透明填充不要写 `color-mix`**：构建器（Lightning CSS）会把它拆成「实色兜底 + 真值」两条规则，实色兜底在老一点的 WebKit 上会把整块面刷成纯色（选中卡片直接变纯蓝）。写法：插件自己的 `:root` / `[data-theme='dark']` 里定义 rgba 令牌（参考 `plugins/totp/src/styles/app.css` 的 `--totp-*`），色值取自 `theme.css` 的 `--launcher-accent` / `--launcher-success`。
 
 ## 性能
