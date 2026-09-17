@@ -13,9 +13,15 @@ import os from 'node:os'
 import path from 'node:path'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const kernelEntry = path.join(repoRoot, 'apps', 'kernel', 'dist', 'kernel.mjs')
-if (!fs.existsSync(kernelEntry)) {
-  console.error('✗ 找不到内核产物，先跑 npm run build:kernel')
+// v2：内核是 Rust 二进制（`target/release/launcher-kernel`）
+const kernelBin = path.join(repoRoot, 'target', 'release', process.platform === 'win32' ? 'launcher-kernel.exe' : 'launcher-kernel')
+if (!fs.existsSync(kernelBin)) {
+  console.error('✗ 找不到内核产物，先跑 pnpm build:kernel')
+  process.exit(1)
+}
+// 逻辑层插件产物也是必需的：缺了会报 ENTRY_MISSING，冒烟会误报成插件坏
+if (!fs.existsSync(path.join(repoRoot, 'plugins', 'web-open', 'dist', 'web'))) {
+  console.error('✗ 插件逻辑层产物不存在，先跑 pnpm build:plugins')
   process.exit(1)
 }
 
@@ -26,19 +32,18 @@ if (queries.length === 0) queries.push('safari', '百度.com', 'notes')
 // 出厂 bundle = plugins/ 下全部插件；未构建的插件没有 dist/package.json，内核会自行跳过
 const builtinRoots = [path.join(repoRoot, 'plugins')]
 
+const uiDist = path.join(repoRoot, 'apps', 'launcher-ui', 'dist')
 const child = spawn(
-  process.execPath,
+  kernelBin,
   [
-    kernelEntry,
     '--standalone',
     '--data-root',
     dataRoot,
     '--builtin-plugins',
     builtinRoots.join(','),
-    '--ui-dist',
-    path.join(repoRoot, 'apps', 'launcher-ui', 'dist'),
+    ...(fs.existsSync(uiDist) ? ['--ui-dist', uiDist] : []),
   ],
-  { stdio: ['ignore', 'pipe', 'pipe'] },
+  { stdio: ['ignore', 'pipe', 'pipe'], cwd: repoRoot },
 )
 
 let base = null
@@ -148,6 +153,21 @@ try {
   }
 
   line('\n[执行]')
+  // 审计要有得看：走一条**非 essential** 插件页的真实桥调用
+  // （essential 插件——应用启动 / 文件搜索 / 设置——的调用按设计不进审计，见规则 chassis-core）
+  const session = await post('/api/invoke', { id: 'json-tools:json' })
+  const sessionUrl = session.result?.data?.url ? new URL(session.result.data.url) : null
+  check(Boolean(sessionUrl), 'json-tools 打开会话', JSON.stringify(session.result ?? session))
+  if (sessionUrl) {
+    const info = await post('/api/bridge', {
+      sid: sessionUrl.searchParams.get('sid'),
+      token: sessionUrl.searchParams.get('token'),
+      id: 1,
+      method: 'ctx.host.info',
+    })
+    check(info.ok === true, 'host.info 走通（非 essential ⇒ 会被审计）', JSON.stringify(info))
+  }
+
   const execResult = await post('/api/exec', { pluginId: 'web-open', command: 'web', args: undefined })
   void execResult
 
@@ -164,6 +184,10 @@ try {
     )
   }
   check(audit.records.length > 0, '审计有记录（P6）')
+  check(
+    !audit.records.some((record) => record.pluginId === 'app-launcher'),
+    'essential 插件的调用不进审计（设计如此）',
+  )
 
   if (failures > 0) {
     line('\n[内核日志]')

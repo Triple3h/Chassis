@@ -26,7 +26,9 @@ const withKernel = scope === 'all' || scope === 'kernel'
 const withUi = scope === 'all' || scope === 'ui'
 
 const UI_PORT = 3333
-const kernelEntry = path.join(repoRoot, 'apps', 'kernel', 'dist', 'kernel.mjs')
+// v2：内核是 Rust 二进制（`target/release/launcher-kernel`）
+const kernelBin = path.join(repoRoot, 'target', 'release', process.platform === 'win32' ? 'launcher-kernel.exe' : 'launcher-kernel')
+const pnpmCmd = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const children = []
 
 function shutdown(code = 0) {
@@ -39,19 +41,25 @@ process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
 function ensureKernelBuilt() {
-  if (fs.existsSync(kernelEntry)) return
-  console.log('· 内核产物不存在，先构建一次（node scripts/build-all.mjs kernel）')
-  const result = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'build-all.mjs'), 'kernel'], {
-    stdio: 'inherit',
-    cwd: repoRoot,
-  })
+  if (fs.existsSync(kernelBin)) return
+  console.log('· 内核产物不存在，先构建一次（cargo build --release -p launcher-kernel）')
+  const result = spawnSync('cargo', ['build', '--release', '-p', 'launcher-kernel'], { stdio: 'inherit', cwd: repoRoot })
+  if (result.status !== 0) process.exit(result.status ?? 1)
+}
+
+/** 插件逻辑层是 Rust 产物（`dist/<name>`）：没有就先整包构建一次，否则内核会报 ENTRY_MISSING */
+function ensurePluginsBuilt() {
+  const sentinel = path.join(repoRoot, 'plugins', 'web-open', 'dist', 'web')
+  if (fs.existsSync(sentinel)) return
+  console.log('· 插件逻辑层产物不存在，先构建一次（pnpm build:plugins）')
+  const result = spawnSync(pnpmCmd, ['build:plugins'], { stdio: 'inherit', cwd: repoRoot })
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
 function startKernel() {
   ensureKernelBuilt()
+  ensurePluginsBuilt()
   const args = [
-    kernelEntry,
     '--standalone',
     '--data-root',
     path.join(repoRoot, '.dev-data'),
@@ -61,7 +69,7 @@ function startKernel() {
   if (withUi) args.push('--ui-dev', `http://127.0.0.1:${UI_PORT}`)
 
   // stdout 是壳的协议通道：standalone 下没有意义，直接丢掉，只看 stderr
-  const child = spawn(process.execPath, args, { cwd: repoRoot, stdio: ['ignore', 'ignore', 'pipe'] })
+  const child = spawn(kernelBin, args, { cwd: repoRoot, stdio: ['ignore', 'ignore', 'pipe'] })
   children.push(child)
 
   let announced = false
@@ -69,7 +77,7 @@ function startKernel() {
   child.stderr.on('data', (chunk) => {
     process.stderr.write(chunk)
     if (announced) return
-    const match = /独立模式：UI http:\/\/127\.0\.0\.1:(\d+)/.exec(chunk)
+    const match = /内核就绪：UI http:\/\/127\.0\.0\.1:(\d+)/.exec(chunk)
     if (!match) return
     announced = true
     const port = match[1]

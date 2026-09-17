@@ -26,22 +26,11 @@ function run(cmd, args, cwd) {
   }
 }
 
-async function buildKernel() {
-  const outfile = path.join(repoRoot, 'apps', 'kernel', 'dist', 'kernel.mjs')
-  fs.mkdirSync(path.dirname(outfile), { recursive: true })
-  await build({
-    entryPoints: [path.join(repoRoot, 'apps', 'kernel', 'src', 'main.ts')],
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    target: 'node22',
-    outfile,
-    // sidecar 必须自包含：第三方依赖全部打进来
-    logLevel: 'warning',
-    banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
-    define: { 'process.env.NODE_ENV': '"production"' },
-  })
-  console.log(`✓ kernel → ${path.relative(repoRoot, outfile)}`)
+function buildKernel() {
+  // v2：内核是 Rust（`apps/kernel` → `target/release/launcher-kernel`）。
+  // 内核 = Rust（`apps/kernel`）；v1 的 Node 内核已删除，打包链路不再带 Node。
+  run('cargo', ['build', '--release', '-p', 'launcher-kernel'], repoRoot)
+  console.log('✓ launcher-kernel → target/release/launcher-kernel')
 }
 
 function buildUi() {
@@ -55,8 +44,8 @@ function buildUi() {
 }
 
 function buildPlugins() {
-  const roots = [path.join(repoRoot, 'plugins'), path.join(repoRoot, 'tests', 'fixtures')]
-  for (const root of roots) buildPluginRoot(root)
+  // 只构建出厂插件；`tests/fixtures/*` 的 fixture 由测试自己生成（见 `tests/helpers/fixtures.ts`）
+  buildPluginRoot(path.join(repoRoot, 'plugins'))
 }
 
 function buildPluginRoot(root) {

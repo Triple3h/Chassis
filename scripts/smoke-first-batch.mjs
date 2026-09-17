@@ -26,7 +26,8 @@ import { fileURLToPath } from 'node:url'
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const kernelEntry = path.join(repoRoot, 'apps', 'kernel', 'dist', 'kernel.mjs')
+// v2：内核是 Rust 二进制（`target/release/launcher-kernel`）
+const kernelBin = path.join(repoRoot, 'target', 'release', process.platform === 'win32' ? 'launcher-kernel.exe' : 'launcher-kernel')
 const pluginsRoot = path.join(repoRoot, 'plugins')
 
 const PLUGINS = [
@@ -40,8 +41,8 @@ function line(text) {
   process.stdout.write(`${text}\n`)
 }
 
-if (!fs.existsSync(kernelEntry)) {
-  line('✗ 找不到内核产物，先跑 npm run build:kernel')
+if (!fs.existsSync(kernelBin)) {
+  line('✗ 找不到内核产物，先跑 pnpm build:kernel')
   process.exit(1)
 }
 if (!fs.existsSync(pluginsRoot)) {
@@ -67,7 +68,7 @@ fs.mkdirSync(builtinRoot, { recursive: true })
 
 /**
  * hosts 插件的读写目标改到临时文件 —— 冒烟脚本**绝不能碰用户真实的 /etc/hosts**。
- * 内核与它拉起的脚本 worker 都继承这个环境变量（见 host-manager/src/no-view/_hosts-file.ts）。
+ * 内核与它拉起的脚本子进程都继承这个环境变量（见 host-manager/src/lib.rs）。
  */
 const OUTSIDE = `##\n# Host Database\n##\n127.0.0.1\tlocalhost\n# 别的程序写的\n10.8.0.1\tvpn.example.com\n\n`
 const REGION =
@@ -111,9 +112,8 @@ installPlugins()
 const installSnapshotBefore = snapshot(builtinRoot)
 
 const child = spawn(
-  process.execPath,
+  kernelBin,
   [
-    kernelEntry,
     '--standalone',
     '--data-root',
     dataRoot,
@@ -123,7 +123,7 @@ const child = spawn(
       ? ['--ui-dist', path.join(repoRoot, 'apps', 'launcher-ui', 'dist')]
       : []),
   ],
-  { stdio: ['ignore', 'pipe', 'pipe'] },
+  { stdio: ['ignore', 'pipe', 'pipe'], cwd: repoRoot },
 )
 
 let base = null
@@ -273,7 +273,7 @@ try {
   }
 
   /* --------------------------------------------- 阶段 2：脚本（真读本机文件） */
-  line('\n[阶段 2] 脚本命令（exec.run → Node Worker）')
+  line('\n[阶段 2] 脚本命令（exec.run → Rust 子进程）')
 
   const hostsSession = await openSession('host-manager', 'hosts')
   check(Boolean(hostsSession.sid), 'host-manager 打开会话', JSON.stringify(hostsSession.error))

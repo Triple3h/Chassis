@@ -14,15 +14,27 @@ function copy(src, dest) {
  */
 export function assembleResources(repoRoot) {
   const resources = path.join(repoRoot, 'apps', 'shell', 'resources')
-  const kernelEntry = path.join(repoRoot, 'apps', 'kernel', 'dist', 'kernel.mjs')
+  // v2：内核是 Rust 可执行文件（target/release/launcher-kernel），不再是 Node 的 kernel.mjs
+  const kernelName = process.platform === 'win32' ? 'launcher-kernel.exe' : 'launcher-kernel'
+  const kernelEntry = path.join(repoRoot, 'target', 'release', kernelName)
   const uiDist = path.join(repoRoot, 'apps', 'launcher-ui', 'dist')
 
-  if (!fs.existsSync(kernelEntry)) throw new Error(`找不到内核产物：${kernelEntry}（先跑 npm run build:kernel）`)
+  if (!fs.existsSync(kernelEntry)) throw new Error(`找不到内核产物：${kernelEntry}（先跑 pnpm build:kernel）`)
   if (!fs.existsSync(path.join(uiDist, 'index.html'))) {
-    throw new Error(`找不到 UI 产物：${uiDist}（先跑 npm run build:ui）`)
+    throw new Error(`找不到 UI 产物：${uiDist}（先跑 pnpm build:ui）`)
   }
 
-  copy(kernelEntry, path.join(resources, 'kernel', 'kernel.mjs'))
+  const kernelDir = path.join(resources, 'kernel')
+  fs.mkdirSync(kernelDir, { recursive: true })
+  // 先清掉上一次的产物（含 v1 留下的 kernel.mjs），只保留仓库里的 PLACEHOLDER.md
+  for (const name of fs.readdirSync(kernelDir)) {
+    if (name.endsWith('.md')) continue
+    fs.rmSync(path.join(kernelDir, name), { recursive: true, force: true })
+  }
+  const kernelDest = path.join(kernelDir, kernelName)
+  fs.copyFileSync(kernelEntry, kernelDest)
+  // 可执行位必须带进 .app（copyFileSync 保留 mode，这里显式再设一次）
+  if (process.platform !== 'win32') fs.chmodSync(kernelDest, 0o755)
   copy(uiDist, path.join(resources, 'ui'))
 
   const builtin = path.join(resources, 'builtin-plugins')
