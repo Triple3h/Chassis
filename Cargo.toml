@@ -1,0 +1,20 @@
+# M5：Rust workspace（根级）—— 内核（apps/kernel）+ 插件 SDK（packages/plugin-sdk-rs）+ 各插件逻辑层
+# （crate 根 = 插件目录 plugins/<id>/，Rust 源码直接放该插件的 src/，与 view 的 Vue 源码同目录）。
+#
+# 为什么放在仓库根：Cargo 要求 workspace 成员必须位于 workspace 根**之下**（子目录），
+# 而成员分散在 packages/、apps/ 与 plugins/ 三处；只有仓库根能同时罩住它们。
+# apps/shell 是独立 workspace（自己的 target 与打包路径假设），必须显式 exclude。
+# 设计见 docs/m5-rust-and-windows.md §A1.1。
+[workspace]
+resolver = "2"
+members = [
+    "packages/plugin-sdk-rs",
+    "apps/kernel",
+    # 逻辑层插件（有 no-view / script 命令的）：逐个列出（glob `plugins/*` 会匹配到没有清单的纯 view 插件目录）
+    "plugins/app-launcher",
+    "plugins/file-search",
+    "plugins/host-manager",
+    "plugins/totp",
+    "plugins/web-open",
+]
+exclude = ["apps/shell"]

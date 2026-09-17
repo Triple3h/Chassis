@@ -17,6 +17,8 @@ plugins/release/
 .dev-data/
 .dev/
 apps/shell/target/
+# M5：根级 Rust workspace 的产物（内核 / 插件 SDK / 插件逻辑层）
+/target/
 apps/shell/gen/
 apps/shell/resources/kernel/
 apps/shell/resources/ui/

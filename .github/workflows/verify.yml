@@ -1,0 +1,40 @@
+# 静态与单元验证（不产包）：push / PR 触发。
+# 设计见 docs/m5-rust-and-windows.md §B3.7。Linux 上只做类型检查 / 测试 / 构建 / 规范自检 + Rust workspace 测试。
+name: verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck（TS / Vue）
+        run: pnpm typecheck
+
+      - name: test（TS）
+        run: pnpm test
+
+      - name: build（kernel / ui / plugins）
+        run: pnpm build
+
+      - name: spec-check（插件规范自检）
+        run: pnpm spec-check
+
+      - name: cargo test --workspace
+        run: cargo test --workspace
