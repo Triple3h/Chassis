@@ -1,8 +1,9 @@
 //! 启动台 UI 的宿主服务（v1 `http/server.ts`；ADR-0001：内核托管 UI 静态资源，
 //! UI 走 HTTP + SSE 与内核通信）。
 //!
-//! `infra_router` 产出**可 merge 进任意 Router 的片段**（SSE + 静态 + CORS + 兜底），
-//! 业务路由由 `api.rs` 构造后 merge —— 这样本模块不必知道内核状态的具体类型。
+//! `infra_router` 产出**可 merge 进任意 Router 的片段**（SSE + 静态 + 兜底），
+//! 业务路由由 `api.rs` 构造后 merge，最后统一用 `with_cors` 挂 CORS ——
+//! 这样本模块不必知道内核状态的具体类型，也不会漏挂中间件。
 
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
@@ -112,15 +113,32 @@ impl InfraState {
     }
 }
 
-/// 可 merge 进任意 `Router<S>` 的基础设施片段：SSE + 静态资源 + CORS。
+/// 可 merge 进任意 `Router<S>` 的基础设施片段：SSE + 静态资源。
+///
+/// **CORS 不在这里挂**：`Router::layer` 只作用于本 router 已有的路由，而业务路由
+/// （`/api/*`）是另一棵树（`api::router`），merge 之后覆盖不到它们 ——
+/// 必须等整棵树拼完再统一挂（见 `with_cors`，调用点在 `kernel.rs`）。
 pub fn infra_router<S>(state: InfraState) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
     Router::new()
         .route("/api/events", get(sse_handler).with_state(state.hub.clone()))
-        .fallback(get(serve_static).with_state(state.clone()))
-        .layer(middleware::from_fn_with_state(state, cors_middleware))
+        .fallback(get(serve_static).with_state(state))
+}
+
+/// 给**整棵路由树**挂 CORS（必须在 merge 之后调用）。
+///
+/// 踩坑记录（2026-09-17 实机复现）：一开始把 CORS layer 挂在 `infra_router` 上，
+/// 于是 `/api/*` 全都漏掉 —— dev 模式（UI 跑在 vite dev server、直连内核 API）下
+/// 预检 OPTIONS 返回 405、响应也没有 `Access-Control-Allow-Origin`，浏览器把请求
+/// 整个拦掉（表现为启动台搜不出任何东西）。生产模式 UI 由内核托管（same-origin）
+/// 没有跨域，所以这个问题只在 `pnpm dev` 下暴露。
+pub fn with_cors<S>(router: Router<S>, state: InfraState) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router.layer(middleware::from_fn_with_state(state, cors_middleware))
 }
 
 pub struct UiServer {
@@ -293,4 +311,71 @@ pub fn mime_for(path: &Path) -> &'static str {
 pub fn json_response(status: StatusCode, payload: Value) -> Response {
     let body = serde_json::to_string(&payload).unwrap_or_else(|_| "null".to_string());
     (status, [(header::CONTENT_TYPE, "application/json; charset=utf-8")], body).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower::ServiceExt;
+
+    const DEV_ORIGIN: &str = "http://127.0.0.1:3333";
+
+    fn state_with(allowed: Vec<String>) -> InfraState {
+        InfraState::new(SseHub::new(8), &ServerOptions { allowed_origins: allowed, ..Default::default() })
+    }
+
+    fn ping_app() -> Router {
+        let state = state_with(vec![DEV_ORIGIN.to_string()]);
+        let api = Router::new().route("/api/ping", get(|| async { "pong" }));
+        with_cors(api.merge(infra_router::<()>(state.clone())), state)
+    }
+
+    /// 回归：CORS 必须覆盖到 merge 进来的业务路由。
+    /// 只挂在 `infra_router` 上时，dev 模式（UI 在 vite dev server、直连内核 API）
+    /// 的预检返回 405 且响应无 CORS 头，浏览器把请求整个拦掉 —— 启动台什么都搜不出来。
+    #[tokio::test]
+    async fn cors_covers_merged_api_routes() {
+        let preflight = ping_app()
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/api/ping")
+                    .header(header::ORIGIN, DEV_ORIGIN)
+                    .header("access-control-request-method", "POST")
+                    .header("access-control-request-headers", "content-type")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(preflight.status(), StatusCode::NO_CONTENT, "预检应返回 204");
+        assert_eq!(allow_origin_of(&preflight), Some(DEV_ORIGIN));
+
+        let response = ping_app()
+            .oneshot(Request::builder().uri("/api/ping").header(header::ORIGIN, DEV_ORIGIN).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(allow_origin_of(&response), Some(DEV_ORIGIN), "业务响应也要带 CORS 头");
+    }
+
+    /// 白名单之外的来源不给 CORS 头（内核对「别的网页」保持关闭）
+    #[tokio::test]
+    async fn cors_rejects_unknown_origin() {
+        let response = ping_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ping")
+                    .header(header::ORIGIN, "http://evil.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(allow_origin_of(&response), None);
+    }
+
+    fn allow_origin_of(response: &Response) -> Option<&str> {
+        response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN).and_then(|value| value.to_str().ok())
+    }
 }

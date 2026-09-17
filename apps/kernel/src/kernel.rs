@@ -564,7 +564,11 @@ impl Kernel {
         }
 
         let infra = InfraState::new(self.sse.clone(), &options);
-        let router = crate::api::router().merge(crate::http::server::infra_router::<Arc<Kernel>>(infra));
+        // CORS 必须挂在整个 merge 完的树上（业务路由在 api::router 里，挂 infra_router 上覆盖不到）
+        let router = crate::http::server::with_cors(
+            crate::api::router().merge(crate::http::server::infra_router::<Arc<Kernel>>(infra.clone())),
+            infra,
+        );
         let server = serve(router, self.clone(), self.sse.clone(), options, self.log.clone()).await?;
         self.ui_port.store(server.port, Ordering::SeqCst);
         *self.ui.lock().unwrap_or_else(|err| err.into_inner()) = Some(server);

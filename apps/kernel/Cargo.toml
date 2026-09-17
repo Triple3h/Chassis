@@ -48,3 +48,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 # A1 后续模块加入（见 m5 计划 §A1.2）：
 #   notify（插件热重载）、zip（zip 安装）、plist（app-launcher）
+
+[dev-dependencies]
+# 单测里把 Router 当 Service 用（oneshot 发请求），验证 CORS 等中间件确实挂上了
+tower = { version = "0.5", features = ["util"] }

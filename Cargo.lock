@@ -493,6 +493,7 @@ dependencies = [
  "sysinfo",
  "tokio",
  "tokio-stream",
+ "tower",
  "uuid",
  "zip",
 ]
