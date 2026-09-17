@@ -11,17 +11,64 @@
 }
 
 .launcher-code-big {
-  font-size: 20px;
+  font-size: 22px;
   line-height: 26px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
 }
 
-/* 倒计时环 */
+/* 换码动画：验证码一变就重放（模板用 :key="验证码串" 让这个节点重建） */
+.launcher-code-swap {
+  display: inline-block;
+  animation: launcher-code-swap var(--launcher-motion-base) var(--launcher-ease-enter);
+}
+@keyframes launcher-code-swap {
+  from {
+    opacity: 0.25;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── 倒计时环 ──────────────────────────────────────────────────
+   剩余时间有两种表达，同时存在且互不冲突：
+   · 行内 style 的 stroke-dashoffset（每秒重算）—— 动画没跑起来时的正确兜底；
+   · CSS 动画（animation 的优先级高于行内样式）—— 动画跑起来时逐帧平滑的那条。
+   相位由 App.vue 的 ringStyle() 用负 animation-delay 钉在 TOTP 时间步上；
+   dasharray 取 66（> 2πr，r = 10.5），同值在 App.vue 的 RING_DASH 与上面 @keyframes 里。 */
 .launcher-ring {
   transform: rotate(-90deg);
 }
-.launcher-ring circle {
+.launcher-ring .track {
   fill: none;
+  stroke: var(--launcher-line);
+  stroke-width: 2.6;
+}
+.launcher-ring .progress {
+  fill: none;
+  stroke: var(--launcher-accent);
+  stroke-width: 2.6;
   stroke-linecap: round;
+  stroke-dasharray: 66;
+  animation: launcher-ring-deplete linear infinite;
+  transition: stroke var(--launcher-motion-fast) var(--launcher-ease-move);
+}
+.launcher-ring .progress.is-warn {
+  stroke: var(--launcher-warn);
+}
+.launcher-ring .progress.is-danger {
+  stroke: var(--launcher-danger);
+}
+@keyframes launcher-ring-deplete {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 66;
+  }
 }
 
 .launcher-row {
@@ -45,4 +92,251 @@
 }
 .launcher-pulse {
   animation: launcher-pulse 1.4s ease-in-out infinite;
+}
+
+/* ══ TOTP 专属界面 ══════════════════════════════════════════════
+   账户列表用「卡片 + 环形倒计时」表达：卡片承载身份与服务，
+   环与秒数承载「还剩几秒」（最后 10 秒转警示色、最后 5 秒转危险色并呼吸）。
+
+   主题色派生的半透明填充一律走下面这组令牌，**不要写 color-mix**：
+   构建器会把 color-mix 拆成「实色兜底 + 真值」两条规则，实色兜底在老一点的 WebKit 上
+   会把整张卡片刷成纯蓝（选中态看起来像坏了）。rgba 落死，到处都一样。
+   色值取自 theme.css 的 --launcher-accent / --launcher-success（插件页不跟随用户主题色）。 */
+:root {
+  --totp-sel-bg: rgba(37, 99, 235, 0.09);
+  --totp-sel-line: rgba(37, 99, 235, 0.34);
+  --totp-soft-bg: rgba(37, 99, 235, 0.13);
+  --totp-soft-line: rgba(37, 99, 235, 0.26);
+  --totp-ok-bg: rgba(22, 163, 74, 0.08);
+  --totp-ok-line: rgba(22, 163, 74, 0.45);
+}
+[data-theme='dark'] {
+  --totp-sel-bg: rgba(91, 140, 255, 0.13);
+  --totp-sel-line: rgba(91, 140, 255, 0.38);
+  --totp-soft-bg: rgba(91, 140, 255, 0.17);
+  --totp-soft-line: rgba(91, 140, 255, 0.3);
+  --totp-ok-bg: rgba(74, 222, 128, 0.09);
+  --totp-ok-line: rgba(74, 222, 128, 0.4);
+}
+
+/* 顶栏品牌块 —— 与头像同一种圆角色块，把「这是哪个插件」立起来 */
+.launcher-brand {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  color: var(--launcher-accent);
+  background: var(--totp-soft-bg);
+  border: 1px solid var(--totp-soft-line);
+}
+
+.launcher-search {
+  height: 32px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.launcher-clear {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--launcher-faint);
+  cursor: pointer;
+}
+.launcher-clear:hover {
+  background: var(--launcher-hover);
+  color: var(--launcher-muted);
+}
+
+/* 竖线：把「开关类」按钮与「动作类」按钮分开 */
+.launcher-vsep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--launcher-line);
+}
+.launcher-btn.ghost.is-on {
+  color: var(--launcher-accent);
+  background: var(--totp-soft-bg);
+}
+
+/* 分组标签 */
+.launcher-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--launcher-panel-2);
+  color: var(--launcher-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--launcher-motion-fast) var(--launcher-ease-move),
+    color var(--launcher-motion-fast) var(--launcher-ease-move),
+    border-color var(--launcher-motion-fast) var(--launcher-ease-move);
+}
+.launcher-filter:hover {
+  background: var(--launcher-active);
+  color: var(--launcher-fg);
+}
+.launcher-filter.is-active {
+  background: var(--totp-soft-bg);
+  border-color: var(--totp-soft-line);
+  color: var(--launcher-accent);
+  font-weight: 600;
+}
+.launcher-n {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+.launcher-noscroll {
+  scrollbar-width: none;
+}
+.launcher-noscroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* 账户卡片 */
+.launcher-card {
+  border: 1px solid var(--launcher-line);
+  border-radius: 12px;
+  background: var(--launcher-panel);
+  transition:
+    background var(--launcher-motion-fast) var(--launcher-ease-move),
+    border-color var(--launcher-motion-fast) var(--launcher-ease-move);
+}
+.launcher-card:hover {
+  background: var(--launcher-hover);
+}
+.launcher-card.is-selected {
+  background: var(--totp-sel-bg);
+  border-color: var(--totp-sel-line);
+}
+/* 选中态的左侧色条：键盘上下移动时，眼睛能立刻找到落点 */
+.launcher-card.is-selected::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  width: 3px;
+  height: 22px;
+  border-radius: 0 3px 3px 0;
+  background: var(--launcher-accent);
+  transform: translateY(-50%);
+}
+.launcher-card.is-copied {
+  border-color: var(--totp-ok-line);
+  background: var(--totp-ok-bg);
+}
+
+/* 头像：底色由服务名散列生成，白字 + 内描边（深浅主题下都不糊） */
+.launcher-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  user-select: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    inset 0 -1px 3px rgba(0, 0, 0, 0.16);
+}
+
+/* 验证码：单击即复制 —— 平时不加装饰，悬停才浮出一层浅底 */
+.launcher-code-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--launcher-motion-fast) var(--launcher-ease-move);
+}
+.launcher-code-btn:hover {
+  background: var(--launcher-hover);
+}
+
+/* 计时列：环 + 圈内的秒数；HOTP 行留空，好让各行的按钮纵向对齐 */
+.launcher-timer {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 26px;
+}
+.launcher-timer-n {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--launcher-faint);
+}
+.launcher-timer-n.is-warn {
+  color: var(--launcher-warn);
+}
+.launcher-timer-n.is-danger {
+  color: var(--launcher-danger);
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* 最后 5 秒的呼吸：整屏信息里只有它能把「快换码了」挑出来 */
+  .launcher-timer-n.is-danger {
+    animation: launcher-blink 1s var(--launcher-ease-move) infinite;
+  }
+}
+@keyframes launcher-blink {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* 行内动作（复制 / 编辑）：平时压暗，指到这一行才提亮 */
+.launcher-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.5;
+  transition: opacity var(--launcher-motion-fast) var(--launcher-ease-move);
+}
+.launcher-card:hover .launcher-row-actions,
+.launcher-card.is-selected .launcher-row-actions {
+  opacity: 1;
+}
+
+/* 空状态 / 解锁页的图标底座 */
+.launcher-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto;
+  border-radius: 16px;
+  color: var(--launcher-accent);
+  background: var(--totp-soft-bg);
+}
+
+.launcher-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
