@@ -1,0 +1,61 @@
+{
+  "name": "calc-pad",
+  "title": "计算稿纸",
+  "author": "triple3h",
+  "description": "像稿纸一样一行行算下去：实时求值、变量复用、自动保存",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "2",
+  "icon": "calculator",
+  "categories": [
+    "tool"
+  ],
+  "capabilities": [
+    "hostUi",
+    "storage",
+    "clipboard.write"
+  ],
+  "commands": [
+    {
+      "name": "calc-pad",
+      "title": "计算稿纸",
+      "subtitle": "一行一个算式，回车把结果带进下一行",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "输入算式，回车换行继续算",
+      "keywords": [
+        "计算",
+        "计算器",
+        "稿纸",
+        "算式",
+        "calc",
+        "calculator",
+        "数学",
+        "换算"
+      ],
+      "icon": "calculator"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/expr.test.ts && node ../../scripts/run-ts.mjs test/pads.test.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@launcher/ui": "workspace:*",
+    "@launcher/api": "workspace:*",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}

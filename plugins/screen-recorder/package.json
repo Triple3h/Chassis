@@ -1,0 +1,106 @@
+{
+  "name": "screen-recorder",
+  "title": "录屏助手",
+  "author": "triple3h",
+  "description": "全屏 / 区域 / 窗口三种录制模式，可带麦克风与鼠标点击高亮；顺手也能截图",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "2",
+  "icon": "video",
+  "categories": [
+    "tool"
+  ],
+  "platforms": [
+    "macos"
+  ],
+  "capabilities": [
+    "hostUi",
+    "storage",
+    "exec.spawn",
+    "shell.open",
+    "notify.show",
+    "clipboard.write"
+  ],
+  "commands": [
+    {
+      "name": "recorder",
+      "title": "录屏助手",
+      "subtitle": "全屏 / 区域 / 窗口录屏，带点击高亮与麦克风",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "回车开始录屏，或先设置录制方式",
+      "keywords": [
+        "录屏",
+        "录制",
+        "屏幕录制",
+        "截图",
+        "screen",
+        "record",
+        "recorder",
+        "screencapture"
+      ],
+      "icon": "video"
+    },
+    {
+      "name": "rec-start",
+      "title": "开始录制（脚本）",
+      "mode": "script",
+      "icon": "play"
+    },
+    {
+      "name": "rec-stop",
+      "title": "停止录制（脚本）",
+      "mode": "script",
+      "icon": "stop"
+    },
+    {
+      "name": "rec-status",
+      "title": "录制状态（脚本）",
+      "mode": "script",
+      "icon": "info"
+    },
+    {
+      "name": "rec-shot",
+      "title": "截图（脚本）",
+      "mode": "script",
+      "icon": "camera"
+    },
+    {
+      "name": "rec-permission",
+      "title": "屏幕录制权限（脚本）",
+      "mode": "script",
+      "icon": "shield"
+    },
+    {
+      "name": "rec-list",
+      "title": "最近产物列表（脚本）",
+      "mode": "script",
+      "icon": "folder"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build && npm run build:scripts",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:scripts": "cargo build --release -p launcher-plugin-screen-recorder && node ../../scripts/build-plugin.mjs screen-recorder --copy-scripts --keep-dist",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/recorder.test.ts",
+    "test:scripts": "cargo test -p launcher-plugin-screen-recorder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@launcher/ui": "workspace:*",
+    "@launcher/api": "workspace:*",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}

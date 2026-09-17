@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.vue-plugin.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "vue": [
+        "./node_modules/vue"
+      ],
+      "@launcher/api": [
+        "./node_modules/@launcher/api"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.vue"
+  ]
+}

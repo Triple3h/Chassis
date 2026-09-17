@@ -1,0 +1,60 @@
+{
+  "name": "markdown-notes",
+  "title": "Markdown 笔记",
+  "author": "triple3h",
+  "description": "Markdown 笔记：边写边预览、自动保存、可导出 Markdown / HTML",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "2",
+  "icon": "file-text",
+  "categories": [
+    "tool"
+  ],
+  "capabilities": [
+    "hostUi",
+    "storage",
+    "clipboard.write"
+  ],
+  "commands": [
+    {
+      "name": "notes",
+      "title": "Markdown 笔记",
+      "subtitle": "实时预览、自动保存的 Markdown 笔记本",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "写点什么，或搜索已有笔记",
+      "keywords": [
+        "markdown",
+        "笔记",
+        "md",
+        "备忘",
+        "写作",
+        "编辑器",
+        "notes"
+      ],
+      "icon": "file-text"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/markdown.test.ts && node ../../scripts/run-ts.mjs test/notes.test.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@launcher/ui": "workspace:*",
+    "@launcher/api": "workspace:*",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}

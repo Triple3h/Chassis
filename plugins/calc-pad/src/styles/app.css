@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import "../../../../packages/ui/styles/theme.css";
+
+/* Tailwind v4 不会自动跨目录扫描，必须显式声明 */
+@source "../";
+@source "../../../../packages/ui";
+
+/* 稿纸：算式与结果都用等宽字体，数字列对齐 */
+.pad-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+/* 结果列：等宽 + 右对齐，小数点自然对齐 */
+.pad-result {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  text-align: right;
+}

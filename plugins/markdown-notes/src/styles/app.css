@@ -1,0 +1,133 @@
+@import "tailwindcss";
+@import "../../../../packages/ui/styles/theme.css";
+
+/* Tailwind v4 不会自动跨目录扫描，必须显式声明 */
+@source "../";
+@source "../../../../packages/ui";
+
+/* 编辑器：等宽、行高松一点，长文档才好读 */
+.md-editor {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 21px;
+  tab-size: 2;
+}
+
+/* ── 预览区排版（渲染器输出的 html 走这里）──────────────────────── */
+.md-body {
+  font-size: 13px;
+  line-height: 1.75;
+  word-break: break-word;
+}
+.md-body > :first-child {
+  margin-top: 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 16px 0 8px;
+}
+.md-body h1 {
+  font-size: 20px;
+  border-bottom: 1px solid var(--launcher-line);
+  padding-bottom: 4px;
+}
+.md-body h2 {
+  font-size: 17px;
+}
+.md-body h3 {
+  font-size: 15px;
+}
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  font-size: 13.5px;
+  color: var(--launcher-muted);
+}
+.md-body p {
+  margin: 8px 0;
+}
+.md-body ul,
+.md-body ol {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+.md-body ul {
+  list-style: disc;
+}
+.md-body ol {
+  list-style: decimal;
+}
+.md-body li {
+  margin: 2px 0;
+}
+.md-body li.md-task {
+  list-style: none;
+  margin-left: -18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.md-body code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--launcher-panel-2);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.md-body pre.md-pre {
+  background: var(--launcher-panel-2);
+  border: 1px solid var(--launcher-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  overflow: auto;
+}
+.md-body pre.md-pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  line-height: 19px;
+}
+.md-body blockquote {
+  border-left: 3px solid var(--launcher-line-strong);
+  padding-left: 10px;
+  margin: 8px 0;
+  color: var(--launcher-muted);
+}
+.md-body a {
+  color: var(--launcher-accent);
+  text-decoration: underline;
+}
+.md-body hr {
+  border: none;
+  border-top: 1px solid var(--launcher-line);
+  margin: 14px 0;
+}
+.md-body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12.5px;
+}
+.md-body th,
+.md-body td {
+  border: 1px solid var(--launcher-line);
+  padding: 4px 8px;
+  text-align: left;
+}
+.md-body th {
+  background: var(--launcher-panel-2);
+  font-weight: 600;
+}
+.md-body img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+.md-body del {
+  color: var(--launcher-faint);
+}

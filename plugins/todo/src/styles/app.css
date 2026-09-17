@@ -1,0 +1,35 @@
+@import "tailwindcss";
+@import "../../../../packages/ui/styles/theme.css";
+
+/* Tailwind v4 不会自动跨目录扫描，必须显式声明 */
+@source "../";
+@source "../../../../packages/ui";
+
+/* 番茄钟大数字：等宽 + 表格数字，秒数跳动时不抖 */
+.pomo-clock {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 34px;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+
+/* 正在计时的呼吸灯 */
+@keyframes todo-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pomo-running {
+  animation: todo-pulse 2s ease-in-out infinite;
+}
+
+/* 已完成任务：标题划掉 */
+.task-done {
+  color: var(--launcher-faint);
+  text-decoration: line-through;
+}

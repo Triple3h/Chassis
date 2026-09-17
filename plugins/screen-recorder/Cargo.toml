@@ -1,0 +1,38 @@
+[package]
+name = "launcher-plugin-screen-recorder"
+version = "0.1.0"
+edition = "2021"
+description = "录屏助手（screen-recorder）逻辑层：驱动系统 screencapture 录屏 / 截图，管理录制进程与产物"
+license = "MIT"
+publish = false
+
+[lib]
+name = "launcher_plugin_screen_recorder"
+path = "src/lib.rs"
+
+# bin 名 = commands[].name（plugin-spec §2.2 的 N1 铁律）
+[[bin]]
+name = "rec-start"
+path = "src/bin/rec_start.rs"
+[[bin]]
+name = "rec-stop"
+path = "src/bin/rec_stop.rs"
+[[bin]]
+name = "rec-status"
+path = "src/bin/rec_status.rs"
+[[bin]]
+name = "rec-shot"
+path = "src/bin/rec_shot.rs"
+[[bin]]
+name = "rec-permission"
+path = "src/bin/rec_permission.rs"
+[[bin]]
+name = "rec-list"
+path = "src/bin/rec_list.rs"
+
+[dependencies]
+launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"   # 录屏/截图文件名的时间戳（本地时区）
+libc = "0.2"     # kill(2)：判断录制进程是否还在 + 发 SIGINT 收尾

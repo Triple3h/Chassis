@@ -1,0 +1,61 @@
+{
+  "name": "todo",
+  "title": "ToDo 待办",
+  "author": "triple3h",
+  "description": "记待办、标优先级、蹲截止日期，内置番茄钟专注计时",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "2",
+  "icon": "list-todo",
+  "categories": [
+    "tool"
+  ],
+  "capabilities": [
+    "hostUi",
+    "storage",
+    "notify.show"
+  ],
+  "commands": [
+    {
+      "name": "todo",
+      "title": "ToDo 待办",
+      "subtitle": "待办清单 + 番茄钟，搜索框里的文字可直接变成任务",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "输入要记的事，回车就是一条待办",
+      "keywords": [
+        "todo",
+        "待办",
+        "任务",
+        "清单",
+        "番茄钟",
+        "提醒",
+        "清单待办",
+        "pomodoro"
+      ],
+      "icon": "list-todo"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/tasks.test.ts && node ../../scripts/run-ts.mjs test/pomodoro.test.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@launcher/ui": "workspace:*",
+    "@launcher/api": "workspace:*",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}

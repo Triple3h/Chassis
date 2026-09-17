@@ -535,6 +535,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "launcher-plugin-screen-recorder"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "launcher-plugin-sdk",
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "launcher-plugin-sdk"
 version = "0.1.0"
 dependencies = [

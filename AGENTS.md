@@ -10,7 +10,7 @@ Chassis is a plugin-based macOS launcher: Tauri 2 Rust shell (system primitives 
 | `apps/kernel/src/` | Kernel (bin `launcher-kernel`): `kernel.rs`, `api.rs`, `plugin/*`, `search*.rs`, `services/*`, `link.rs` |
 | `apps/launcher-ui/src/` | Vue UI: `App.vue`, `components/*`, `lib/grid.ts`, `stores/*` |
 | `packages/` | `plugin-manifest` (types + validation + contract), `plugin-api` (view-side SDK), `plugin-sdk-rs` (logical-layer Rust SDK), `ui` (`@launcher/ui` shared kit) |
-| `plugins/*` | 8 built-in plugins; each `dist/` ships `index.html`, `assets/`, `package.json`, plus one executable per `no-view`/`script` command; Rust logic lives in each plugin's crate (`plugins/<id>/Cargo.toml`, sources in the same `src/`) |
+| `plugins/*` | 13 built-in plugins; each `dist/` ships `index.html`, `assets/`, `package.json`, plus one executable per `no-view`/`script` command; Rust logic lives in each plugin's crate (`plugins/<id>/Cargo.toml`, sources in the same `src/`) |
 | `tests/{unit,contract,smoke}` | Test suites plus `tests/fixtures/echo-plugin` (Rust fixture: SDK `echo` example binary) |
 
 ## Build, Test, and Development Commands

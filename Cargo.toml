@@ -14,6 +14,7 @@ members = [
     "plugins/app-launcher",
     "plugins/file-search",
     "plugins/host-manager",
+    "plugins/screen-recorder",
     "plugins/totp",
     "plugins/web-open",
 ]

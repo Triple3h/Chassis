@@ -1,6 +1,6 @@
 # 出厂插件（plugins/）
 
-出厂**预装**的 8 个插件。内核一视同仁：同一份「出厂 bundle」、可禁用、可卸载
+出厂**预装**的 13 个插件。内核一视同仁：同一份「出厂 bundle」、可禁用、可卸载
 （只有 `internal-*` 属管理面不可卸载），产物形态与 `docs/plugin-spec.md` 完全一致。
 
 | 插件 | 命令 | 视图层 | 逻辑层 |
@@ -13,6 +13,11 @@
 | `host-manager` | `hosts`（view） + `hosts-read` / `hosts-write` / `hosts-permission`（script） | Vite + Vue | Rust |
 | `text-diff` | `diff`（view） | Vite + Vue | — |
 | `json-tools` | `json`（view） | Vite + Vue | — |
+| `snips` | `snips`（view） | Vite + Vue | — |
+| `calc-pad` | `calc-pad`（view） | Vite + Vue | — |
+| `markdown-notes` | `notes`（view） | Vite + Vue | — |
+| `todo` | `todo`（view） | Vite + Vue | — |
+| `screen-recorder`（macOS 专属） | `recorder`（view） + `rec-start` / `rec-stop` / `rec-status` / `rec-shot` / `rec-permission` / `rec-list`（script） | Vite + Vue | Rust |
 
 ## 工程形态：视图层两套工具链，逻辑层统一 Rust
 
@@ -25,7 +30,8 @@
 | 共享代码 | 无（各自独立） | `@launcher/ui`（工作区包，`packages/ui/`）：UI 积木 + 前端工具（构建期打进各自产物） |
 | 构建驱动 | 根 `scripts/build-all.mjs` 按 `package.json` 的 `build:view` / `build:scripts` 驱动 | 同左 |
 
-> 4 个 Vue 插件 2026-09-16 搬进本目录：与内置插件同出厂流程，
+> Vue 插件（`totp` / `host-manager` / `text-diff` / `json-tools` / `snips` / `calc-pad` /
+> `markdown-notes` / `todo` / `screen-recorder`）与内置插件同出厂流程，
 > 但保留自己的 Vite + Vue 工具链，view 侧直连 `@launcher/api`，逻辑层走 Rust SDK `launcher-plugin-sdk`。
 > 插件 id 简化为 `totp` / `text-diff` / `json-tools`；hosts 后来改名为 `host-manager`。
 > 旧数据目录与历史 / 固定项由内核首次加载时接手，**改名链**（`sofast-hosts` → `hosts` → `host-manager`）

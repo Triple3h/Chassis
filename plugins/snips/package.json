@@ -1,0 +1,62 @@
+{
+  "name": "snips",
+  "title": "备忘快贴",
+  "author": "triple3h",
+  "description": "收藏常用「文本」「代码」「图片」，一键复制并粘贴回前台应用",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "2",
+  "icon": "clipboard",
+  "categories": [
+    "tool"
+  ],
+  "capabilities": [
+    "hostUi",
+    "storage",
+    "clipboard.read",
+    "clipboard.write"
+  ],
+  "commands": [
+    {
+      "name": "snips",
+      "title": "备忘快贴",
+      "subtitle": "常用文本 / 代码 / 图片片段，一键粘贴",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "搜索快贴，或输入要存下的片段",
+      "keywords": [
+        "快贴",
+        "备忘",
+        "剪贴板",
+        "片段",
+        "代码片段",
+        "snippet",
+        "clipboard",
+        "常用文本"
+      ],
+      "icon": "clipboard"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts && node ../../scripts/run-ts.mjs test/images.test.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@launcher/ui": "workspace:*",
+    "@launcher/api": "workspace:*",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}
