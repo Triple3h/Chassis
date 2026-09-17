@@ -18,7 +18,7 @@ pnpm app:local                # build-all → 组装资源 → cargo build --rel
 pnpm app:local --skip-build   # 前端产物没变时：跳过前端构建，只重编 Rust / 重新组装
 ```
 
-首次 cargo release 约 5–15 分钟。脚本依次做：
+首次 release 编译较久（壳 + 内核 + 5 个插件 crate 全量编译；后续增量快）。脚本依次做：
 
 1. `build-all.mjs` 构建 kernel / ui / 插件（`--skip-build` 时跳过）；
 2. 收集 `apps/shell/resources/{kernel,ui,builtin-plugins}`；
@@ -54,7 +54,9 @@ pnpm app:local   # 2. 重新打包（tray.png 走 include_bytes! ⇒ 换图标�
 
 - `codesign --verify --verbose=1 dist-app/Chassis.app`（ad-hoc 会有告警，正常）。
 - 双击启动：托盘图标出现 → 热键唤出窗口 → 搜一个应用能启动。
+- **零 Node 物证**：`find dist-app/Chassis.app/Contents/Resources -name '*.mjs'` 应为空；`Resources/kernel/launcher-kernel` 与各逻辑层插件的 `dist/<命令名>` 都是可执行文件（Rust 产物，0755）。
 - 改过插件：确认插件随包（`Contents/Resources/builtin-plugins/`）；需要单独分发的插件走 `pnpm pack:plugins`（zip → `plugins/release/`）。
+- 逻辑层改动的实机验证**必须重打包**（`pnpm app:local --skip-build` 也会重编 Rust 并重新组装）；只跑 `pnpm build` 只更新开发产物与 `dist/`，`.app` 里还是旧的。
 
 ## 环境依赖
 

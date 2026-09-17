@@ -1,13 +1,14 @@
 ---
-description: Vue 插件（plugins/{totp,host-manager,text-diff,json-tools}）开发硬约束：宿主调用直连 SDK、命令名与产物文件名必须一致、@launcher/ui 依赖解析、性能与安全的红线
+description: 插件开发硬约束（plugins/ 下 8 个出厂插件；view 层 Vue / 逻辑层 Rust）：宿主调用直连 SDK、命令名与产物文件名必须一致、apiVersion 2 与 Rust crate 登记、@launcher/ui 依赖解析、性能与安全的红线
 alwaysApply: true
 enabled: true
 provider:
 ---
 
-# Vue 插件开发铁律
+# 插件开发铁律（view 层 Vue / 逻辑层 Rust）
 
-`plugins/` 下 4 个 Vite + Vue 插件（totp / host-manager / text-diff / json-tools）的硬约束。
+`plugins/` 下 8 个出厂插件（app-launcher / file-search / web-open / internal-settings / totp / host-manager / text-diff / json-tools）的硬约束。
+**view 层仍是 Vite + Vue；`no-view` / `script` 逻辑层是 Rust 可执行产物（v2，ADR-0005）**——逻辑层 crate 根 = 插件目录，源码直接放该插件的 `src/`。
 下面每一条都是「不遵守就一定出问题」的；完整背景见 `docs/plugin-dev-guide.md`（历史与踩坑），
 操作流程见 skill `chassis-plugin-dev`。
 
@@ -26,18 +27,23 @@ provider:
 - `package.json` **必须**提供 `build:view` / `build:scripts` 脚本：根 `scripts/build-all.mjs` 按这两条驱动构建
   （只有 view 就只写 `build:view`；有 no-view/script 才写 `build:scripts`），否则 `pnpm build` 会跳过该插件。
 - `commands[].name` 对 `no-view` / `script` 命令**必须**等于产物文件名（v2：可执行产物 `dist/<name>`，Windows `dist/<name>.exe`）。
-- 逻辑层构建走 `build:scripts` = `cargo build --release -p <crate>` + `node ../../scripts/build-plugin.mjs <id> --copy-scripts`（M5 起；单一 bin 天然自包含，不存在 chunk 拆分问题。v1 的 `vite.worker.config.ts` + 逐入口构建是过渡期写法）。
+- 有 `no-view` / `script` 命令 ⇒ `apiVersion` **必须** `"2"`（v1 的 `.mjs` 逻辑层产物内核不再支持；spec-check 的 N1 会校验可执行位 + 二进制魔数，脚本改名冒充不算）。
+- **新逻辑层插件 = 建 crate + 登记根 `Cargo.toml` 的 members**（crate 名 `launcher-plugin-<id>`，`[[bin]] name` = 命令名）；漏登记 ⇒ `cargo build -p` 直接找不到包（members 不能写 `plugins/*` glob）。
+- 逻辑层构建走 `build:scripts` = `cargo build --release -p <crate>` + `node ../../scripts/build-plugin.mjs <id> --copy-scripts`（带 view 的再加 `--keep-dist`，且顺序先 view 后 scripts；单一 bin 天然自包含，不存在 chunk 拆分问题。v1 的 `vite.worker.config.ts` + 逐入口构建是过渡期写法）。配套 `test:scripts` = `cargo test -p <crate>`。
 - `vite.config.ts` **必须** `base: './'`，且不要启用 `manualChunks`。
 - `dist/` 必须包含 `index.html` + `assets/` + `package.json`（含完整 `commands`）+ 每个逻辑层命令的可执行产物。
 
-## 逻辑层（`no-view` / `script`，v2）
+## 逻辑层（`no-view` / `script`，v2，Rust）
 
 - 产物是**可执行文件**（`dist/<name>`，Windows `.exe`），宿主 `spawn` + NDJSON over stdio（ADR-0005 / `plugin-spec` §4.4）；`.mjs` 产物不再支持。
-- **必须**用 SDK 读写：`ctx.args` / `ctx.settings` / `ctx.data_path`（`ctx.plugin_path` 只读）、`ctx.done(x)` / `ctx.fail(e)` / `ctx.log` / `ctx.progress` / `ctx.on_query` / `ctx.storage.*`；panic 由 SDK 转 `fail`。
+- **必须**用 Rust SDK `launcher_plugin_sdk` 读写：`ctx.raw_args()` / `ctx.args::<T>()`、`ctx.settings_str()` / `ctx.settings_bool()`、`ctx.data_path()`（`ctx.plugin_path()` 只读）、`ctx.done(Value)` / `ctx.fail(e)` / `ctx.log(msg, data, Level)` / `ctx.progress(f, data)` / `ctx.on_query(..)` / `ctx.storage()`；panic 由 SDK 转 `fail`。
   手写 NDJSON 只允许出现在 SDK 自身与协议一致性测试里。
-- stdout **只准**协议行（日志走 `ctx.log`，不要裸 `println!`）；stderr 由宿主转 warn 日志。
+- **异步模式**：SDK 零依赖（纯 std 线程模型）。需要并发 / 超时的插件自建 `static RT: OnceLock<Runtime>` + `block_on`（参考 `file-search` / `app-launcher` 的 `runtime()`）；`on_query` handler 跑在 SDK 的 executor 线程、**不在任何 runtime 内**，所以 `block_on` 安全 —— 不要用 `Handle::current()`（会 panic）。
+- stdout **只准**协议行（日志走 `ctx.log`，不要裸 `println!`）；stderr 由宿主转 warn 日志；野 stdout 行会被宿主按「协议解析失败」转入日志（终端里看不到，去宿主日志找）。
 - 一次性执行：`ctx.done` 后必须退出；**不要**自己 daemon 化 / 常驻 —— 常驻能力走 `contributes: true`（宿主按需启停 + 空闲回收）。
 - 失败语义：`run` 超时默认 10s（上限 5min，超时 `TIMEOUT`）；非零退出 / `fail` 只影响本次调用，连续 3 次该命令 `degraded`。
+- **同一份纯逻辑被 view（TS）与逻辑层（Rust）双份实现时，必须建共享 fixture 向量**（输入 + 操作序列 → 期望输出，两侧测试都读它；参考 `plugins/host-manager/test/fixtures/blocks-vectors.json`）—— 双份实现漂移 = 预览与写入不一致（写系统文件时是危险事故）。
+- 平台限定命令（`mdfind` / `sips` / `osascript` 等）在 Rust 侧用 `#[cfg(target_os = "macos")]` 隔离，并在清单 / 文档标注；M6 要补 Windows 后端（`docs/m5-rust-and-windows.md` §B2）。
 
 ## 模块解析
 
@@ -70,6 +76,6 @@ provider:
 
 ## 收尾
 
-- 改完**必须**跑：插件目录下 `npm run typecheck && npm run build && npm test`，仓库根 `pnpm spec-check`。
+- 改完**必须**跑：插件目录下 `npm run typecheck && npm run build && npm test`；有逻辑层的加 `npm run test:scripts`（或仓库根 `cargo test --workspace` 一把跑），再跑仓库根 `pnpm spec-check`。
 - 交付前**必须**用静态服务器打开 `dist/` 实机点一遍（生产构建的资源路径与 dev server 不同）。
-- 新增逻辑层命令时，同步更新 `package.json` 的 `commands`、Cargo 的 bin 与 `build:scripts`，并跑 `pnpm spec-check`（产物必须是可执行文件）。
+- 新增逻辑层命令时，同步更新 `package.json` 的 `commands`、Cargo 的 bin、根 `Cargo.toml` members 与 `build:scripts` / `test:scripts`，并跑 `pnpm spec-check`（产物必须是可执行文件）。

@@ -1,11 +1,11 @@
 ---
 name: chassis-plugin-dev
-description: 开发、修改、构建或发布本仓库的 Vue 插件（plugins/{totp,host-manager,text-diff,json-tools}）时使用。触发场景：新建一个 Vue 插件、增删 commands 清单、实现 view/no-view/script 命令、用 exec.run 调用脚本、把产物装进 extensions 目录、排查插件白屏或宿主 API 报错。关键词：插件、extension、commands、exec.run、extensions 目录、Vite + Vue。
+description: 开发、修改、构建或发布本仓库插件（view 层 Vue / 逻辑层 Rust）时使用。触发场景：新建插件、增删 commands 清单、实现 view/no-view/script 命令、写 Rust 逻辑层 crate、用 exec.run 调用脚本、把产物装进 extensions 目录、排查插件白屏或宿主 API 报错。关键词：插件、extension、commands、exec.run、extensions 目录、Vite + Vue、Rust SDK、Cargo.toml、cargo test。
 allowed-tools:
 disable: false
 ---
 
-# Vue 插件开发（plugins/ 下的 Vite + Vue 插件）
+# 插件开发（view 层 Vite + Vue / 逻辑层 Rust 子进程）
 
 按下面的顺序做，不要跳步。硬约束见 `.codebuddy/rules/chassis-plugin/RULE.mdc`；
 原理与踩坑复盘见 `docs/plugin-dev-guide.md`。
@@ -30,7 +30,12 @@ disable: false
 - `package.json`（含 `commands` 清单、`build:view` / `build:scripts` 脚本、`@launcher/api` 依赖）
 - `vite.config.ts`（UI，`base: './'` + 清单裁剪插件 + vue 去重别名）
 - `tsconfig.json`、`src/styles/app.css`、`src/main.ts`、`index.html`
-- `Cargo.toml`（有 no-view/script 命令时才需要：crate `launcher-plugin-<id>`，**crate 根 = 插件目录**、源码直接放 `src/`；`[[bin]]` 名 = 命令名，依赖 `launcher-plugin-sdk`；新插件记得把 `plugins/<id>` 加进根 `Cargo.toml` 的 members）
+- `Cargo.toml`（有 no-view/script 命令时才需要：crate `launcher-plugin-<id>`，**crate 根 = 插件目录**、源码直接放 `src/`；`[[bin]]` 名 = 命令名，依赖 `launcher-plugin-sdk`）
+
+有逻辑层的两个必做登记（漏一个就跑不起来）：
+
+1. 把 `plugins/<id>` 加进**仓库根** `Cargo.toml` 的 members（不能写 `plugins/*` glob；漏登记 ⇒ `cargo build -p` 直接找不到包）。
+2. `package.json`：`apiVersion` 写 `"2"`，脚本补 `build:scripts`（`cargo build --release -p <crate> && node ../../scripts/build-plugin.mjs <id> --copy-scripts`，带 view 的加 `--keep-dist`）与 `test:scripts`（`cargo test -p <crate>`）。
 
 装依赖：
 
@@ -42,15 +47,18 @@ pnpm install   # 仓库根；插件是 workspace 成员，不单独 install
 
 - UI 复用 `@launcher/ui`：`AppShell`（页面骨架 + 轻提示）、`UiIcon`（图标）、`UiDialog`（弹窗）、`virtual`（虚拟滚动）、`clipboard` / `keys` / `theme` / `toast` 工具。
 - 宿主能力**直连 SDK**：view 侧 `import { exec, host, hostUi, screenshot, storage } from '@launcher/api'`；
-  逻辑层（Rust）用 `launcher_plugin_sdk`（`ctx.args` / `ctx.settings` / `ctx.data_path` / `ctx.done` / `ctx.fail` / `ctx.log` / `ctx.progress` / `ctx.on_query`）。
+  逻辑层（Rust）用 `launcher_plugin_sdk`：`ctx.raw_args()` / `ctx.args::<T>()`、`ctx.settings_str|bool()`、`ctx.data_path()`（`ctx.plugin_path()` 只读）、`ctx.done(Value)` / `ctx.fail(e)` / `ctx.log(msg, data, Level)` / `ctx.progress(f, data)` / `ctx.on_query(..)` / `ctx.storage()`。
   先用 `host.isLauncher()`（同步）分流，失败路径在调用点兜（`.catch(() => null)`）。
+- 逻辑层需要异步（超时 / 并发）时自建 runtime：`static RT: OnceLock<Runtime>` + `block_on`（参考 `file-search` / `app-launcher` 的 `runtime()`；`on_query` handler 不在任何 runtime 内，`block_on` 安全 —— 别用 `Handle::current()`）。
 - 大计算放 Worker：`plugins/text-diff/src/core/{worker,runner}.ts` 是标准范式（worker + 主线程降级 + 序号防串包）。
-- 需要读本地文件时，照抄 `plugins/totp/`：纯逻辑放 `src/lib.rs`（可单测），`src/bin/read_image.rs` 是 `ctx.log/done` 胶水。
+- 需要读本地文件时，照抄 `plugins/totp/`：纯逻辑放 `src/lib.rs`（可单测），`src/bin/read_image.rs` 是 `ctx.log/done` 胶水；平台限定命令（`mdfind` / `sips` / `osascript`）用 `#[cfg(target_os = "macos")]` 隔离。
+- 同一份纯逻辑被 view 与逻辑层双份实现时，建共享 fixture 向量（`plugins/host-manager/test/fixtures/blocks-vectors.json` 是范例）。
 
 ## 第 4 步：验证（不许跳）
 
 ```bash
 npm run typecheck && npm run build && npm test
+npm run test:scripts                  # 有逻辑层：cargo test -p launcher-plugin-<id>
 node scripts/spec-check.mjs <name>    # 仓库根；不传名字则检查全部插件
 ```
 

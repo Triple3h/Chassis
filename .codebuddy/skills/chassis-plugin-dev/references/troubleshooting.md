@@ -17,9 +17,19 @@
 ## 逻辑层命令（no-view / script）不生效 / `exec.run` 返回 null
 
 1. `ls -l dist/<name>` —— 产物存在吗？**可执行吗**？名字和 `commands[].name` **逐字相同**吗（大小写、连字符）？
-2. 产物是不是被 UI 构建清掉了：带 view 的插件要用 `node scripts/build-plugin.mjs <id> --copy-scripts --keep-dist`（先 vite 后补逻辑层产物）。
-3. 清单 `apiVersion` 是不是 `"2"` —— v1 的 `.mjs` 产物**不再支持**（内核会明确报「需升级为可执行产物」）。
-4. 用 `references/scaffold-templates.md` 末尾的手工拉起命令跑一次产物，能跑通说明产物没问题，问题在宿主侧调用。
+2. `dist/<name>` 是不是旧二进制：它由 `cargo build --release` + `build-plugin.mjs --copy-scripts` 拷来 —— 改动后要重跑插件目录 `npm run build:scripts`（或根 `pnpm build`），只跑 `cargo test` 不会更新它。
+3. 产物是不是被 UI 构建清掉了：带 view 的插件要用 `node scripts/build-plugin.mjs <id> --copy-scripts --keep-dist`（先 vite 后补逻辑层产物）。
+4. 清单 `apiVersion` 是不是 `"2"` —— v1 的 `.mjs` 产物**不再支持**（内核会明确报「需升级为可执行产物」）。
+5. `--copy-scripts` 报「找不到 Rust 产物」⇒ 先 `cargo build --release -p launcher-plugin-<id>`；报「找不到包」⇒ 根 `Cargo.toml` members 忘了登记 `plugins/<id>`。
+6. 用 `references/scaffold-templates.md` 末尾的手工拉起命令跑一次产物，能跑通说明产物没问题，问题在宿主侧调用。
+
+## 逻辑层里一用 tokio 就 panic / 「no reactor running」
+
+SDK 是纯 std 线程模型，handler 跑在 SDK 自己的 executor 线程、**不在任何 tokio runtime 内**。自建 `static RT: OnceLock<Runtime>` + `block_on`（照抄 `plugins/file-search/src/lib.rs` 的 `runtime()`）；**不要** `Handle::current()`（会 panic）。
+
+## 产物手工跑正常、宿主里没反应
+
+先看宿主日志，别看终端：产物的 stderr 会被宿主转成 warn 日志；混进 stdout 的野行会被按「协议解析失败」也转进日志（终端里什么都看不到）。另外确认 `--launcher-context` 的 JSON 字段是 camelCase（`pluginId` / `dataPath` / `pluginPath`），缺失字段靠 `LAUNCHER_PLUGIN_ID` / `LAUNCHER_DATA_PATH` 兜底。
 
 ## 页面能打开但 JS/CSS 404
 
@@ -92,6 +102,7 @@ npm 11 默认拦截依赖的 postinstall（如 `esbuild`）。**通常不影响�
 ```bash
 cd plugins/<name>
 npm run typecheck && npm run build && npm test
+npm run test:scripts              # 有逻辑层时：cargo test -p launcher-plugin-<id>
 find dist -type f | sort          # index.html / assets/* / package.json（+ no-view/script 的可执行产物 <name>）
 python3 -m http.server 5233 --directory dist   # 再实机点一遍，别只信 dev server
 ```

@@ -8,14 +8,16 @@
 plugins/<name>/
 ├── package.json
 ├── vite.config.ts
-├── vite.worker.config.ts      # 有 no-view / script 命令才需要
 ├── tsconfig.json
 ├── index.html
+├── Cargo.toml                 # 有 no-view / script 命令才需要（crate 根 = 插件目录）
 ├── src/
 │   ├── main.ts
 │   ├── App.vue
 │   ├── styles/app.css
-│   └── core/                  # 纯逻辑（算法、解析、存储）
+│   ├── core/                  # view 侧纯逻辑（算法、解析、存储）
+│   ├── lib.rs                 # 逻辑层纯逻辑（可单测；有逻辑层才需要）
+│   └── bin/<name>.rs          # 每个 no-view / script 命令一个 bin
 └── test/                      # 用 scripts/run-ts.mjs 跑的单测
 ```
 
@@ -47,7 +49,8 @@ plugins/<name>/
     "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "build:scripts": "cargo build --release -p launcher-plugin-<id> && node ../../scripts/build-plugin.mjs <id> --copy-scripts --keep-dist",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "node ../../scripts/run-ts.mjs test/core.test.ts && cargo test -p launcher-plugin-<id>",
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts",
+    "test:scripts": "cargo test -p launcher-plugin-<id>",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -103,7 +106,7 @@ export default defineConfig({
 `package.json` 的两条脚本（根 `scripts/build-all.mjs` 按它们驱动构建）：
 
 ```json
-"build:view": "vue-tsc --noEmit && vite build",
+"build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
 "build:scripts": "cargo build --release -p launcher-plugin-<id> && node ../../scripts/build-plugin.mjs <id> --copy-scripts --keep-dist"
 ```
 

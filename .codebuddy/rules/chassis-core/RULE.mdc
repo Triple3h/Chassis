@@ -1,5 +1,5 @@
 ---
-description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、窗口显隐/拖动/缩放与选区时机、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名）、数据迁移与样式同源
+description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、Rust 工程与协议（workspace 布局/camelCase 契约/读循环不许内联 await/日志只走 stderr）、窗口显隐/拖动/缩放与选区时机、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名）、数据迁移与样式同源
 alwaysApply: true
 enabled: true
 provider:
@@ -7,7 +7,8 @@ provider:
 
 # 底座开发铁律（apps/ 与 packages/）
 
-`apps/shell`（Rust 壳）/ `apps/kernel`（Rust 内核，bin `launcher-kernel`；ADR-0005 —— M0–M4 是 TS 实现，M5 起同目录换成 Rust）/ `apps/launcher-ui`（Vue UI）/ `packages/*` 的硬约束。
+`apps/shell`（Rust 壳）/ `apps/kernel`（Rust 内核，bin `launcher-kernel`；ADR-0005）/ `apps/launcher-ui`（Vue UI）/ `packages/*` 的硬约束。
+**内核、SDK 与逻辑层插件已是 Rust；UI 与视图层插件仍是 Vue/TS** —— 下文反引号里的符号名默认指 Rust 侧，UI 侧保留原名（如 `showWindowAnimated()`）。
 每条都是「不遵守就一定出问题」的；原理与复盘见 `docs/architecture.md` 与 `docs/decisions/`（ADR-0001~0005）。
 插件侧约束见规则 `chassis-plugin`；收尾验证见技能 `chassis-deliver`。
 
@@ -19,21 +20,31 @@ provider:
 - **逻辑层插件（v2，M5 起）= 可执行产物**：宿主 `spawn`，`.mjs` 产线不再支持（ADR-0005）；`commands[].name` = 产物文件名（`dist/<name>`，Windows `.exe`），查找顺序 `<name>(.exe)` → `workers/<name>(.exe)`。
 - 新增槽位 / 字段 / 协议行为：先改 `docs/launcher-requirements.md`（需求唯一源）与 `docs/plugin-spec.md`（对外契约），再实现。
 
+## Rust 工程与协议（内核 / SDK / 逻辑层插件）
+
+- **workspace 在仓库根 `Cargo.toml`**：成员逐个列出（`packages/plugin-sdk-rs`、`apps/kernel`、各逻辑层插件 `plugins/<id>`）—— 不能写 `plugins/*` glob（会匹配到没有清单的纯 view 插件目录而报错）；`apps/shell` 是独立 workspace，必须显式 `exclude`；产物统一在根 `target/`。**新增逻辑层插件 = 建 crate + 登记 members**，两步缺一不可。
+- **跨协议 JSON 字段一律 camelCase**：Rust 结构体一律 `#[serde(rename_all = "camelCase")]`，字段名与 `docs/plugin-spec.md` 逐字段对齐（「协议不变只换载体」的落实点）。契约有两份实现（内核 `manifest.rs` / `contract.rs` ↔ TS 包 `packages/plugin-manifest`），改字段两边必须同步。
+- **壳 ↔ 内核的读循环不能自己堵自己**：handler 里**必须 `tokio::spawn`**，绝不能内联 `await` 一个「发链路请求、等壳回」的调用 —— 回复正是由读循环读的，内联 await = 自己等自己（必然超时，且期间所有壳往来全部堵死）。回归用例 `apps/kernel/src/link.rs::handler_may_await_link_requests`，改 `link.rs` 必须让它继续绿。
+- 内核日志一律 stderr（`logging.rs` 收口）；**stdout 只有一条通道 `link::stdout_output()`**（`lib.rs` 注入 `Kernel.link_writer`），其余代码任何裸 `println!` 都等于污染协议。
+- Rust 测试：单测就近模块内 `#[cfg(test)] mod tests`，跨模块 / 协议 / 装配放 `apps/kernel/tests/`；一把跑 `cargo test --workspace`（内核 / SDK / 各插件 crate 全覆盖）。跨进程断言用 `waitFor`（HTTP 响应先于 SSE 事件到达）。
+- **依赖克制**：内核 / 插件依赖是精挑过的（tokio 只开用到的 feature、`sysinfo` 关默认特性）。新增第三方 crate 要说明用途并锁最小 features；能用 std 就不引。
+- **平台限定逻辑必须隔离**：`mdfind` / `sips` / `osascript` / AX API 等 macOS-only 实现放 `#[cfg(target_os = "macos")]` 分支并在 `plugin-spec` 标注；M6（Windows）要补第二套后端，通用路径里不许假设 POSIX。
+
 ## 窗口显隐与动效（踩坑最多，动它前读完）
 
 - 唯一裁决者是壳：壳 `window/toggled` → 内核只广播；**任何真改了显隐的路径都必须回报**（托盘 / 单实例 / ⌘W 都补齐过；漏报 = 唤出是空窗口），显示失败也要广播。
-- 排队中的隐藏可被 `cancelPendingHide()` 撤销，**迟到的回执也要作废**；`isVisible(): boolean | null`（「问不到」≠「否定」）。
-- **显示**要等窗口真能画：窗口隐藏时 webview 不绘制、CSS 时钟照走 ⇒ 内核 `emitVisibleAnimated()` 推迟 `SHOW_ANIMATION_MS`(80ms) 广播；UI `setWindowVisible()` 等可见信号 + `waitForPaint()`（页面可见后两帧；120ms 上限 + setTimeout 保险）。
-- **隐藏一律等 UI 回执才落地**：`emit(false)` → UI 演离场 → `POST /api/window/hidden` → 内核 `hideWindowNow()`；兜底 `HIDE_FALLBACK_MS` 500ms（内核）/ 800ms（壳）。
-- `window/hide` 落地后**必须清 `HIDE_AT_MS`**（否则下次热键被当成「取消隐藏」）；`toggle()` 的「离场途中再按 = 取消隐藏」判断排最前；UI `REVEAL_FAST_MS`(180ms) 必须小于「离场 + 回执」耗时。
+- 排队中的隐藏可被 `cancel_pending_hide()` 撤销（内核 `window_visibility.rs` 用令牌作废迟到的回执；壳侧同名函数清 `HIDE_AT_MS`），**迟到的回执也要作废**；`is_visible() -> Option<bool>`（「问不到」≠「否定」）。
+- **显示**要等窗口真能画：窗口隐藏时 webview 不绘制、CSS 时钟照走 ⇒ 内核 `emit_visible_animated()` 推迟 `SHOW_ANIMATION_MS`(80ms) 广播；UI `setWindowVisible()` 等可见信号 + `waitForPaint()`（页面可见后两帧；120ms 上限 + setTimeout 保险）。
+- **隐藏一律等 UI 回执才落地**：`emit(false)` → UI 演离场 → `POST /api/window/hidden` → 内核 `finish_hide()` → 落地；兜底 `HIDE_FALLBACK_MS` 500ms（内核）/ 800ms（壳）。
+- 壳里 `window/hide` 落地后**必须清 `HIDE_AT_MS`**（否则下次热键被当成「取消隐藏」）；`toggle()` 的「离场途中再按 = 取消隐藏」判断排最前；UI `REVEAL_FAST_MS`(180ms) 必须小于「离场 + 回执」耗时。
 - **窗口边角**：`.shell` 上不放 `backdrop-filter`（唯一会溢出圆角的属性），也不放 `box-shadow`（阴影全在窗口外、一个像素都渲染不出来，却会让 WebKit 把贴住视口底边的圆角画成直角）；`clip-path: inset(0 round var(--radius-shell))` 兜底。
 - 动效令牌单一来源（ADR-0004）：UI `--motion-*`、插件侧镜像 `--launcher-motion-*`；`show/hideWindowAnimated()` 是唯一收口。
 
 ## 窗口拖动 / 缩放 / 选中文本 / 状态条
 
 - **选区只能在 `window.show` 之前读**：窗口一上屏，前台 App 就是自己，`AXSelectedText` 随之消失（`primitives/selection.rs`）。所以 `window.show` 的返回值带 `{selection}` —— **谁调 show 谁负责把它转交内核**；热键 / 托盘 / 单实例三条路统一走 `window::show_and_report`（`let _ = show(...)` ＝ 选中文本凭空消失，"选中了再按热键却不带"就是这么来的）。
-- 读取策略在内核（`Kernel.applySelection`）：只填**空搜索框**、超长（`SELECTION_MAX_CHARS`）不带；壳只管"此刻前台选中了什么"这个事实。
-- **窗口尺寸归 UI**：把手按下 = `manualResized`，内容高度不再改窗口；尺寸**按模式分别记忆**（`config.windowSizes.host` / `.plugin`，UI 提交、内核 `sanitizeWindowSizes` 钳制），下次唤出 / 进插件页 / UI 挂载时用 `window.setSize` 还原（自适应那条路仍走 `window.setHeight`，别混用）。落盘时机：拖完防抖 400ms + **离场前 `flushSizeSave()` 补一次**；「恢复默认大小」= 清当前模式的记忆 + `setWindowHeight(desiredHeight, { force: true })` 回自适应。写回时必须**整个 `windowSizes` 对象一起给**（`patchConfig` 是浅合并，少给一个键就把另一模式的记忆抹了）。
+- 读取策略在内核（`Kernel::apply_selection`，`kernel.rs`）：只填**空搜索框**、超长（`SELECTION_MAX_CHARS`）不带；壳只管「此刻前台选中了什么」这个事实。
+- **窗口尺寸归 UI**：把手按下 = `manualResized`，内容高度不再改窗口；尺寸**按模式分别记忆**（`config.windowSizes.host` / `.plugin`，UI 提交、内核 `sanitize_window_sizes()`（`config.rs`）钳制），下次唤出 / 进插件页 / UI 挂载时用 `window.setSize` 还原（自适应那条路仍走 `window.setHeight`，别混用）。落盘时机：拖完防抖 400ms + **离场前 `flushSizeSave()` 补一次**；「恢复默认大小」= 清当前模式的记忆 + `setWindowHeight(desiredHeight, { force: true })` 回自适应。写回时必须**整个 `windowSizes` 对象一起给**（`patch_config` 是浅合并，少给一个键就把另一模式的记忆抹了）。
 - `-webkit-app-region: drag` 只准用在**没有交互元素**的条带上（当前只有顶缘 8px 热区）；含 input/button 的行一律走 `data-drag-region` + `window.startDragging`（IPC 兜底），别赌某个 WebKit 版本的 `no-drag` 实现。
 - 缩放把手 `z-index` 必须高于拖拽条（角上缩放优先于拖动）；边把手宽度保持 6px（再宽会压住插件页 iframe 的滚动条）。
 - 「恢复默认大小」按钮有两个落点：宿主态在搜索栏右侧（只有图标）、插件页在宿主 footer 右侧（带文字）—— 插件页没有搜索栏可挂，别只在一边加。
@@ -42,7 +53,7 @@ provider:
 
 ## 配置与事件
 
-- **配置写入只有一个收口 `Kernel.patchConfig()`**：落盘 → 副作用（历史上限 / 自启 / 热键）→ `emit('config/changed')`。`POST /api/config`、管理面 `ctx.settings.patch`、`setAutostart` / `setHistoryLimit` 全部转发到它 —— **别在调用点上补广播**。
+- **配置写入只有一个收口 `Kernel::patch_config()`**（`apps/kernel/src/kernel.rs`）：落盘 → 副作用（历史上限 / 自启 / 热键）→ `emit('config/changed')`。`POST /api/config`、管理面 `ctx.settings.patch`、`setAutostart` / `setHistoryLimit` 全部转发到它 —— **别在调用点上补广播**。
 - 广播的 UI 侧配套三处：`lib/api.ts` 事件名单、`stores/data.ts` 用 payload 更新快照、`App.vue` watch；守卫 `tests/unit/config-events.test.ts`（每条路径一条用例）。
 - 验证必须走**真实路径**：设置页走的是 `ctx.settings.patch`，`curl /api/config` 会恰好绕开坏的那条。
 
@@ -53,14 +64,14 @@ provider:
 - **插件页 CSP**：`script-src 'self' 'wasm-unsafe-eval'`（放行随包 wasm 编译，必须随包、禁 CDN；JS `eval` 仍禁）；受 `apps/kernel/src/http/plugin_servers.rs` 的 `plugin_page_csp_allows_wasm_but_not_eval` 守护。
 - **插件重载会打死它自己的插件页**：`session/closed{reason}` + `plugin/reloaded` ⇒ UI 用同一命令换新会话重开；其余 reason 直接卸载 iframe。
 - **插件视图的退出入口是宿主的责任**（顶栏由插件自己画）：footer 最左「返回」+ `Esc` / `⌘W`，三条路径统一走 `leavePluginView()`（close → `nextTick()` → focus）。焦点在 iframe 里时宿主收不到按键（事件不跨文档冒泡）⇒ **SDK 把没人消费的 Esc 交还宿主**（`commands.close` → `session/closed{reason:'ui'}` → 同一条收尾，含焦点归位）；插件消费 Esc 要 `preventDefault()` / `stopPropagation()`。受 `tests/unit/plugin-api-escape.test.ts` 守护。
-- v1 view 会话打开时**没有搜索框** ⇒ `watchSearchContent` 不触发；入口型插件用 `getSearchContent()` 取初始输入；footer 的 keys 只展示、不派发。
+- view 会话打开时宿主**卸载搜索框** ⇒ `hostUi.watchSearchContent` 不触发；入口型插件用 `hostUi.getSearchContent()` 取初始输入；footer 的 keys 只展示、不派发。
 
 ## 插件策略（内核侧）
 
-- **`essential`（不可禁用）**：只认出厂清单的 `essential: true`（`isEssential = builtin && manifest.essential`，第三方写了无效）；启动期 `pruneEssentialDisabled()` 清配置里的残留禁用；其调用**不进审计**（`audit.setExempt`）。
-- **`history: false`（不进最近使用）**：写历史前判 `PluginManager.excludesHistory(id)`（`Kernel.invoke` 与 `rememberItemResult` 两处）**且**启动装配期 `history.dropHistoryBy(...)` 摘掉存量条目（只「以后不写」的话，界面上旧记录还在 = 用户以为没生效）；只动历史、**不动固定项**。
+- **`essential`（不可禁用）**：只认出厂清单的 `essential: true`（`is_essential = builtin && manifest.essential`，第三方写了无效）；启动期 `prune_essential_disabled()`（`plugin/manager.rs`）清配置里的残留禁用；其调用**不进审计**（`audit.set_exempt`）。
+- **`history: false`（不进最近使用）**：写历史前判 `PluginManager::excludes_history(id)`（`Kernel::invoke` 与 `rememberItemResult` 两处）**且**启动装配期 `history.drop_history_by(...)` 摘掉存量条目（只「以后不写」的话，界面上旧记录还在 = 用户以为没生效）；只动历史、**不动固定项**。
 - **清单字段白名单只有一份**：`scripts/lib/manifest-keys.mjs`（两套构建器 + spec-check 共用），加字段先动它。
-- **搜索命中面 = 命令 `title` / `subtitle` / `keywords`**（`pinyin.matchTarget`：前缀 1.0 / 包含 0.7 / 全拼 0.6 / 首字母 0.5 / subtitle 与 keywords 0.4）；别名两层 = 插件级（兜底全部入口命令）∪ 命令级；用户改动存 `<dataRoot>/plugin-overrides.json`（`undefined` = 用清单值 / `[]` = 显式清空），改完只 `registry.update` 即时生效、**不重载插件**。
+- **搜索命中面 = 命令 `title` / `subtitle` / `keywords`**（`pinyin::match_target`：前缀 1.0 / 包含 0.7 / 全拼 0.6 / 首字母 0.5 / subtitle 与 keywords 0.4；多音字按 `ToPinyinMulti` 展开读音变体、封顶 8 个，改打分要跑 `pinyin.rs` 的用例组）；别名两层 = 插件级（兜底全部入口命令）∪ 命令级；用户改动存 `<dataRoot>/plugin-overrides.json`（`undefined` = 用清单值 / `[]` = 显式清空），改完只 `registry.update` 即时生效、**不重载插件**。
 - 固定 / 历史项必须存 `action` 快照：应用 / 文件 / 网址的 `command` 是**结果项 id**（不是命令名）；UI `pinPayload` 要带 `result.item.action`。
 
 ## 内置原生插件（internal-settings）
@@ -70,10 +81,10 @@ provider:
 
 ## 数据与插件装载
 
-- **插件根识别**：`<dir>/dist/package.json` 存在 ⇒ 插件根 = `<dir>/dist`（`scan()` 与 `installFromDirectory()` 必须一致）。
+- **插件根识别**：`<dir>/dist/package.json` 存在 ⇒ 插件根 = `<dir>/dist`（`PluginManager::scan()` 与 `install_from_directory()` 必须一致，`plugin/manager.rs`）。
 - 数据布局：`<dataRoot>/{config,history,pinned}.json`、`plugin-overrides.json`、`extensions/<id>/`、`plugins/<id>/`（插件唯一可写处）、`logs/audit-*.jsonl`（滚动 7 天）。
-- 插件 id 改名后老数据由内核接手：`adoptLegacyDataDir()`（数据目录）+ `HistoryStore.migratePluginIds()`（历史 / 固定项）；`LEGACY_PLUGIN_IDS` 是「新→旧」、`LEGACY_ID_TO_CURRENT` 是「旧→新」，**传错 = 把新条目改回旧 id**。
-- 壳启动 `adopt_legacy_data_dir()` 从 `Launcher/` 一次性复制接手（只复制不移动），必须排在 `logging::init()` 之前 —— 否则新目录已存在、迁移永不执行。
+- 插件 id 改名后老数据由内核接手：`PluginManager::adopt_legacy_data_dir()`（数据目录）+ `HistoryStore::migrate_plugin_ids()`（历史 / 固定项）。链在 `apps/kernel/src/legacy.rs`：`RENAME_CHAINS` = `[当前 id, ...历代旧 id]`；`legacy_data_dir_ids()` 给「新→旧」候选（逐个试），`legacy_id_to_current()` 是「旧→新」**单跳**查表（链断了会停在中间那一代）——**传错 = 把新条目改回旧 id**。
+- 壳启动 `adopt_legacy_data_dir()`（`apps/shell/src/sidecar.rs`）从 `Launcher/` 一次性复制接手（只复制不移动），必须排在 `logging::init()` 之前 —— 否则新目录已存在、迁移永不执行。
 
 ## 样式
 

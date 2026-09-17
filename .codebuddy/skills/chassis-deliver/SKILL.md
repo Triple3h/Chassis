@@ -1,6 +1,6 @@
 ---
 name: chassis-deliver
-description: 改完代码收尾时使用（底座与插件通用）：跑类型检查/测试/构建/冒烟/spec-check、真实路径验证、实机点一遍、分批提交与 git add -p 拆 hunk。触发场景：改完收尾、跑测试、验证一下、提交代码、分批提交、帮我提交、发布前自检。关键词：验证、收尾、提交、分批提交、冒烟、spec-check、pnpm build、typecheck、git add -p。
+description: 改完代码收尾时使用（底座与插件通用）：跑类型检查/测试/构建/冒烟/spec-check、真实路径验证、实机点一遍、分批提交与 git add -p 拆 hunk。触发场景：改完收尾、跑测试、验证一下、提交代码、分批提交、帮我提交、发布前自检。关键词：验证、收尾、提交、分批提交、冒烟、spec-check、pnpm build、typecheck、cargo test、git add -p。
 allowed-tools:
 disable: false
 ---
@@ -14,19 +14,21 @@ disable: false
 
 | 改动 | 必跑 |
 |---|---|
-| 任何 TS / Vue | `pnpm typecheck`（= `scripts/run-tsc.mjs`，15 个包） |
+| 任何 TS / Vue | `pnpm typecheck`（= `scripts/run-tsc.mjs`，10 个包） |
 | 任何逻辑 | `pnpm test`（= `run-tests.mjs`；分层 `pnpm test:unit` / `test:contract` / `pnpm smoke`） |
+| Rust（内核 / SDK / 插件逻辑层） | `cargo test --workspace`（workspace 在**仓库根** `Cargo.toml`；协议回归在 `apps/kernel/tests/link_protocol.rs` 与 `link.rs` 的 `handler_may_await_link_requests`，动 `link.rs` / runner / SDK 必跑） |
 | 内核 / UI / 插件 | `pnpm build`（= `build-all.mjs`：kernel → ui → plugins） |
 | 内核或插件协议 | `node scripts/smoke-real.mjs`（真内核 + 出厂插件，走「输入 → 首屏 → 执行 → 写历史」整条链路） |
 | 插件清单相关 | `pnpm spec-check`（N1–N3 / 产物 / 远程资源；N3 只做人工核对提示） |
 | Rust 壳 | `cd apps/shell && cargo check`（只编壳）/ `pnpm shell:dev`（跑） |
-| Rust（M5：内核 / 插件逻辑层 / SDK） | `cargo test`（workspace 在**仓库根** `Cargo.toml`）+ `pnpm parity:echo`（v1↔v2 协议对拍；动了 runner / SDK / 协议必跑） |
 
 要点：
 
 - 测试文件放 `tests/{unit,contract,smoke}`（插件内部用例放插件 `src` 旁）；**类型检查只覆盖 `tests/` 与各包 src，插件包 tsconfig 不含自己的 tests**。
+- Rust 单测就近模块内 `#[cfg(test)]`，跨模块 / 协议 / 装配放 `apps/kernel/tests/`；插件自己的 crate 测试也归 `cargo test --workspace`（插件的 `npm test` 只跑 TS 侧，Rust 侧是 `npm run test:scripts`）。
 - `run-ts.mjs` 用 esbuild bundle 到 `.dev/`；测试 import 走源码，不需要先构建。
-- **冒烟必须跑在新产物上**（先 `pnpm build` 再冒烟；旧 dist 会让冒烟「假通过」）。
+- `tests/helpers/harness.ts` 会自己 `cargo build -p launcher-kernel`（源码没动时是毫秒级 no-op），跑 `pnpm test` 前不用手动编内核。
+- **冒烟必须跑在新产物上**（先 `pnpm build` 再冒烟；旧 dist 会让冒烟「假通过」）。逻辑层改动尤其注意：`dist/<name>` 是 `pnpm build` 从 `target/release/<bin>` 拷来的，只跑 `cargo test` 不会更新它。
 
 ## 第 2 步：真实路径验证（不许用等效捷径）
 
@@ -51,3 +53,5 @@ disable: false
 - 类型检查过、运行报错：多半是 `verbatimModuleSyntax` 的 type-only import（需 `import type`）。
 - 冒烟失败但单测过：先确认产物是不是旧的重跑 `pnpm build`。
 - Rust 改动没生效：`.app` 里跑的是 release 产物，用 `pnpm app:local --skip-build` 重编（它跳过前端构建，仍会重编 Rust 并重新组装）。
+- 逻辑层命令行为没变：`dist/<name>` 还是旧二进制（`pnpm build` 才从 `target/release/<bin>` 拷过去）—— 插件目录跑 `npm run build:scripts` 或仓库根 `pnpm build`；`pnpm spec-check` 检查的也是这个旧产物。
+- 宿主里插件「没反应」但独立跑产物正常：产物 stdout 混入了非协议行（被宿主当解析失败转日志），或 `ctx.args` 为空（`--launcher-context` 没注入 / 字段名错了）—— 先看宿主日志再查产物。
