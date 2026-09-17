@@ -1,0 +1,33 @@
+[package]
+name = "launcher-plugin-app-launcher"
+version = "0.1.0"
+edition = "2021"
+description = "应用启动器（app-launcher）逻辑层：扫描 macOS .app、本地化名称、图标转 PNG、按名/别名打分"
+license = "MIT"
+publish = false
+
+[lib]
+name = "launcher_plugin_app_launcher"
+path = "src/lib.rs"
+
+# bin 名 = commands[].name（plugin-spec §2.2 的 N1 铁律）
+[[bin]]
+name = "search"
+path = "src/bin/search.rs"
+
+[[bin]]
+name = "refresh"
+path = "src/bin/refresh.rs"
+
+[dependencies]
+launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# plist 解析：v1 是自研（为了 esbuild 自包含），Rust 侧有现成 crate（binary + XML 都支持）
+plist = "1"
+# 图标缓存的文件名（与 v1 同款：sha1(icns 路径)）
+sha1 = "0.10"
+base64 = "0.22"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "io-util", "sync"] }
+# 并发扫描（v1 的 mapLimit(50)）
+futures = "0.3"
