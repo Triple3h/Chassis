@@ -1,0 +1,26 @@
+[package]
+name = "launcher-plugin-file-search"
+version = "0.1.0"
+edition = "2021"
+description = "文件搜索（file-search）逻辑层：mdfind 搜文件名 / open -R 在 Finder 中显示"
+license = "MIT"
+publish = false
+
+[lib]
+name = "launcher_plugin_file_search"
+path = "src/lib.rs"
+
+# bin 名 = commands[].name（plugin-spec §2.2 的 N1 铁律）
+[[bin]]
+name = "files"
+path = "src/bin/files.rs"
+
+[[bin]]
+name = "reveal"
+path = "src/bin/reveal.rs"
+
+[dependencies]
+launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
+serde_json = "1"
+# SDK 刻意零依赖（纯 std 线程）；需要异步的插件自建 runtime（见 src/lib.rs 的 `runtime()`）
+tokio = { version = "1", features = ["rt", "process", "time", "io-util", "sync"] }

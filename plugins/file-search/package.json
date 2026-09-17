@@ -4,21 +4,35 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "apiVersion": "1",
+  "apiVersion": "2",
   "description": "用 Spotlight 索引搜索本机文件，可打开或在 Finder 中显示",
   "author": "launcher",
   "icon": "file-search",
-  "keywords": ["file", "文件", "搜索", "mdfind", "spotlight"],
+  "keywords": [
+    "file",
+    "文件",
+    "搜索",
+    "mdfind",
+    "spotlight"
+  ],
   "essential": true,
   "history": false,
-  "capabilities": ["storage", "shell.open"],
+  "capabilities": [
+    "storage",
+    "shell.open"
+  ],
   "commands": [
     {
       "name": "files",
       "title": "文件",
       "mode": "script",
       "contributes": true,
-      "keywords": ["file", "文件", "查找", "find"],
+      "keywords": [
+        "file",
+        "文件",
+        "查找",
+        "find"
+      ],
       "placeholder": "输入文件名",
       "icon": "file-search"
     },
@@ -30,14 +44,8 @@
     }
   ],
   "scripts": {
-    "build": "node ../../scripts/build-plugin.mjs file-search",
-    "build:scripts": "node ../../scripts/build-plugin.mjs file-search",
-    "typecheck": "tsc -p tsconfig.json"
-  },
-  "dependencies": {
-    "@launcher/api-node": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "^22.10.0"
+    "build": "node ../../scripts/build-plugin.mjs file-search --copy-scripts",
+    "build:scripts": "cargo build --release -p launcher-plugin-file-search && node ../../scripts/build-plugin.mjs file-search --copy-scripts",
+    "test:scripts": "cargo test -p launcher-plugin-file-search"
   }
 }
