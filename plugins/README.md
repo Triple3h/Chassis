@@ -10,7 +10,7 @@
 | `web-open` | `web`（script，贡献型） | esbuild | Rust |
 | `internal-settings` | `settings` + `manage`（view） | esbuild | — |
 | `totp` | `totp`（view） + `read-image`（script） | Vite + Vue | Rust |
-| `host-manager` | `hosts`（view） + `hosts-read` / `hosts-write`（script） | Vite + Vue | Rust |
+| `host-manager` | `hosts`（view） + `hosts-read` / `hosts-write` / `hosts-permission`（script） | Vite + Vue | Rust |
 | `text-diff` | `diff`（view） | Vite + Vue | — |
 | `json-tools` | `json`（view） | Vite + Vue | — |
 

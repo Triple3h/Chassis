@@ -102,6 +102,7 @@ pnpm app:local    # release 编译 + 组装 + ad-hoc 签名 → dist-app/Chassis
 | 文件与文件夹（桌面 / 图片等） | TOTP 扫截图目录、文件搜索命中受保护目录 | 对应范围搜不到 |
 
 > **前置说明**：**打开应用 / 文件 / 网址走的是 `/usr/bin/open`（LaunchServices），不需要任何权限** —— 所以「自动化」那条只在真的动 hosts 时才弹，不是启动就弹。
+> **host-manager 可以不开这条**：顶栏点「需授权」→「开启免授权写入」，会把 `/etc/hosts` 的写权限**一次性**授给当前账户（POSIX ACL `chmod +a`，与 uTools / SwitchHosts 引导你手动做的是同一件事），此后保存直接写入、不再弹「自动化」框；随时可在同一面板撤销，恢复系统默认。
 > 打包用的是 **ad-hoc 签名**，而 TCC 授权是**绑代码签名**的：每次重新打包（新二进制、新签名）系统都会当成「第一次」重弹一次；自用场景下这是必然代价。
 > 弹窗里只有「拒绝 / 打开系统设置」（没有「允许」）时，说明之前拒绝过或签名已变，去 系统设置 → 隐私与安全性 → 自动化 手动勾上即可。
 
@@ -234,7 +235,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | `web-open` | `web`（script，贡献型） | esbuild / Rust |
 | `internal-settings` | `settings` + `manage`（view） | esbuild / — |
 | `totp` | `totp`（view）+ `read-image`（script） | Vite + Vue / Rust |
-| `host-manager` | `hosts`（view）+ `hosts-read` / `hosts-write`（script） | Vite + Vue / Rust |
+| `host-manager` | `hosts`（view）+ `hosts-read` / `hosts-write` / `hosts-permission`（script） | Vite + Vue / Rust |
 | `text-diff` | `diff`（view） | Vite + Vue / — |
 | `json-tools` | `json`（view） | Vite + Vue / — |
 
