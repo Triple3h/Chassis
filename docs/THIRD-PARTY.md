@@ -19,8 +19,6 @@
 | `plugins/app-launcher/src/core/scanner.ts` | `src/main/core/commandScanner/macScanner.ts`（约 432 行中的扫描主体） | 去掉 Electron 依赖：`app.getPreferredSystemLanguages()` → `defaults read -g AppleLanguages`；图标改为输出 `.icns` 路径（由 `sips` 转 PNG）；`pLimit` 改为内置保序版 |
 | `plugins/app-launcher/src/core/scanner.ts` 中的 `collectAppBundles` | 同上 | 原样移植（含符号链接解析、PWA/Office 子目录下钻一层、`.app` 命中即停止下钻） |
 | `plugins/app-launcher/src/core/scanner.ts` 中的 `bcp47ToLprojNames` / `bcp47ToLoctableKeys` / `parseStringsContent` / `readStringsFile` | 同上 | 原样移植（含 binary plist / XML plist / UTF-16 文本三种 `.strings` 格式） |
-| `apps/kernel/src/util/limit.ts` | `src/main/core/commandScanner/utils.ts`（`pLimit`） | 增加保序版 `pMapOrdered` |
-| `apps/kernel/src/util/fsx.ts` 的 `assertSafePathPart` | `src/main/utils/pluginStorage.ts`（`assertSafePluginArtifactPart`） | 原样移植（路径片段安全校验） |
 | `apps/kernel/src/http/server.ts` 的 URL 拆分与穿越防护 | `src/main/utils/pluginUrl.ts`（`getUrlScheme` / `splitPluginUrl` 的思路） | 按本仓库的静态服务需求重写为 `resolveWithinRoot` |
 
 **未移植**：ZTools 的插件管理、窗口管理、存储、同步、AI、支付、市场等模块（架构不同：Electron `WebContentsView` → Tauri WebView + iframe + 每插件独立端口）。

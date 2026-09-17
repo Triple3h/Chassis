@@ -29,10 +29,6 @@ export class Pipeline {
     }
   }
 
-  entries(stage: MiddlewareStage): Array<{ label: string; pluginId: string }> {
-    return this.stages[stage].map((e) => ({ label: e.label, pluginId: e.pluginId }))
-  }
-
   async run(ctx: ExecContext, terminal: () => Promise<ActionResult>): Promise<ActionResult> {
     const chain = [
       ...this.stages['pre-execute'],

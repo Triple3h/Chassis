@@ -150,7 +150,6 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     builtinRoots,
     uiDistDir: null,
     version: 'test',
-    ephemeral: true,
   })
   registerApi(kernel)
   await kernel.start()

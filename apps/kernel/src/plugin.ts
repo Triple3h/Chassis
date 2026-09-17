@@ -18,10 +18,10 @@ import { createPluginContext, disposeContext, type ServiceBinder } from './conte
 import type { EventBus } from './events'
 import type { CommandRegistry } from './registry'
 import type { SessionManager } from './session'
-import type { KernelServices, PluginContext } from './services/types'
+import type { PluginContext } from './services/types'
 import type { ScriptRuntime } from './services/exec'
 import type { Disposer, SessionCloseReason } from './types'
-import { ensureDir, listDirSafe, pathExists } from './util/fsx'
+import { ensureDir, listDirSafe, pathExists, pluginDataPath } from './util/fsx'
 import type { PluginServerPool } from './http/pluginServers'
 import { LEGACY_PLUGIN_IDS } from './legacy'
 import {
@@ -71,7 +71,6 @@ export interface PluginManagerDeps {
   sessions: SessionManager
   servers: PluginServerPool
   binder: ServiceBinder
-  services: KernelServices
   exec: ScriptRuntime
   /** 管理面特权服务工厂（仅 id 以 internal- 开头的插件会被注入） */
   settingsFor?: (pluginId: string) => Record<string, unknown>
@@ -113,7 +112,7 @@ export class PluginManager {
   }
 
   dataPathFor(id: string): string {
-    return path.join(this.deps.dataRoot, 'plugins', id)
+    return pluginDataPath(this.deps.dataRoot, id)
   }
 
   /**
@@ -436,6 +435,8 @@ export class PluginManager {
     record.state = 'validating'
     record.error = undefined
     record.commandErrors.clear()
+    // 失败计数只在「本次加载之后」有效：不清零的话，重载后一次失败就可能直接判降级
+    record.failureCount = 0
 
     const manifestResult = await readManifest(record.dir)
     if (!manifestResult.ok) {
@@ -492,7 +493,6 @@ export class PluginManager {
     const ctx = createPluginContext({
       pluginId: id,
       capabilities: record.capabilities,
-      services: this.deps.services,
       binder: this.deps.binder,
       bus: this.deps.bus,
       ...(extra ? { extra } : {}),
@@ -535,11 +535,18 @@ export class PluginManager {
     return record
   }
 
-  /** 贡献型搜索源：激活后延迟预热，避免第一次输入吃冷启动超时 */
+  /**
+   * 贡献型搜索源：激活后延迟预热，避免第一次输入吃冷启动超时。
+   *
+   * 定时器到点时插件可能已经被禁用 / 重载过（800ms 窗口内完全做得到）——那时
+   * `disable()` 里的 `releasePlugin` 刚把 worker 收掉，这条迟到的预热会把它**重新拉起来**，
+   * 而且新的 worker 已不在 disable 的管辖范围内，只能等 5 分钟闲置回收。所以到点先确认插件仍可用。
+   */
   private prewarmSearchSources(id: string, record: PluginRecord, manifest: PluginManifest): void {
     for (const decl of manifest.commands) {
       if (!decl.contributes || decl.mode === 'view' || record.commandErrors.has(decl.name)) continue
       const timer = setTimeout(() => {
+        if (!this.isActive(id)) return
         void this.deps.exec.prewarm(id, decl.name)
       }, 800)
       timer.unref?.()
@@ -569,14 +576,6 @@ export class PluginManager {
       record.devUrl = undefined
     }
     this.emitChanged()
-  }
-
-  async enable(id: string): Promise<PluginRecord> {
-    const cfg = this.deps.config.get()
-    if (cfg.disabled.includes(id)) {
-      await this.deps.config.patch({ disabled: cfg.disabled.filter((x) => x !== id) })
-    }
-    return this.load(id)
   }
 
   async setDisabled(id: string, disabled: boolean): Promise<void> {
@@ -616,6 +615,18 @@ export class PluginManager {
       // 加载失败也要通知：UI 不能把死掉的旧页面留在窗口里
       this.deps.bus.emit('plugin/reloaded', { pluginId: id, commands: views, ok: false })
       throw err
+    }
+  }
+
+  /**
+   * 热重载；失败则退回「直接加载一次」——给「改了权限 / dev 配置后要把插件拉起来」的调用点用。
+   * 收敛在这里，调用点不必各自写一遍 `reload().catch(() => load())`。
+   */
+  async reloadOrLoad(id: string): Promise<PluginRecord> {
+    try {
+      return await this.reload(id)
+    } catch {
+      return await this.load(id)
     }
   }
 
@@ -670,11 +681,10 @@ export class PluginManager {
     await fsp.rm(target, { recursive: true, force: true })
     await fsp.cp(sourceDir, target, { recursive: true, dereference: true })
 
+    // scan() 已按同一条识别规则把 record.dir / builtin 指向 extensions/ 下的新目录
     await this.scan()
     const record = this.records.get(id)
     if (!record) throw new LauncherError('MANIFEST_INVALID', '安装后未找到插件目录')
-    record.dir = target
-    record.builtin = false
     if (!this.deps.config.get().disabled.includes(id)) await this.load(id)
     return record
   }

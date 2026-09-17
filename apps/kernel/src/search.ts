@@ -7,7 +7,6 @@ import { blendPluginScore, combinedScore, matchTarget, type SearchTarget } from 
 import type { CommandRegistry, RegisteredCommand, SearchResultHub } from './registry'
 import type { SessionManager } from './session'
 import type { ScriptRuntime } from './services/exec'
-import type { Disposer } from './types'
 import { itemKey, normalizeQuery } from './util/text'
 
 export interface SearchResponse {
@@ -51,14 +50,6 @@ export class SearchEngine {
   private inFlight = new Map<string, Promise<SearchResponse>>()
 
   constructor(private readonly deps: SearchDeps) {}
-
-  onRegistryChanged(fn: () => void): Disposer {
-    return this.deps.registry.onChange(fn)
-  }
-
-  currentToken(): number {
-    return this.counter
-  }
 
   async search(rawQuery: string): Promise<SearchResponse> {
     const query = normalizeQuery(rawQuery)
@@ -190,9 +181,7 @@ export class SearchEngine {
     return {
       pluginId,
       pluginTitle: this.deps.pluginTitleOf(pluginId),
-      command: this.deps.registry.get(itemKey(pluginId, pluginKeyOf(item)))?.pluginId === pluginId
-        ? pluginKeyOf(item)
-        : pluginKeyOf(item),
+      command: pluginKeyOf(item),
       item: this.withIcon(pluginId, item),
       itemKey: key,
       score: blendPluginScore(item.score, usage),
@@ -272,16 +261,15 @@ export class SearchEngine {
     return [...map.values()]
   }
 
-  /** 防抖稳定：集合不变时保持上次顺序（requirements §7.6.5） */
+  /**
+   * 防抖稳定（requirements §7.6.5）：**结果集合没变**时保持上次顺序 ——
+   * 插件是陆续回结果的，若每次都按分数重排，列表会在用户眼皮底下反复跳动；
+   * 集合变了（有新增 / 消失）则上次顺序已无意义，回到纯分数序。
+   */
   private stableSort(items: RankedResult[]): RankedResult[] {
-    const known = items.filter((i) => this.lastOrder.has(i.itemKey))
-    const unknown = items.filter((i) => !this.lastOrder.has(i.itemKey))
-    const sameSet = known.length === items.length && items.length === this.lastOrder.size
-    known.sort((a, b) => (this.lastOrder.get(a.itemKey) ?? 0) - (this.lastOrder.get(b.itemKey) ?? 0))
-    if (!sameSet) unknown.sort((a, b) => b.score - a.score)
-    else unknown.sort((a, b) => b.score - a.score)
-    if (sameSet) return known
-    return [...unknown.sort((a, b) => b.score - a.score), ...known].sort((a, b) => b.score - a.score)
+    const sameSet = items.length === this.lastOrder.size && items.every((i) => this.lastOrder.has(i.itemKey))
+    if (!sameSet) return [...items].sort((a, b) => b.score - a.score)
+    return [...items].sort((a, b) => (this.lastOrder.get(a.itemKey) ?? 0) - (this.lastOrder.get(b.itemKey) ?? 0))
   }
 
   private rememberOrder(items: RankedResult[]): void {

@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { assert, assertEqual, assertRejects, run, test } from '../helpers/assert'
-import { assertSafePathPart, resolveWithinRoot } from '../../apps/kernel/src/util/fsx'
+import { resolveWithinRoot } from '../../apps/kernel/src/util/fsx'
 import { truncateForAudit } from '../../apps/kernel/src/util/text'
 import { assertHttpUrl } from '../../apps/kernel/src/services/shell'
 import { buildPinyin, matchTarget } from '../../apps/kernel/src/pinyin'
@@ -28,19 +28,6 @@ test('静态服务：root 为相对路径时也应解析成功（否则表现为
   assert(resolved.endsWith(`${path.sep}index.html`) || resolved.endsWith('/index.html'), `路径异常：${resolved}`)
   assertEqual(resolveWithinRoot('apps/launcher-ui/dist', '../secret'), null)
   assertEqual(resolveWithinRoot('apps/launcher-ui/dist', '../../etc/passwd'), null)
-})
-
-test('非法文件名片段被拒绝（zip / 安装路径）', () => {
-  for (const bad of ['..', '.', 'a/b', 'a\\b', '/abs', '', 'x\u0000y']) {
-    let threw = false
-    try {
-      assertSafePathPart(bad, '测试')
-    } catch {
-      threw = true
-    }
-    assert(threw, `应当拒绝：${JSON.stringify(bad)}`)
-  }
-  assertSafePathPart('my-plugin-0.1.0', '测试')
 })
 
 test('审计参数打码与截断', () => {

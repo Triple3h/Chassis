@@ -39,7 +39,6 @@ interface SearchWorker {
   command: string
   pending: Map<number, Waiting>
   idleTimer: NodeJS.Timeout | null
-  commandHandlers: Map<string, Waiting | undefined>
 }
 
 /** 脚本命令运行时（worker_threads），见 requirements §4.1 / §7.3 / plugin-spec §4.2 */
@@ -62,10 +61,6 @@ export class ScriptRuntime {
     return null
   }
 
-  async hasEntry(pluginId: string, command: string): Promise<boolean> {
-    return (await this.resolveEntry(pluginId, command)) !== null
-  }
-
   /** 一次性执行 no-view / script 命令 */
   async run(pluginId: string, command: string, args: unknown, timeoutMs?: number): Promise<unknown> {
     const entry = await this.resolveEntry(pluginId, command)
@@ -73,7 +68,7 @@ export class ScriptRuntime {
 
     const release = await this.acquire(pluginId)
     try {
-      return await this.runWorker(entry, pluginId, command, args, normalizeTimeout(timeoutMs), false)
+      return await this.runWorker(entry, pluginId, command, args, normalizeTimeout(timeoutMs))
     } finally {
       release()
     }
@@ -203,7 +198,6 @@ export class ScriptRuntime {
       command,
       pending: new Map(),
       idleTimer: null,
-      commandHandlers: new Map(),
     }
     this.searchWorkers.set(key, entry)
     this.pipeOutput(worker, pluginId, command)
@@ -281,17 +275,17 @@ export class ScriptRuntime {
     }
   }
 
+  /** 一次性 worker（搜索路径不在这里，见 `ensureSearchWorker`） */
   private runWorker(
     entryPath: string,
     pluginId: string,
     command: string,
     args: unknown,
     timeoutMs: number,
-    isSearch: boolean,
   ): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const worker = new Worker(pathToFileURL(entryPath), {
-        workerData: this.workerData(pluginId, command, args, isSearch ? 'search' : 'run'),
+        workerData: this.workerData(pluginId, command, args, 'run'),
         stdout: true,
         stderr: true,
       })
@@ -408,10 +402,6 @@ export class ScriptRuntime {
     }
     const current = this.active.get(pluginId) ?? 1
     this.active.set(pluginId, Math.max(0, current - 1))
-  }
-
-  get isClosed(): boolean {
-    return this.closed
   }
 }
 

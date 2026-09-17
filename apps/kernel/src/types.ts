@@ -16,6 +16,7 @@ export type KernelEvent =
   | 'ui/footer'
   | 'ui/hide'
   | 'shell/visibility'
+  | 'app/quit'
 
 /** 会话为什么被关掉：`reload` 时 UI 应当在插件重载完成后重开该页面 */
 export type SessionCloseReason = 'close' | 'ui' | 'reload' | 'disable' | 'uninstall' | 'shutdown'
@@ -26,13 +27,9 @@ export interface Session {
   command: string
   token: string
   port: number
-  origin: string
   createdAt: number
   /** 最近一次搜索广播的 token（searchResult.set 的新鲜度校验） */
   lastSearchToken: number
-  /** 当前会话的 footer / 搜索框内容快照 */
-  searchContent: string
-  footer: unknown
 }
 
 export interface SearchSlot {
@@ -40,8 +37,6 @@ export interface SearchSlot {
   query: string
   /** pluginId → 结果项 */
   results: Map<string, ResultItem[]>
-  /** 已经回过的插件 */
-  settled: Set<string>
   closed: boolean
 }
 

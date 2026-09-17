@@ -1,7 +1,6 @@
-import path from 'node:path'
 import { LauncherError, toErrorShape, type ActionResult, type ActionDecl, type ResultItem } from '@launcher/plugin-manifest'
 import { AuditLog } from './audit'
-import { ConfigStore, DEFAULT_CONFIG, type Config } from './config'
+import { ConfigStore, type Config } from './config'
 import { EventBus } from './events'
 import { HistoryStore } from './history'
 import { OverrideStore } from './overrides'
@@ -14,7 +13,7 @@ import { PluginManager, type PluginRecord } from './plugin'
 import { LEGACY_ID_TO_CURRENT } from './legacy'
 import { PluginServerPool } from './http/pluginServers'
 import { UiServer } from './http/server'
-import { createKernelServices } from './services/kernel'
+import { createServiceBinder } from './services/kernel'
 import { ScriptRuntime } from './services/exec'
 import { PluginStorage } from './services/storage'
 import { Primitives } from './services/shell'
@@ -22,31 +21,16 @@ import { HostUiBridge } from './services/hostUi'
 import { QuicklinkStore } from './services/quicklink'
 import { BridgeDispatcher } from './services/bridge'
 import { createSettingsService, type SettingsHost, type SettingsService } from './services/settings'
-import type { ExecContext, KernelEvent } from './types'
+import { createSettingsHost } from './services/settingsHost'
+import { PluginAdmin } from './pluginAdmin'
+import { WindowVisibility } from './windowVisibility'
+import type { ExecContext } from './types'
+import { pluginDataPath } from './util/fsx'
 import { itemKey } from './util/text'
 
-/**
- * 隐藏的**兜底**时长（ms）：等不到 UI 的回执也只能落地。
- *
- * 正常路径根本不看这个数：UI 演完离场动画会回执 `/api/window/hidden`，内核拿到就立刻隐藏
- * （见 `hideWindowAnimated`）。回执才是「演完了」的准确信号 —— 广播穿过 内核 → SSE → webview
- * 的耗时不可控，任何固定时长都可能砍在淡出中途，把半透明的一帧留成「下一场唤出先亮的旧画面」。
- *
- * 这个数只防「UI 没了 / SSE 断了 / 回执丢了」：500ms 比正常回执（约 140+100ms）宽裕一倍多。
- */
-export const HIDE_FALLBACK_MS = 500
-
-/**
- * 「显示」这条广播的延迟（ms）。
- *
- * 壳的 `show()` 只是把窗口排进显示队列：窗口真正上屏、webview 从「隐藏」恢复绘制
- * 还要几十毫秒，而 **CSS 的时间线在这段时间里照走**。广播发早了，UI 的入场动画会在
- * 窗口还没有画面的时候播完 —— 用户看到的是「啪」一下整块出现（实测反馈：动效好像没实现）。
- * 留这一段时间让窗口先跑到「能画」的状态，是入场动画能被看见的前提。
- */
-export const SHOW_ANIMATION_MS = 80
-
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+// 显隐时序常量与状态机都在 `WindowVisibility`（`windowVisibility.ts`）；
+// 这里 re-export 保持既有导入路径（tests/contract/shell-link.test.ts）继续可用
+export { HIDE_FALLBACK_MS, SHOW_ANIMATION_MS } from './windowVisibility'
 
 export interface KernelOptions {
   dataRoot: string
@@ -55,8 +39,6 @@ export interface KernelOptions {
   uiDistDir: string | null
   uiDevUrl?: string
   version: string
-  /** 只用内存（测试用，不落盘） */
-  ephemeral?: boolean
 }
 
 export function createLogger() {
@@ -101,22 +83,17 @@ export class Kernel {
   readonly search: SearchEngine
   readonly bridge: BridgeDispatcher
   readonly uiServer: UiServer
-  private services!: ReturnType<typeof createKernelServices>['services']
-  private binder!: ReturnType<typeof createKernelServices>['binder']
+  /** 窗口显隐（广播 + 等回执 + 兜底）：状态机与常量都在 `WindowVisibility` */
+  readonly visibility: WindowVisibility
+  /** 插件管理动作（托盘 / 设置面板 / HTTP API 共用） */
+  readonly admin: PluginAdmin
+  private binder!: ReturnType<typeof createServiceBinder>
+  /** 管理面（internal 插件）特权服务的宿主实现（组装见 `services/settingsHost.ts`） */
+  private settingsHost!: SettingsHost
   private started = false
   private readyFlag = false
-  /** 正在「演离场」的那次隐藏（同一时刻只允许一次） */
-  private pendingHide: Promise<void> | null = null
-  /** 撤销令牌：唤出时 +1，让已经排队的隐藏落地前自己失效 */
-  private hideToken = 0
-  /** 显示广播的令牌：排队中的那次「晚一点广播」被新的显隐动作作废 */
-  private showToken = 0
-  /** 兜底定时器：UI 的回执一直不来也要落地（见 HIDE_FALLBACK_MS） */
-  private hideTimer: ReturnType<typeof setTimeout> | null = null
-  /** 「现在落地」的入口：回执与兜底共用；没有排队的隐藏时为 null */
-  private landPendingHide: (() => void) | null = null
-  /** 让 `/api/window/hide` 的调用方等到真正落地（回执或兜底）再返回 */
-  private resolvePendingHide: (() => void) | null = null
+  /** 退出只允许发生一次（三条退出路径可能同时被人碰到） */
+  private quitting = false
 
   constructor(private readonly opts: KernelOptions) {
     this.config = new ConfigStore(opts.dataRoot)
@@ -130,14 +107,14 @@ export class Kernel {
 
     this.exec = new ScriptRuntime({
       resolvePluginDir: (pluginId) => this.plugins?.dirOf(pluginId),
-      dataPathFor: (pluginId) => path.join(opts.dataRoot, 'plugins', pluginId),
+      dataPathFor: (pluginId) => pluginDataPath(opts.dataRoot, pluginId),
       dataRoot: opts.dataRoot,
       log: (level, message, data) => this.log(level, message, data),
       onFailure: (pluginId, command) => this.plugins?.noteFailure(pluginId, command),
       handleRpc: (pluginId, method, params) => this.handleScriptRpc(pluginId, method, params),
     })
 
-    const built = createKernelServices({
+    this.binder = createServiceBinder({
       version: opts.version,
       dataRoot: opts.dataRoot,
       audit: this.audit,
@@ -163,10 +140,7 @@ export class Kernel {
           capabilities: [...new Set([...(record?.manifest?.capabilities ?? []), ...(decl.capabilities ?? [])])],
         })
       },
-      unregisterCommand: (id) => void this.registry.update(id, {}),
     })
-    this.services = built.services
-    this.binder = built.binder
 
     this.registry.bindInvoker((id, args, source) => this.invoke(id, args, source))
 
@@ -181,13 +155,10 @@ export class Kernel {
       sessions: this.sessions,
       servers: this.servers,
       binder: this.binder,
-      services: this.services,
       exec: this.exec,
       settingsFor: (pluginId) => this.createSettingsService(pluginId) as unknown as Record<string, unknown>,
       log: (level, message, data) => this.log(level, message, data),
-      onChanged: () => {
-        void this.refreshTray()
-      },
+      onChanged: () => void this.registerTray(),
     })
 
     // 底座基础能力（essential）的调用不进审计：等价于底座自身行为，且调用量大
@@ -233,6 +204,27 @@ export class Kernel {
     })
 
     this.bus.setSink((event, payload) => this.uiServer.broadcast(event, payload))
+
+    // 三块「自成一体」的职责各自成类：显隐状态机 / 插件管理 / 管理面宿主
+    this.visibility = new WindowVisibility({ primitives: this.primitives, bus: this.bus })
+    this.admin = new PluginAdmin({
+      plugins: this.plugins,
+      overrides: this.overrides,
+      config: this.config,
+      primitives: this.primitives,
+    })
+    this.settingsHost = createSettingsHost({
+      version: opts.version,
+      dataRoot: opts.dataRoot,
+      config: this.config,
+      history: this.history,
+      audit: this.audit,
+      bus: this.bus,
+      primitives: this.primitives,
+      plugins: this.plugins,
+      patchConfig: (patch) => this.patchConfig(patch),
+      pluginAction: (action, payload) => this.pluginAction(action, payload),
+    })
   }
 
   async start(): Promise<void> {
@@ -328,10 +320,6 @@ export class Kernel {
       .catch(() => undefined)
   }
 
-  async refreshTray(): Promise<void> {
-    await this.registerTray()
-  }
-
   async handleTrayMenu(id: string): Promise<void> {
     switch (id) {
       case 'show':
@@ -347,107 +335,59 @@ export class Kernel {
         await this.plugins.reloadAll()
         break
       case 'quit':
-        await this.shutdown()
+        await this.quit()
         break
       default:
         break
     }
   }
 
-  private async shutdown(): Promise<void> {
+  /**
+   * 退出内核的**唯一收口**：托盘「退出」、`/api/app/quit`、壳的 `app/shutdown` 全走这里。
+   *
+   * 之前三条路径各写一遍「stop + quit + exit」，细节互不相同（有的回请壳、有的直接 exit、
+   * 有的带 120ms 延迟），差异只能靠逐个读才发现。统一为：广播退出（UI 先知道）→ 收尾 →
+   * 回请壳退出（壳发起的退出不必回请）→ 延迟 120ms 让在途响应写出去再 exit。
+   */
+  async quit(options: { quitShell?: boolean } = {}): Promise<void> {
+    if (this.quitting) return
+    this.quitting = true
     this.bus.emit('shell/visibility', { visible: false })
+    this.bus.emit('app/quit', {})
     await this.stop()
-    await this.primitives.quit().catch(() => undefined)
-    process.exit(0)
+    if (options.quitShell !== false) await this.primitives.quit().catch(() => undefined)
+    setTimeout(() => process.exit(0), 120)
   }
 
-  // ── 窗口显隐的唯一收口（与壳的分工见 tests/contract/shell-link.test.ts）──
+  // ── 窗口显隐（与壳的分工见 tests/contract/shell-link.test.ts）──
   //
-  // 壳仍然独占「什么时候该显、什么时候该隐」的裁决权，内核只负责**让这次显隐好看一点**：
-  // 把广播和真正落地拆成两步，中间留给 UI 播动画的时间。所有跨进程路径都必须走这两个方法，
-  // 否则就会出现「有的入口有动画、有的入口啪一下」这种最难查的不一致。
+  // 壳仍然独占「什么时候该显、什么时候该隐」的裁决权，内核只负责**让这次显隐好看一点**。
+  // 状态机（广播 → 等 UI 回执 → 兜底落地）整体在 `WindowVisibility` 里，
+  // 下面这几个方法是薄转发 —— 保留它们是为了让所有调用点读起来仍是「kernel.xxxAnimated()」。
 
   /** 显示窗口：先落地，再等窗口真的能画了才广播（见 `SHOW_ANIMATION_MS`） */
   async showWindowAnimated(focus = true): Promise<void> {
-    this.cancelPendingHide()
-    try {
-      await this.primitives.showWindow(focus)
-    } finally {
-      // 广播一定要发出去：敲壳失败（壳没连上 / 窗口没了）时 UI 更不能停在「隐藏态」——
-      // 那正好是一块透明窗口，用户会以为启动台压根没打开。显示这条路径只加不减。
-      await this.emitVisibleAnimated()
-    }
+    await this.visibility.show(focus)
   }
 
-  /**
-   * 「显示」这条广播要**晚一点发**：等窗口上屏、webview 恢复绘制之后再让 UI 起入场动画
-   *（原因写在 `SHOW_ANIMATION_MS` 上）。延迟期间又来了隐藏 / 新的显示，这一次就作废。
-   */
-  async emitVisibleAnimated(): Promise<void> {
-    const token = ++this.showToken
-    await delay(SHOW_ANIMATION_MS)
-    if (token !== this.showToken) return
-    this.bus.emit('shell/visibility', { visible: true })
+  /** 「显示」这条广播要晚一点发：等窗口上屏、webview 恢复绘制之后再让 UI 起入场动画 */
+  emitVisibleAnimated(): Promise<void> {
+    return this.visibility.emitVisible()
   }
 
-  /**
-   * 隐藏窗口：先广播（UI 演离场动画），**等 UI 回执「最后一帧画出来了」才真正落地**。
-   *
-   * 为什么不能定时落地：广播要穿过 内核 → SSE → webview 才变成 CSS 的起点，
-   * 这段延迟不可控；任何固定时长都可能砍在淡出中途 —— 被砍掉的那一帧（半透明面板）
-   * 会被 webview 留成「最后一帧」，下次唤出时合成器先亮它（用户：「闪一下，像打开了两次」）。
-   * 回执把「演完了」交给唯一知道答案的一方；`HIDE_FALLBACK_MS` 只防回执永远不来。
-   *
-   * 重复调用会搭同一班车（一次 `ctx.hostUi.hide` 会同时从内核和 UI 两条路走回来）。
-   */
-  async hideWindowAnimated(): Promise<void> {
-    if (this.pendingHide) return this.pendingHide
-    // 排队中的「显示广播」一并作废：先显后隐的连按不能被它补一帧可见
-    this.showToken += 1
-    this.bus.emit('shell/visibility', { visible: false })
-    const token = ++this.hideToken
-    this.pendingHide = new Promise<void>((resolve) => {
-      this.resolvePendingHide = resolve
-      this.landPendingHide = () => {
-        // 令牌被换过 = 这次已经作废（被唤出撤销、或已排了新的一次）：什么都不动
-        if (token !== this.hideToken) return
-        this.settlePendingHide()
-        void this.hideWindowNow()
-      }
-      this.hideTimer = setTimeout(() => this.landPendingHide?.(), HIDE_FALLBACK_MS)
-    })
-    return this.pendingHide
+  /** 隐藏窗口：先广播（UI 演离场），等回执才真正落地（兜底 `HIDE_FALLBACK_MS`） */
+  hideWindowAnimated(): Promise<void> {
+    return this.visibility.hide()
   }
 
   /** UI 回执：离场动画的最后一帧已经画出来了 —— 现在可以落地了 */
   finishWindowHide(): void {
-    this.landPendingHide?.()
+    this.visibility.finishHide()
   }
 
   /** 撤销尚在排队的隐藏（热键连按不能被上一次隐藏偷走窗口） */
   cancelPendingHide(): void {
-    this.hideToken += 1
-    this.settlePendingHide()
-  }
-
-  /** 收尾一次排队中的隐藏：定时器、入口、等待者一并清掉（重复调用无副作用） */
-  private settlePendingHide(): void {
-    if (this.hideTimer) {
-      clearTimeout(this.hideTimer)
-      this.hideTimer = null
-    }
-    this.landPendingHide = null
-    this.pendingHide = null
-    const resolve = this.resolvePendingHide
-    this.resolvePendingHide = null
-    resolve?.()
-  }
-
-  /** 真正敲壳隐藏（回执与兜底共用的一条路） */
-  private async hideWindowNow(): Promise<void> {
-    // 只有**明确知道**已经被藏掉了才跳过；问不到（壳没连上）就照常走，隐藏本身会失败并静默
-    if ((await this.primitives.isVisible()) === false) return
-    await this.primitives.hideWindow().catch(() => undefined)
+    this.visibility.cancelPendingHide()
   }
 
   /** 执行命令（入口：UI / 插件 / 宿主） */
@@ -473,7 +413,6 @@ export class Kernel {
       const result = await this.pipeline.run(ctx, () => this.execute(ctx))
       // `history: false` 的插件（底座自身入口）不进「最近使用」—— 它们一用就占满整个分区
       if (result.ok && result.kind !== 'host' && !this.plugins.excludesHistory(entry.pluginId)) {
-        const record = this.plugins.get(entry.pluginId)
         this.history.record({
           key: itemKey(entry.pluginId, entry.decl.name, args),
           pluginId: entry.pluginId,
@@ -482,7 +421,6 @@ export class Kernel {
           ...(entry.decl.subtitle ? { subtitle: entry.decl.subtitle } : {}),
           ...(entry.decl.icon ? { icon: entry.decl.icon } : {}),
           ...(args !== undefined ? { args } : {}),
-          ...(record ? {} : {}),
         })
         this.bus.emit('history/changed', { key: itemKey(entry.pluginId, entry.decl.name, args) })
       }
@@ -517,7 +455,6 @@ export class Kernel {
     }
     const port = Number(new URL(origin).port || 0)
     const session = this.sessions.create({ pluginId, command, port })
-    this.hostUi.state.searchContent = this.hostUi.state.searchContent
     const params = new URLSearchParams({
       sid: session.sid,
       cmd: command,
@@ -682,124 +619,14 @@ export class Kernel {
     return { config }
   }
 
-  /** 管理面（internal 插件）特权服务的宿主实现 */
+  /** 管理面（internal 插件）特权服务：宿主实现见 `services/settingsHost.ts` */
   createSettingsService(pluginId: string): SettingsService {
-    return createSettingsService(this.settingsHost(), pluginId)
+    return createSettingsService(this.settingsHost, pluginId)
   }
 
-  private settingsHost(): SettingsHost {
-    return {
-      getConfig: () => this.config.get(),
-      patchConfig: (patch) => this.patchConfig(patch),
-      setAutostart: async (enabled) => {
-        await this.patchConfig({ autostart: enabled })
-      },
-      setHistoryLimit: async (limit) => {
-        await this.patchConfig({ historyLimit: limit })
-      },
-      listPlugins: async () => this.plugins.info(),
-      pluginAction: (action, payload) => this.pluginAction(action, payload),
-      queryAudit: async (limit) => this.audit.query({ limit }),
-      clearAudit: () => this.audit.clear(),
-      clearHistory: async () => {
-        this.history.clearHistory()
-        this.emit('history/changed', {})
-      },
-      openDataDir: async () => {
-        await this.primitives.shellFor('kernel').openPath(this.dataRoot)
-      },
-      revealPath: async (target) => {
-        await this.primitives.shellFor('kernel').reveal(target)
-      },
-      hostInfo: () => ({
-        version: this.opts.version,
-        platform: process.platform,
-        dataRoot: this.dataRoot,
-        node: process.version,
-      }),
-    }
-  }
-
-  /** 插件管理动作（托盘、设置面板、HTTP API 共用同一条路径） */
+  /** 插件管理动作（托盘、设置面板、HTTP API 共用同一条路径；实现在 `PluginAdmin`） */
   async pluginAction(action: string, payload: Record<string, unknown> = {}): Promise<unknown> {
-    const id = typeof payload.id === 'string' ? payload.id : ''
-    const dir = typeof payload.path === 'string' ? payload.path : ''
-    switch (action) {
-      case 'enable':
-        await this.plugins.setDisabled(id, false)
-        return { ok: true }
-      case 'disable':
-        await this.plugins.setDisabled(id, true)
-        return { ok: true }
-      case 'reload':
-        await this.plugins.reload(id)
-        return { ok: true }
-      case 'reloadAll':
-        await this.plugins.reloadAll()
-        return { ok: true }
-      case 'uninstall':
-        await this.plugins.uninstall(id)
-        return { ok: true }
-      case 'installDir':
-        await this.plugins.installFromDirectory(dir, { overwrite: Boolean(payload.overwrite) })
-        return { ok: true }
-      case 'installZip':
-        await this.plugins.installFromZip(dir, { overwrite: Boolean(payload.overwrite) })
-        return { ok: true }
-      case 'reveal': {
-        const pluginDir = this.plugins.dirOf(id)
-        if (!pluginDir) throw new LauncherError('NOT_FOUND', `插件不存在：${id}`)
-        await this.primitives.shellFor('kernel').reveal(pluginDir)
-        return { ok: true }
-      }
-      case 'openData': {
-        await this.primitives.shellFor('kernel').openPath(this.plugins.dataPathFor(id))
-        return { ok: true }
-      }
-      case 'setKeywords': {
-        // 界面化编辑别名：覆盖层落盘 + 当场重进注册表（不用重载插件，下一次搜索即生效）
-        const { command, plugin } = this.requireOverrideTarget(id, payload)
-        const keywords = Array.isArray(payload.keywords)
-          ? payload.keywords.filter((k): k is string => typeof k === 'string')
-          : []
-        if (command) await this.overrides.setCommandKeywords(plugin.id, command, keywords)
-        else await this.overrides.setPluginKeywords(plugin.id, keywords)
-        this.plugins.applyOverrides(plugin.id)
-        return { ok: true, plugins: this.plugins.info() }
-      }
-      case 'resetKeywords': {
-        const { command, plugin } = this.requireOverrideTarget(id, payload)
-        if (command) await this.overrides.setCommandKeywords(plugin.id, command, null)
-        else await this.overrides.setPluginKeywords(plugin.id, null)
-        this.plugins.applyOverrides(plugin.id)
-        return { ok: true, plugins: this.plugins.info() }
-      }
-      case 'setCapability': {
-        // 用户拒绝 / 恢复某项高风险能力（安装时确认的落点）
-        const capability = typeof payload.capability === 'string' ? payload.capability : ''
-        const denied = Boolean(payload.denied)
-        const current = this.config.get().denied
-        const list = new Set(current[id] ?? [])
-        if (denied) list.add(capability)
-        else list.delete(capability)
-        await this.config.patch({ denied: { ...current, [id]: [...list] } })
-        await this.plugins.reload(id).catch(() => this.plugins.load(id))
-        return { ok: true }
-      }
-      default:
-        throw new LauncherError('BAD_ARGS', `未知插件动作：${action}`)
-    }
-  }
-
-  /** setKeywords / resetKeywords 的入参校验：插件必须存在，命令（若给）必须在清单里 */
-  private requireOverrideTarget(id: string, payload: Record<string, unknown>): { command: string; plugin: PluginRecord } {
-    const plugin = this.plugins.get(id)
-    if (!plugin) throw new LauncherError('NOT_FOUND', `插件不存在：${id}`)
-    const command = typeof payload.command === 'string' ? payload.command : ''
-    if (command && !(plugin.manifest?.commands ?? []).some((decl) => decl.name === command)) {
-      throw new LauncherError('NOT_FOUND', `命令不存在：${id}:${command}`)
-    }
-    return { command, plugin }
+    return this.admin.run(action, payload)
   }
 
   /** 脚本（worker）侧的宿主调用，统一过审计（P6） */
@@ -808,46 +635,23 @@ export class Kernel {
     method: string,
     params: Record<string, unknown>,
   ): Promise<unknown> {
-    const caps = this.plugins.capabilitiesOf(pluginId)
     if (method.startsWith('storage.')) {
-      if (!caps.has('storage')) throw new LauncherError('CAPABILITY_DENIED', '未声明能力：storage')
-      const service = this.storage.serviceFor(pluginId, 'script')
-      switch (method) {
-        case 'storage.get':
-          return service.get(String(params.key ?? ''))
-        case 'storage.set':
-          return service.set(String(params.key ?? ''), params.value)
-        case 'storage.remove':
-          return service.remove(String(params.key ?? ''))
-        case 'storage.all':
-          return service.all()
-        case 'storage.clear':
-          return service.clear()
-        default:
-          break
+      if (!this.plugins.capabilitiesOf(pluginId).has('storage')) {
+        throw new LauncherError('CAPABILITY_DENIED', '未声明能力：storage')
       }
+      // 转发与 view 桥共用同一实现（PluginStorage.call），这里只做能力校验
+      return this.storage.call(pluginId, 'script', method.slice('storage.'.length), params)
     }
     throw new LauncherError('NOT_FOUND', `未知脚本 RPC：${method}`)
-  }
-
-  emit(event: KernelEvent, payload?: unknown): void {
-    this.bus.emit(event, payload)
-  }
-
-  get defaultConfig(): Config {
-    return DEFAULT_CONFIG
   }
 
   get dataRoot(): string {
     return this.opts.dataRoot
   }
 
-  get builtinRoots(): readonly string[] {
-    return this.opts.builtinRoots
-  }
-
-  assertStarted(): void {
-    if (!this.started) throw new LauncherError('INTERNAL', '内核尚未启动')
+  /** 内核版本：HTTP 接口 / 握手一律从这里取，别再写字面量 */
+  get version(): string {
+    return this.opts.version
   }
 
   /** 就绪标志：壳问 `kernel/ready` 时用来区分「进程活着」与「UI 端口可用」 */

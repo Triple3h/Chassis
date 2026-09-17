@@ -16,13 +16,13 @@ function required(value: unknown, field: string): string {
 export function registerApi(kernel: Kernel): void {
   const server = kernel.uiServer
 
-  server.get('/api/health', () => ({ ok: true, version: '0.1.0', ui: server.address }))
+  server.get('/api/health', () => ({ ok: true, version: kernel.version, ui: server.address }))
 
   server.get('/api/bootstrap', () => {
     const config = kernel.config.get()
     return {
       ok: true,
-      version: '0.1.0',
+      version: kernel.version,
       platform: process.platform,
       dataRoot: kernel.dataRoot,
       config,
@@ -86,7 +86,7 @@ export function registerApi(kernel: Kernel): void {
 
   server.post('/api/history/clear', async () => {
     kernel.history.clearHistory()
-    kernel.emit('history/changed', {})
+    kernel.bus.emit('history/changed', {})
     return { ok: true }
   })
 
@@ -104,7 +104,7 @@ export function registerApi(kernel: Kernel): void {
     const key = required(payload.key, 'key')
     if (kernel.history.isPinned(key)) {
       kernel.history.unpin(key)
-      kernel.emit('pinned/changed', { key, pinned: false })
+      kernel.bus.emit('pinned/changed', { key, pinned: false })
       return { ok: true, pinned: false }
     }
     const item = {
@@ -118,7 +118,7 @@ export function registerApi(kernel: Kernel): void {
       ...(payload.action ? { action: payload.action } : {}),
     }
     kernel.history.pin(item)
-    kernel.emit('pinned/changed', { key, pinned: true })
+    kernel.bus.emit('pinned/changed', { key, pinned: true })
     return { ok: true, pinned: true }
   })
 
@@ -126,7 +126,7 @@ export function registerApi(kernel: Kernel): void {
     const { keys } = body<{ keys?: string[] }>(ctx)
     if (!Array.isArray(keys)) throw new LauncherError('BAD_ARGS', 'keys 必须是数组')
     const list = kernel.history.reorder(keys)
-    kernel.emit('pinned/changed', { reordered: true })
+    kernel.bus.emit('pinned/changed', { reordered: true })
     return { ok: true, pinned: list }
   })
 
@@ -172,7 +172,7 @@ export function registerApi(kernel: Kernel): void {
     if (devUrl === '') delete devPlugins[id]
     else devPlugins[id] = devUrl
     await kernel.config.patch({ devPlugins })
-    await kernel.plugins.reload(id).catch(() => kernel.plugins.load(id))
+    await kernel.plugins.reloadOrLoad(id)
     return { ok: true }
   })
 
@@ -203,14 +203,6 @@ export function registerApi(kernel: Kernel): void {
   })
 
   // ── 窗口 / 系统 ─────────────────────────────────────────────
-  /** 诊断（临时）：UI 上报自己的视口与 outer 尺寸，用来对照壳记录的窗口实测尺寸 */
-  server.post('/api/ui/viewport', async (ctx) => {
-    const payload = body<{ innerW?: number; innerH?: number; outerW?: number; outerH?: number; dpr?: number; screenH?: number }>(ctx)
-    console.error(
-      `[ui-viewport] inner=${payload.innerW}x${payload.innerH} outer=${payload.outerW}x${payload.outerH} dpr=${payload.dpr} screenH=${payload.screenH}`,
-    )
-    return { ok: true }
-  })
   server.post('/api/window/show', async () => {
     await kernel.showWindowAnimated(true)
     return { ok: true }
@@ -227,7 +219,7 @@ export function registerApi(kernel: Kernel): void {
    */
   server.post('/api/window/hidden', async (ctx) => {
     const payload = body<{ opacity?: number; elapsedMs?: number }>(ctx)
-    console.error(`[hide-ack] opacity=${payload.opacity ?? '-'} elapsed=${payload.elapsedMs ?? '-'}ms`)
+    kernel.log('debug', `[hide-ack] opacity=${payload.opacity ?? '-'} elapsed=${payload.elapsedMs ?? '-'}ms`)
     kernel.finishWindowHide()
     return { ok: true }
   })
@@ -242,10 +234,8 @@ export function registerApi(kernel: Kernel): void {
     return { ok: true }
   })
   server.post('/api/app/quit', async () => {
-    await kernel.uiServer.broadcast('app/quit', {})
-    await kernel.stop()
-    await kernel.primitives.quit().catch(() => undefined)
-    setTimeout(() => process.exit(0), 120)
+    // 不 await：`quit()` 会停掉 UI 服务，之后再写响应就来不及了 —— 先让本次响应出去，再收尾
+    void kernel.quit()
     return { ok: true }
   })
   server.post('/api/app/autostart', async (ctx) => {
@@ -304,13 +294,13 @@ export function registerApi(kernel: Kernel): void {
       ok: true,
       ready: true,
       uiPort: kernel.uiServer.address,
-      version: '0.1.0',
+      version: kernel.version,
       dataRoot: kernel.dataRoot,
     }
   })
   kernel.link.handle('app/shutdown', async () => {
-    await kernel.stop()
-    process.exit(0)
+    // 壳发起的退出：不必回请壳（它自己正在退）；延迟 exit 让这条响应先写出去
+    await kernel.quit({ quitShell: false })
     return { ok: true }
   })
 }

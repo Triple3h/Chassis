@@ -4,7 +4,7 @@ import type { AuditLog } from '../audit'
 import type { EventBus } from '../events'
 import type { Pipeline } from '../pipeline'
 import type { CommandRegistry, SearchResultHub } from '../registry'
-import type { Middleware, MiddlewareStage, Quicklink, Session } from '../types'
+import type { Middleware, MiddlewareStage, Session } from '../types'
 import type { ServiceBinder } from '../context'
 import type {
   AuditService,
@@ -40,26 +40,16 @@ export interface KernelServiceDeps {
   capabilitiesOf: (pluginId: string) => ReadonlySet<string>
   invokeCommand: (id: string, args: unknown, source: 'ui' | 'plugin') => Promise<ActionResult>
   registerCommand: (pluginId: string, pluginTitle: string, decl: CommandDecl) => () => void
-  unregisterCommand: (id: string) => void
 }
 
-export function createKernelServices(deps: KernelServiceDeps): { services: KernelServices; binder: ServiceBinder } {
-  const services: KernelServices = {
-    storage: deps.storage.serviceFor('__host__'),
-    commands: commandsFor('__host__', '宿主'),
-    searchResult: searchResultFor('__host__'),
-    hostUi: deps.hostUi.serviceFor('__host__', ''),
-    clipboard: deps.primitives.clipboardFor('__host__'),
-    shell: deps.primitives.shellFor('__host__'),
-    exec: execFor('__host__'),
-    notify: deps.primitives.notifyFor('__host__'),
-    screenshot: deps.primitives.screenshotFor('__host__'),
-    quicklink: deps.quicklinks.serviceFor('__host__'),
-    audit: auditFor('__host__'),
-    pipeline: pipelineFor('__host__'),
-    host: hostFor('__host__'),
-  }
-
+/**
+ * 服务装配：只产出 **binder**（按插件构造受限服务视图）。
+ *
+ * 这里曾同时产出一份挂 `'__host__'` 的 `KernelServices` 实例交给 `createPluginContext`，
+ * 但后者只读 `binder`，那份对象从装配到销毁没有任何读取方 —— 已删除。
+ * 服务形状仍以 `services/types.ts` 的 `KernelServices` 为准（它就是 binder 的返回类型表）。
+ */
+export function createServiceBinder(deps: KernelServiceDeps): ServiceBinder {
   function commandsFor(pluginId: string, pluginTitle: string): CommandRegistryService {
     const service: CommandRegistryService = {
       register: (decl: CommandDecl) => {
@@ -127,20 +117,7 @@ export function createKernelServices(deps: KernelServiceDeps): { services: Kerne
     }
   }
 
-  function hostFor(pluginId: string): HostService {
-    return {
-      info: (): HostInfo => ({
-        version: deps.version,
-        platform: process.platform,
-        dataRoot: deps.dataRoot,
-        pluginId,
-        command: '',
-        sid: '',
-      }),
-    }
-  }
-
-  const binder = {
+  return {
     bind(key: ServiceKey, pluginId: string, sid?: string): unknown {
       switch (key) {
         case 'storage':
@@ -187,8 +164,6 @@ export function createKernelServices(deps: KernelServiceDeps): { services: Kerne
       }
     },
   } as unknown as ServiceBinder
-
-  return { services, binder }
 }
 
 function assertDeclCapabilities(decl: Partial<CommandDecl>, declared: ReadonlySet<string>): void {
@@ -208,5 +183,3 @@ function assertResultItems(items: ResultItem[]): void {
     }
   }
 }
-
-export type { Quicklink }

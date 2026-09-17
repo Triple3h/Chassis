@@ -35,7 +35,6 @@ function makeContext(capabilities: string[]) {
   const ctx = createPluginContext({
     pluginId: 'demo',
     capabilities: new Set(capabilities),
-    services: fakeServices(),
     binder: { bind: (key: ServiceKey) => fakeServices()[key] } as unknown as ServiceBinder,
     bus: new EventBus(),
     disposeSink: { register: () => undefined },
@@ -83,7 +82,6 @@ test('管理面特权服务只由内核注入（extra）', () => {
   const withExtra = createPluginContext({
     pluginId: 'internal-settings',
     capabilities: new Set(['hostUi']),
-    services: fakeServices(),
     binder: { bind: (key: ServiceKey) => fakeServices()[key] } as unknown as ServiceBinder,
     bus: new EventBus(),
     disposeSink: { register: () => undefined },

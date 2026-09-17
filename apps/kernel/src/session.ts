@@ -14,11 +14,8 @@ export class SessionManager {
       command: input.command,
       token: randomUUID().replace(/-/g, ''),
       port: input.port,
-      origin: `http://127.0.0.1:${input.port}`,
       createdAt: Date.now(),
       lastSearchToken: 0,
-      searchContent: '',
-      footer: null,
     }
     this.sessions.set(sid, session)
     this.emit(session, 'open')
@@ -52,10 +49,6 @@ export class SessionManager {
       if (this.close(session.sid, reason)) count += 1
     }
     return count
-  }
-
-  closeAll(reason: SessionCloseReason = 'shutdown'): void {
-    for (const sid of [...this.sessions.keys()]) this.close(sid, reason)
   }
 
   on(fn: (session: Session, kind: 'open' | 'close', reason?: SessionCloseReason) => void): Disposer {

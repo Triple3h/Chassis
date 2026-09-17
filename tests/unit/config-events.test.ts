@@ -10,6 +10,7 @@
  */
 import { assertEqual, run, test } from '../helpers/assert'
 import { createHarness } from '../helpers/harness'
+import { DEFAULT_CONFIG } from '../../apps/kernel/src/config'
 
 interface Appearance {
   accent?: string
@@ -49,7 +50,7 @@ test('非法主题色被 sanitize 回落默认值，广播的也是默认值', a
   stop()
 
   assertEqual(seen.length, 1)
-  assertEqual(seen[0]?.accent, h.kernel.defaultConfig.accent, 'UI 拿到的一定是能直接用进 CSS 的值')
+  assertEqual(seen[0]?.accent, DEFAULT_CONFIG.accent, 'UI 拿到的一定是能直接用进 CSS 的值')
 })
 
 test('改非外观项（热键）同样广播，UI 不必为此单独开一条通道', async () => {

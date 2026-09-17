@@ -75,7 +75,11 @@ export class Primitives {
     return {
       start: async () =>
         audited(this.audit, { pluginId, channel: 'ui' }, 'ctx.screenshot.start', 'screenshot', undefined, async () => {
-          // 区域截图 → 系统剪贴板（requirements §8.6：只返回是否成功触发）
+          // 区域截图 → 系统剪贴板（requirements §8.6：只返回是否成功触发）。
+          //
+          // 注意：这里是内核里**唯一**直接执行系统命令的地方 —— 理想形态是壳提供 `screenshot`
+          // 原语（与 clipboard / notify / opener 并列），交互式截图（`-i`）无法自动化验证、
+          // 下沉要重打包实机确认，所以先在 `docs/architecture.md` 差异清单 D18 记录现状。
           if (process.platform !== 'darwin') return false
           return new Promise<boolean>((resolve) => {
             execFile('screencapture', ['-i', '-c'], (err) => resolve(!err))
@@ -140,10 +144,6 @@ export class Primitives {
 
   async setTrayMenu(items: Array<{ id: string; label: string; type?: 'item' | 'separator' }>): Promise<void> {
     await this.link.request('tray.setMenu', { items })
-  }
-
-  async setBadge(_unused: never): Promise<void> {
-    void _unused
   }
 
   async quit(): Promise<void> {

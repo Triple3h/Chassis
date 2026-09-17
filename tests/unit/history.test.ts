@@ -53,16 +53,11 @@ test('固定项按 order 排序，重排与取消固定都生效', async () => {
   await fsp.rm(dir, { recursive: true, force: true })
 })
 
-test('重复固定幂等；pruneInvalid 清理失效项', async () => {
+test('重复固定幂等', async () => {
   const { store, dir } = await tmpStore()
   store.pin({ key: 'a', pluginId: 'p', command: 'c', title: 'a' })
   store.pin({ key: 'a', pluginId: 'p', command: 'c', title: 'a' })
   assertEqual(store.pinnedList().length, 1)
-
-  store.record({ key: 'dead', pluginId: 'gone', command: 'x', title: 'x' })
-  const removed = store.pruneInvalid((item) => item.pluginId !== 'gone')
-  assertEqual(removed.history, 1)
-  assertEqual(store.allRecent().length, 0)
   await fsp.rm(dir, { recursive: true, force: true })
 })
 

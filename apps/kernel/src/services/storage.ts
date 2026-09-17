@@ -2,7 +2,7 @@ import path from 'node:path'
 import { LauncherError } from '@launcher/plugin-manifest'
 import type { StorageService } from './types'
 import type { AuditLog } from '../audit'
-import { readJson, writeJsonAtomic } from '../util/fsx'
+import { pluginDataPath, readJson, writeJsonAtomic } from '../util/fsx'
 import { audited } from './audited'
 
 /**
@@ -19,7 +19,7 @@ export class PluginStorage {
   ) {}
 
   pluginDir(pluginId: string): string {
-    return path.join(this.dataRoot, 'plugins', pluginId)
+    return pluginDataPath(this.dataRoot, pluginId)
   }
 
   fileFor(pluginId: string): string {
@@ -63,16 +63,36 @@ export class PluginStorage {
     }
   }
 
-  /** 只读访问（宿主内部用，比如 internal-settings 的插件列表） */
-  async snapshot(pluginId: string): Promise<Record<string, unknown>> {
-    return { ...(await this.load(pluginId)) }
-  }
-
-  async removePluginData(pluginId: string): Promise<void> {
-    const timer = this.timers.get(pluginId)
-    if (timer) clearTimeout(timer)
-    this.timers.delete(pluginId)
-    this.cache.delete(pluginId)
+  /**
+   * 方法名 → 服务调用：**view 桥与 script RPC 共用这一处转发**。
+   *
+   * 两条通道（`ctx.storage.*` 与脚本 SDK 的 `storage.*`）参数语义一致，
+   * 之前各写一份 switch、加一个方法要改两处；能力校验留在各自入口（桥 / 脚本 RPC）。
+   */
+  async call(
+    pluginId: string,
+    channel: 'ui' | 'script',
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    const service = this.serviceFor(pluginId, channel)
+    switch (method) {
+      case 'get':
+        return service.get(String(params.key ?? ''))
+      case 'set':
+        await service.set(String(params.key ?? ''), params.value)
+        return null
+      case 'remove':
+        await service.remove(String(params.key ?? ''))
+        return null
+      case 'all':
+        return service.all()
+      case 'clear':
+        await service.clear()
+        return null
+      default:
+        throw new LauncherError('NOT_FOUND', `未知 storage 方法：${method}`)
+    }
   }
 
   async flushAll(): Promise<void> {

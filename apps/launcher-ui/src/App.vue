@@ -266,17 +266,6 @@ onUnmounted(() => {
 
 function measure(): void {
   viewportHeight.value = Math.max(120, window.innerHeight - SEARCH_BAR_HEIGHT - FOOTER_HEIGHT - 18)
-  // 诊断（临时）：上报视口/outer 尺寸 → 内核写日志，用来对照壳记录的窗口实测尺寸
-  void api
-    .reportViewport({
-      innerW: window.innerWidth,
-      innerH: window.innerHeight,
-      outerW: window.outerWidth,
-      outerH: window.outerHeight,
-      dpr: window.devicePixelRatio,
-      screenH: window.screen.height,
-    })
-    .catch(() => undefined)
 }
 
 watch(desiredHeight, (height) => setWindowHeight(height))

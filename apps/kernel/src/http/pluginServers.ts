@@ -42,7 +42,6 @@ const MIME: Record<string, string> = {
 export interface PluginListener {
   pluginId: string
   port: number
-  origin: string
   close: () => Promise<void>
 }
 
@@ -54,14 +53,6 @@ export class PluginServerPool {
   private listeners = new Map<string, PluginListener>()
 
   constructor(private readonly log: (level: 'info' | 'warn' | 'error', msg: string) => void) {}
-
-  get(pluginId: string): PluginListener | undefined {
-    return this.listeners.get(pluginId)
-  }
-
-  has(pluginId: string): boolean {
-    return this.listeners.has(pluginId)
-  }
 
   /** 起 listener；端口从 0 让系统分配（避免端口被占） */
   async start(pluginId: string, root: string): Promise<PluginListener> {
@@ -88,7 +79,6 @@ export class PluginServerPool {
     const listener: PluginListener = {
       pluginId,
       port,
-      origin: `http://127.0.0.1:${port}`,
       close: async () => {
         this.listeners.delete(pluginId)
         await new Promise<void>((resolve) => server.close(() => resolve()))

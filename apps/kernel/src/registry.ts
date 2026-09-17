@@ -1,5 +1,5 @@
 import type { ActionResult, CommandDecl, ResultItem } from '@launcher/plugin-manifest'
-import { globalCommandId, splitGlobalCommandId } from '@launcher/plugin-manifest'
+import { globalCommandId } from '@launcher/plugin-manifest'
 import type { Disposer, SearchSlot } from './types'
 
 export interface RegisteredCommand {
@@ -33,16 +33,11 @@ export class CommandRegistry {
     if (this.commands.has(id)) {
       throw new Error(`命令 id 冲突：${id}`)
     }
-    const previous = this.commands.get(id)
     this.commands.set(id, entry)
     this.emit()
+    // 注销只删「还是自己」的那条：期间被 update 过（别名改写）也不该被误删
     return () => {
-      const current = this.commands.get(id)
-      if (current === entry) {
-        this.commands.delete(id)
-      } else if (previous) {
-        this.commands.set(id, previous)
-      }
+      if (this.commands.get(id) === entry) this.commands.delete(id)
       this.emit()
     }
   }
@@ -57,10 +52,6 @@ export class CommandRegistry {
 
   get(id: string): RegisteredCommand | undefined {
     return this.commands.get(id)
-  }
-
-  has(id: string): boolean {
-    return this.commands.has(id)
   }
 
   list(): RegisteredCommand[] {
@@ -110,7 +101,7 @@ export class SearchResultHub {
   private currentToken = 0
 
   open(token: number, query: string): SearchSlot {
-    this.slots.set(token, { token, query, results: new Map(), settled: new Set(), closed: false })
+    this.slots.set(token, { token, query, results: new Map(), closed: false })
     if (this.slots.size > 8) {
       const stale = [...this.slots.keys()].sort((a, b) => a - b).slice(0, this.slots.size - 8)
       for (const t of stale) this.slots.delete(t)
@@ -129,12 +120,10 @@ export class SearchResultHub {
     if (!slot || slot.closed) return false
     if (mode === 'clear') {
       slot.results.delete(pluginId)
-      slot.settled.add(pluginId)
       return true
     }
     const next = mode === 'set' ? items : [...(slot.results.get(pluginId) ?? []), ...items]
     slot.results.set(pluginId, next)
-    slot.settled.add(pluginId)
     return true
   }
 
@@ -145,16 +134,6 @@ export class SearchResultHub {
   setCurrent(token: number): void {
     this.currentToken = token
   }
-
-  getCurrent(): number {
-    return this.currentToken
-  }
-}
-
-export function parseCommandId(id: string): { pluginId: string; command: string } {
-  const parsed = splitGlobalCommandId(id)
-  if (!parsed) throw new Error(`非法命令 id：${id}`)
-  return { pluginId: parsed.pluginId, command: parsed.name }
 }
 
 export { globalCommandId }

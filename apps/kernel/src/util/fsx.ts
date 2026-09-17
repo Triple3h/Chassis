@@ -22,6 +22,14 @@ export async function writeJsonAtomic(file: string, data: unknown): Promise<void
   await fs.rename(tmp, file)
 }
 
+/**
+ * 插件唯一可写目录（N2）：`<dataRoot>/plugins/<pluginId>`。
+ * 唯一定义处 —— 内核里算这个路径的地方（插件管理 / 存储 / 脚本 worker）不要再各拼一遍。
+ */
+export function pluginDataPath(dataRoot: string, pluginId: string): string {
+  return path.join(dataRoot, 'plugins', pluginId)
+}
+
 export async function pathExists(p: string): Promise<boolean> {
   try {
     await fs.access(p)
@@ -36,27 +44,6 @@ export async function listDirSafe(dir: string): Promise<string[]> {
     return await fs.readdir(dir)
   } catch {
     return []
-  }
-}
-
-/**
- * 防目录穿越（requirements §9「供应链」/ plugin-spec §2.3）。
- * 校验字符串可以安全作为文件名片段，不可含路径分隔符与 `..`。
- * 移植自 ZTools `utils/pluginStorage.ts`（MIT，见 docs/THIRD-PARTY.md）。
- */
-export function assertSafePathPart(value: unknown, field: string): asserts value is string {
-  if (
-    typeof value !== 'string' ||
-    !value ||
-    value === '.' ||
-    value === '..' ||
-    value.includes('\0') ||
-    value.includes('/') ||
-    value.includes('\\') ||
-    path.isAbsolute(value) ||
-    path.win32.isAbsolute(value)
-  ) {
-    throw new Error(`${field} 不能用于生成文件路径`)
   }
 }
 

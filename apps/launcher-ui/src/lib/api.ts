@@ -123,9 +123,6 @@ export const api = {
    */
   confirmWindowHidden: (payload: { opacity: number; elapsedMs: number }) =>
     request<{ ok: boolean }>('/api/window/hidden', { method: 'POST', body: JSON.stringify(payload) }),
-  /** 诊断（临时）：上报视口尺寸，内核会把它写进日志 */
-  reportViewport: (payload: { innerW: number; innerH: number; outerW: number; outerH: number; dpr: number; screenH: number }) =>
-    request<{ ok: boolean }>('/api/ui/viewport', { method: 'POST', body: JSON.stringify(payload) }),
   showWindow: () => request<{ ok: boolean }>('/api/window/show', { method: 'POST' }),
   /** `visible` 为 `null` = 内核问不到壳（standalone / 浏览器开发），此时一律当可见处理 */
   windowVisible: () => request<{ ok: boolean; visible: boolean | null }>('/api/window/visible'),

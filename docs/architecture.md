@@ -224,6 +224,7 @@ active → degraded（脚本连续失败 3 次）
 | D15 | §7.6「插件在 200ms 内回结果」 | 插件激活后**延迟 800ms 预热**贡献型搜索 worker | 否则用户第一次输入必然吃一次 worker 冷启动 + 索引加载而超时（体验上就是"第一次搜不到"） |
 | D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
 | D17 | §3.1 只规定「隐藏」的触发条件，未规定显隐过程 | 窗口显隐拆成**广播 + 落地**两步：内核先 `emit('shell/visibility')` 让 UI 播动画，**等 UI 回执「离场最后一帧画出来了」再落地**（`HIDE_FALLBACK_MS`=500ms 兜底；壳侧另有 800ms 兜底防内核失联）；显隐的**裁决权仍在壳**（`window/toggled` 方向不变） | ADR-0004。透明无边框窗口的弹出感只能在 CSS 里做，而 UI 得先知道"要隐藏了"才播得了离场；固定时长会被不可控的广播延迟砍在淡出中途（半透明的一帧留在窗口里 = 下次唤出闪一下） |
+| D18 | §6.1「壳只提供系统原语」 | `screenshot`（区域截图 → 系统剪贴板）**由内核直接 `execFile('screencapture')` 完成**，没有下沉到壳（`apps/shell/src/primitives/` 现有 clipboard / hotkey / notify / opener / tray / window，无 screenshot） | 交互式截图（`-i`）无法自动化验证，改壳＝改协议 + 重打包实机确认，收益不抵风险；先记录现状，等做「壳原语补全」时与其它系统调用一起下沉。**边界上这是内核唯一一处直接执行系统命令的地方**（`apps/kernel/src/services/shell.ts` 的 `screenshotFor`） |
 
 ---
 

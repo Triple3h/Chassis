@@ -13,12 +13,6 @@ export interface DisposeSink {
   register(pluginId: string, fn: Disposer, label: string): void
 }
 
-function hasCapability(caps: ReadonlySet<string>, required: string): boolean {
-  if (caps.has(required)) return true
-  // clipboard.read 与 clipboard.write 是两条独立能力
-  return false
-}
-
 /**
  * 装配期裁剪（requirements §7.1 / P5）：
  * 只挂载插件声明且被授予的服务；未授权 → 属性不存在（不是「存在但被拒」）。
@@ -26,7 +20,6 @@ function hasCapability(caps: ReadonlySet<string>, required: string): boolean {
 export function createPluginContext(opts: {
   pluginId: string
   capabilities: ReadonlySet<string>
-  services: KernelServices
   binder: ServiceBinder
   bus: EventBus
   disposeSink: DisposeSink
@@ -42,7 +35,7 @@ export function createPluginContext(opts: {
   } as PluginContext
 
   const define = (key: ServiceKey, requiredCapability: string | null): void => {
-    if (requiredCapability && !hasCapability(capabilities, requiredCapability)) {
+    if (requiredCapability && !capabilities.has(requiredCapability)) {
       opts.onDenied?.(pluginId, key, requiredCapability)
       return // 不挂载：属性不存在
     }

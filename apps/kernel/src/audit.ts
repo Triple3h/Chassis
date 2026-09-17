@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { AuditRecord } from '@launcher/plugin-manifest'
 import { ensureDir } from './util/fsx'
 import { truncateForAudit } from './util/text'
-import { toErrorShape, type ErrorShape } from '@launcher/plugin-manifest'
+import type { ErrorShape } from '@launcher/plugin-manifest'
 
 const RING_SIZE = 500
 const KEEP_DAYS = 7
@@ -78,23 +78,7 @@ export class AuditLog {
     return rec
   }
 
-  /** 包装一次调用：自动记 ms / 错误 / 能力 */
-  async wrap<T>(
-    input: Omit<AuditInput, 'ok' | 'ms' | 'error'>,
-    fn: () => Promise<T> | T,
-  ): Promise<T> {
-    const start = Date.now()
-    try {
-      const result = await fn()
-      this.record({ ...input, ok: true, ms: Date.now() - start })
-      return result
-    } catch (err) {
-      this.record({ ...input, ok: false, ms: Date.now() - start, error: toErrorShape(err) })
-      throw err
-    }
-  }
-
-  ringBuffer(): AuditRecord[] {
+  private ringBuffer(): AuditRecord[] {
     return [...this.ring].reverse()
   }
 
@@ -113,10 +97,6 @@ export class AuditLog {
     this.queue = this.queue
       .then(() => fs.appendFile(file, line, 'utf8'))
       .catch(() => undefined)
-  }
-
-  async todayFile(): Promise<string> {
-    return path.join(this.dir, `audit-${dayKey(Date.now())}.jsonl`)
   }
 
   /** 滚动保留 7 天 */
