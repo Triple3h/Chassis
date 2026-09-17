@@ -23,7 +23,7 @@ import type { ScriptRuntime } from './services/exec'
 import type { Disposer, SessionCloseReason } from './types'
 import { ensureDir, listDirSafe, pathExists, pluginDataPath } from './util/fsx'
 import type { PluginServerPool } from './http/pluginServers'
-import { LEGACY_PLUGIN_IDS } from './legacy'
+import { legacyDataDirIds } from './legacy'
 import {
   commandKeywordsOf,
   mergeCommandDecls,
@@ -125,23 +125,28 @@ export class PluginManager {
 
   /**
    * 插件改过 id 时，把旧数据目录整体搬到新 id 下（只复制不删除；新目录已存在则不动）。
-   * 映射见 LEGACY_PLUGIN_IDS；失败只记日志，不阻塞加载。
+   * 候选见 `legacyDataDirIds`：改名过一次只有一个候选，改过两次就逐个试（第二代用户可能停在
+   * `plugins/hosts`，第一代用户还在 `plugins/sofast-hosts`）。失败只记日志，不阻塞加载。
    */
   private async adoptLegacyDataDir(id: string): Promise<void> {
-    const legacyId = LEGACY_PLUGIN_IDS[id]
-    if (!legacyId) return
+    const candidates = legacyDataDirIds(id)
+    if (!candidates.length) return
     const next = this.dataPathFor(id)
-    const prev = this.dataPathFor(legacyId)
     if (await pathExists(next)) return
-    if (!(await pathExists(prev))) return
-    try {
-      await fsp.cp(prev, next, { recursive: true })
-      this.deps.log('info', `已迁移旧插件数据目录：${legacyId} → ${id}`)
-    } catch (err) {
-      this.deps.log(
-        'warn',
-        `旧插件数据目录迁移失败：${legacyId} → ${id}（${err instanceof Error ? err.message : String(err)}）`,
-      )
+
+    for (const legacyId of candidates) {
+      const prev = this.dataPathFor(legacyId)
+      if (!(await pathExists(prev))) continue
+      try {
+        await fsp.cp(prev, next, { recursive: true })
+        this.deps.log('info', `已迁移旧插件数据目录：${legacyId} → ${id}`)
+      } catch (err) {
+        this.deps.log(
+          'warn',
+          `旧插件数据目录迁移失败：${legacyId} → ${id}（${err instanceof Error ? err.message : String(err)}）`,
+        )
+      }
+      return
     }
   }
 
@@ -507,7 +512,7 @@ export class PluginManager {
 
     await this.validateEntries(record, manifest)
 
-    // 插件改过 id：旧数据目录整体搬到新 id 下（只复制不删除，见 LEGACY_PLUGIN_IDS）
+    // 插件改过 id：旧数据目录整体搬到新 id 下（只复制不删除，见 legacyDataDirIds）
     await this.adoptLegacyDataDir(id).catch(() => undefined)
 
     record.state = 'loading'

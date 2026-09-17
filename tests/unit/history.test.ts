@@ -92,8 +92,10 @@ test('debounce + 原子写：flush 后落盘可重新加载', async () => {
   await fsp.rm(dir, { recursive: true, force: true })
 })
 
-test('插件改名：旧 pluginId 与 key 前缀迁移，并与新 id 的同类条目合并', async () => {
+test('插件改名：两代旧 id 一次迁到当前 id，并与新 id 的同类条目合并', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'launcher-history-migrate-'))
+  // hosts 改过两次名：sofast-hosts → hosts → host-manager。
+  // 两条历史必须**一次跳到底**（迁移是单跳查表，链断了就会停在中间那代上）。
   const legacyCommandKey = itemKey('sofast-hosts', 'hosts', undefined)
   const legacyArgsKey = itemKey('sofast-hosts', 'hosts', { tab: 'system' })
   await fsp.writeFile(
@@ -102,7 +104,7 @@ test('插件改名：旧 pluginId 与 key 前缀迁移，并与新 id 的同类�
       version: 1,
       items: [
         { key: legacyCommandKey, pluginId: 'sofast-hosts', command: 'hosts', title: 'Hosts 管家', lastUsed: 1000, count: 1 },
-        // 新 id 已经写过同一条：迁移后必须合并，不能变成两条
+        // 上一代 id 已经写过同一条：迁移后必须合并，不能变成两条
         { key: itemKey('hosts', 'hosts', undefined), pluginId: 'hosts', command: 'hosts', title: 'Hosts 管家', lastUsed: 2000, count: 2 },
         { key: legacyArgsKey, pluginId: 'sofast-hosts', command: 'hosts', args: { tab: 'system' }, title: 'Hosts 管家', lastUsed: 500, count: 1 },
         { key: itemKey('other', 'x', undefined), pluginId: 'other', command: 'x', title: '别的插件', lastUsed: 300, count: 1 },
@@ -120,23 +122,26 @@ test('插件改名：旧 pluginId 与 key 前缀迁移，并与新 id 的同类�
   const store = new HistoryStore(dir)
   await store.load(500)
   const migrated = store.migratePluginIds(LEGACY_ID_TO_CURRENT)
-  assertEqual(migrated.history, 2, '只迁移旧 id 的两条')
+  assertEqual(migrated.history, 3, '两代旧 id 的三条都要迁')
   assertEqual(migrated.pinned, 1)
-  assertEqual(store.allRecent().length, 3, '新旧 id 的同一条应当合并')
+  assertEqual(store.allRecent().length, 3, '同一 key 的新旧条目应当合并成一条')
 
-  const merged = store.find(itemKey('hosts', 'hosts', undefined))
-  assert(merged, '迁移后 key 前缀应当是新 id')
-  assertEqual(merged?.pluginId, 'hosts')
+  const merged = store.find(itemKey('host-manager', 'hosts', undefined))
+  assert(merged, '迁移后 key 前缀应当就是当前 id')
+  assertEqual(merged?.pluginId, 'host-manager')
   assertEqual(merged?.count, 3, '合并后使用次数相加')
   assertEqual(merged?.lastUsed, 2000, '保留最近使用的一条')
   assert(store.find(legacyArgsKey) === undefined, '带 args 的条目也应当换前缀')
-  assert(store.find(itemKey('hosts', 'hosts', { tab: 'system' })), 'args 哈希不该被改动')
+  assert(store.find(itemKey('host-manager', 'hosts', { tab: 'system' })), 'args 哈希不该被改动')
   assertEqual(store.find(itemKey('other', 'x', undefined))?.pluginId, 'other', '别的插件不受影响')
-  assertEqual(store.pinnedList()[0]?.pluginId, 'hosts')
+  assertEqual(store.pinnedList()[0]?.pluginId, 'host-manager')
 
   await store.flush()
   const raw = JSON.parse(await fsp.readFile(path.join(dir, 'history.json'), 'utf8')) as { items: Array<{ pluginId: string }> }
-  assert(!raw.items.some((item) => item.pluginId === 'sofast-hosts'), '迁移结果应当落盘')
+  assert(
+    !raw.items.some((item) => item.pluginId === 'sofast-hosts' || item.pluginId === 'hosts'),
+    '迁移结果应当落盘，且不该停在中间那一代上',
+  )
   await fsp.rm(dir, { recursive: true, force: true })
 })
 
