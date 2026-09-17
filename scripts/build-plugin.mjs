@@ -34,8 +34,12 @@ if (!fs.existsSync(pkgPath)) {
 }
 
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+// `--keep-dist`：view 已由 vite 构建过（Vue SFC），这里只补逻辑层产物与清单，别清空 dist
+const keepDist = process.argv.includes('--keep-dist')
 const dist = path.join(dir, 'dist')
-fs.rmSync(dist, { recursive: true, force: true })
+if (!keepDist) {
+  fs.rmSync(dist, { recursive: true, force: true })
+}
 fs.mkdirSync(dist, { recursive: true })
 
 const commands = pkg.commands ?? []
@@ -45,8 +49,36 @@ const banner = {
   js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);",
 }
 
-// 1) 脚本入口：逐个构建，保证自包含
+// 1) 脚本入口
+//
+// v2（plugin-spec §4.4）：逻辑层产物是**可执行文件**，由 cargo 构建后复制进来（`--copy-scripts`）。
+// v1（过渡期）：逐个 esbuild 打包成自包含 `dist/<name>.mjs`（N1 铁律：多入口逐个构建）。
+const copyScripts = process.argv.includes('--copy-scripts')
+const rustReleaseDir = path.join(repoRoot, 'target', 'release')
+
+if (copyScripts) {
+  for (const command of scriptCommands) {
+    // 清掉同名的 v1 产物（plugin-spec §11：v2 不再支持 .mjs）
+    for (const staleExt of ['.mjs', '.js']) {
+      const stale = path.join(dist, `${command.name}${staleExt}`)
+      if (fs.existsSync(stale)) fs.rmSync(stale)
+    }
+    const binName = process.platform === 'win32' ? `${command.name}.exe` : command.name
+    const from = path.join(rustReleaseDir, binName)
+    if (!fs.existsSync(from)) {
+      console.error(
+        `✗ ${pkg.name}: 找不到 Rust 产物 ${from}\n  先执行：cargo build --release -p launcher-plugin-${pkg.name}`,
+      )
+      process.exit(1)
+    }
+    const to = path.join(dist, binName)
+    fs.copyFileSync(from, to)
+    if (process.platform !== 'win32') fs.chmodSync(to, 0o755)
+  }
+}
+
 for (const command of scriptCommands) {
+  if (copyScripts) break
   const candidates = [
     `src/no-view/${command.name}.ts`,
     `src/scripts/${command.name}.ts`,
@@ -86,8 +118,8 @@ for (const command of scriptCommands) {
   }
 }
 
-// 2) view 入口
-if (viewCommands.length > 0) {
+// 2) view 入口（`--keep-dist` 时跳过：vite 已经产出 index.html + assets/）
+if (viewCommands.length > 0 && !keepDist) {
   const html = path.join(dir, 'index.html')
   if (!fs.existsSync(html)) {
     console.error(`✗ ${pkg.name}: 有 view 命令但缺少 index.html`)

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { builtinModules } from 'node:module'
 import path from 'node:path'
 import process from 'node:process'
@@ -32,7 +32,8 @@ const pluginsRoot = path.join(repoRoot, 'plugins')
 const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
 const COMMAND_NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
-const API_VERSIONS = ['1']
+// 1 = 逻辑层是自包含 .mjs（Node worker）；2 = 逻辑层是可执行文件（Rust，plugin-spec §4.4）
+const API_VERSIONS = ['1', '2']
 const MODES = ['view', 'no-view', 'script']
 /** 与 packages/plugin-manifest/src/capabilities.ts 保持一致（唯一真源在底座） */
 const CAPABILITIES = [
@@ -53,8 +54,8 @@ const CAPABILITIES = [
  */
 const DIST_MANIFEST_FIELDS = [...MANIFEST_KEYS, 'type']
 
-/** 底座 SDK：插件页（`@launcher/api`）与脚本侧（`@launcher/api-node`） */
-const LAUNCHER_SDK_RE = /^@launcher\/api(-node)?(\/.*)?$/
+/** 底座 SDK：插件页（`@launcher/api`）；逻辑层侧是 Rust 的 `launcher-plugin-sdk`，不再有 JS SDK */
+const LAUNCHER_SDK_RE = /^@launcher\/api(\/.*)?$/
 /**
  * 允许出现的远程字符串（每一条都必须写清理由；打包进来的第三方库里带着 URL 很正常，
  * 关键是「运行时会不会真的去取」）。
@@ -266,25 +267,37 @@ function checkArtifacts(pluginDir, pkg, report) {
     if (!assetFiles.length) report.fail('产物', '有 view 命令，但 dist/assets/ 是空的')
   }
 
-  // N1：产物名 = 命令名，且产物必须自包含（只 import node: 内置模块）
+  // N1：产物名 = 命令名
+  //  - apiVersion 1：自包含 `.mjs`（只 import node: 内置模块）
+  //  - apiVersion 2：**可执行文件** `dist/<name>`（无扩展名；Windows 是 `<name>.exe`），
+  //    必须带可执行位 + 二进制魔数（ELF / Mach-O / PE）—— 脚本改名冒充不算。
+  const isV2 = String(pkg.apiVersion) === '2'
   for (const cmd of commands) {
     if (!cmd || cmd.mode === 'view') continue
-    const candidates = [`${cmd.name}.mjs`, `${cmd.name}.js`, `workers/${cmd.name}.mjs`, `workers/${cmd.name}.js`]
-    const found = candidates.map((c) => path.join(dist, c)).find((p) => existsSync(p))
-    if (!found) {
-      report.fail('N1', `命令 ${cmd.name} 缺少同名产物（${candidates[0]}）`)
-      continue
-    }
-    const lines = readFileSync(found, 'utf-8').split('\n').filter((line) => /^\s*(import|export .* from)\s/.test(line))
-    for (const line of lines) {
-      const spec = line.match(/from\s+['"]([^'"]+)['"]/)?.[1] ?? line.match(/import\s+['"]([^'"]+)['"]/)?.[1]
-      if (!spec) continue
-      if (spec.startsWith('.') || spec.startsWith('/')) {
-        report.fail('N1', `${rel(found)} 依赖相对路径模块 ${spec} —— 产物必须自包含`)
+    if (isV2) {
+      const name = process.platform === 'win32' ? `${cmd.name}.exe` : cmd.name
+      const found = path.join(dist, name)
+      if (!existsSync(found)) {
+        report.fail('N1', `命令 ${cmd.name} 缺少同名可执行产物（${name}）`)
         continue
       }
-      if (!NODE_BUILTINS.has(spec)) report.fail('N1', `${rel(found)} import 了非内置模块 ${spec}（产物必须自包含）`)
+      if (process.platform !== 'win32' && !(statSync(found).mode & 0o111)) {
+        report.fail('N1', `${rel(found)} 没有可执行权限（chmod 0755）`)
+      }
+      const hex = readFileSync(found).subarray(0, 4).toString('hex')
+      const isBinary =
+        hex.startsWith('7f454c46') || // ELF
+        ['feedface', 'feedfacf', 'cffaedfe', 'cefaedfe'].some((magic) => hex.startsWith(magic)) || // Mach-O
+        hex.startsWith('4d5a') // PE
+      if (!isBinary) report.fail('N1', `${rel(found)} 不是可执行文件（二进制魔数校验失败）`)
+      continue
     }
+    // v1 的逻辑层（自包含 `.mjs` / Node worker）**不再支持**（plugin-spec §4.4 / ADR-0005）：
+    // 这里直接判失败，而不是去校验它 —— 「明确不支持」好过「半支持」。
+    report.fail(
+      'N1',
+      `命令 ${cmd.name} 的插件 apiVersion=${pkg.apiVersion}：v1 逻辑层（.mjs）已不支持，请升级为可执行产物（apiVersion 2）`,
+    )
   }
 
   // §5.4：不得引用远程资源（wasm / 图标 / CDN 必须随包）
