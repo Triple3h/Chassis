@@ -1,5 +1,5 @@
 ---
-description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、Rust 工程与协议（workspace 布局/camelCase 契约/读循环不许内联 await/日志只走 stderr）、窗口显隐/拖动/缩放与选区时机、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名）、数据迁移与样式同源
+description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、Rust 工程与协议（workspace 布局/camelCase 契约/读循环不许内联 await/日志只走 stderr）、窗口显隐/拖动/缩放与选区时机、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名/清单字段三处同步）、插件装载与平台过滤（platforms/arch，扫描期跳过、非法声明不静默吞）、数据迁移与样式同源
 alwaysApply: true
 enabled: true
 provider:
@@ -70,7 +70,7 @@ provider:
 
 - **`essential`（不可禁用）**：只认出厂清单的 `essential: true`（`is_essential = builtin && manifest.essential`，第三方写了无效）；启动期 `prune_essential_disabled()`（`plugin/manager.rs`）清配置里的残留禁用；其调用**不进审计**（`audit.set_exempt`）。
 - **`history: false`（不进最近使用）**：写历史前判 `PluginManager::excludes_history(id)`（`Kernel::invoke` 与 `rememberItemResult` 两处）**且**启动装配期 `history.drop_history_by(...)` 摘掉存量条目（只「以后不写」的话，界面上旧记录还在 = 用户以为没生效）；只动历史、**不动固定项**。
-- **清单字段白名单只有一份**：`scripts/lib/manifest-keys.mjs`（两套构建器 + spec-check 共用），加字段先动它。
+- **清单字段白名单只有一份**：`scripts/lib/manifest-keys.mjs`（两套构建器 + spec-check 共用），加字段先动它。新字段要**三处一起落**：白名单 + 内核 `manifest.rs` + TS 契约包 `packages/plugin-manifest`（少一处 = 字段被静默裁掉或两边校验口径不一致）。
 - **搜索命中面 = 命令 `title` / `subtitle` / `keywords`**（`pinyin::match_target`：前缀 1.0 / 包含 0.7 / 全拼 0.6 / 首字母 0.5 / subtitle 与 keywords 0.4；多音字按 `ToPinyinMulti` 展开读音变体、封顶 8 个，改打分要跑 `pinyin.rs` 的用例组）；别名两层 = 插件级（兜底全部入口命令）∪ 命令级；用户改动存 `<dataRoot>/plugin-overrides.json`（`undefined` = 用清单值 / `[]` = 显式清空），改完只 `registry.update` 即时生效、**不重载插件**。
 - 固定 / 历史项必须存 `action` 快照：应用 / 文件 / 网址的 `command` 是**结果项 id**（不是命令名）；UI `pinPayload` 要带 `result.item.action`。
 
@@ -82,6 +82,11 @@ provider:
 ## 数据与插件装载
 
 - **插件根识别**：`<dir>/dist/package.json` 存在 ⇒ 插件根 = `<dir>/dist`（`PluginManager::scan()` 与 `install_from_directory()` 必须一致，`plugin/manager.rs`）。
+- **平台过滤（plugin-spec §3.5）**：清单可选字段 `platforms`（`macos`/`windows`/`linux`）与 `arch`（`x64`/`arm64`），**省略 = 不限制**（只增不减，老插件无感）。判定在 `scan()` 里（`platform_skip_reason()` + `manifest::raw_platform_mismatch()`），是**加载前**的唯一闸门 ⇒ 不匹配的插件不注册命令、不进设置页、不占历史、不启插件页服务；运行时**不做二次判定**。
+  - **声明非法（`"windows"` / `[]` / `["win"]`）绝不静默跳过** —— 让它走到 `load()` 报 `MANIFEST_INVALID`，用户才看得见「清单写错了」（插件无声消失是最难排查的那一类问题）。
+  - 安装期（`installDir` / `installZip`）另判一次并返回 `PLATFORM_MISMATCH`：显式动作必须有回执。
+  - **口径**：`platforms` 用 Rust `std::env::consts::OS`（照 `#[cfg(target_os)]` 写），**不是** `host.info().platform` 的 Node 口径 `darwin` / `win32` —— 两者混用是最容易犯的错。
+  - 不要在打包脚本（`scripts/lib/resources.mjs`）里按平台过滤：那会让 dev 与打包行为不一致。
 - 数据布局：`<dataRoot>/{config,history,pinned}.json`、`plugin-overrides.json`、`extensions/<id>/`、`plugins/<id>/`（插件唯一可写处）、`logs/audit-*.jsonl`（滚动 7 天）。
 - 插件 id 改名后老数据由内核接手：`PluginManager::adopt_legacy_data_dir()`（数据目录）+ `HistoryStore::migrate_plugin_ids()`（历史 / 固定项）。链在 `apps/kernel/src/legacy.rs`：`RENAME_CHAINS` = `[当前 id, ...历代旧 id]`；`legacy_data_dir_ids()` 给「新→旧」候选（逐个试），`legacy_id_to_current()` 是「旧→新」**单跳**查表（链断了会停在中间那一代）——**传错 = 把新条目改回旧 id**。
 - 壳启动 `adopt_legacy_data_dir()`（`apps/shell/src/sidecar.rs`）从 `Launcher/` 一次性复制接手（只复制不移动），必须排在 `logging::init()` 之前 —— 否则新目录已存在、迁移永不执行。

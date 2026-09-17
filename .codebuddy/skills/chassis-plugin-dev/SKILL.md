@@ -66,12 +66,13 @@ node scripts/spec-check.mjs <name>    # 仓库根；不传名字则检查全部�
 
 1. `dist/` 里有 `index.html`、`assets/`、`package.json`；有逻辑层命令时还有 `dist/<name>`（可执行、0755）。
 2. `dist/package.json` 的 `commands` 与源码一致，`no-view`/`script` 的名字与产物文件名逐字相同；`apiVersion` 是 `"2"`。
-3. 起静态服务器打开 `dist/` 实机点一遍（**不要只测 dev server**）：
+3. **只在一个平台能跑的**已声明 `platforms`（`["macos"]` / `["windows"]` / `["linux"]`）/ `arch`（`["x64"]` / `["arm64"]`）—— 内核在扫描期整包跳过，不声明就会在别的平台上出现「能搜到、点了没反应」的插件（plugin-spec §3.5）。
+4. 起静态服务器打开 `dist/` 实机点一遍（**不要只测 dev server**）：
    ```bash
    python3 -m http.server 5233 --directory dist
    ```
-4. 有 Worker 的功能，确认在网页面里真的走了 Worker（不是降级分支）。
-5. 有逻辑层命令的，手工拉起产物做一次端到端（模拟宿主注入上下文，见 references/scaffold-templates.md 末尾）。
+5. 有 Worker 的功能，确认在网页面里真的走了 Worker（不是降级分支）。
+6. 有逻辑层命令的，手工拉起产物做一次端到端（模拟宿主注入上下文，见 references/scaffold-templates.md 末尾）。
 
 ## 第 5 步：发布
 

@@ -20,6 +20,7 @@ disable: false
 | 内核 / UI / 插件 | `pnpm build`（= `build-all.mjs`：kernel → ui → plugins） |
 | 内核或插件协议 | `node scripts/smoke-real.mjs`（真内核 + 出厂插件，走「输入 → 首屏 → 执行 → 写历史」整条链路） |
 | 插件清单相关 | `pnpm spec-check`（N1–N3 / 产物 / 远程资源；N3 只做人工核对提示） |
+| 清单**字段**增删（如 `platforms` / `arch`） | 三处必须一起改：`scripts/lib/manifest-keys.mjs` 白名单 + 内核 `apps/kernel/src/manifest.rs` + TS 契约包 `packages/plugin-manifest`；再跑 `pnpm spec-check` 与 `cargo test --workspace` |
 | Rust 壳 | `cd apps/shell && cargo check`（只编壳）/ `pnpm shell:dev`（跑） |
 
 要点：

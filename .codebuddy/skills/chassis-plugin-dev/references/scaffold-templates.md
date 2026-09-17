@@ -33,6 +33,9 @@ plugins/<name>/
   "private": true,
   "type": "module",
   "categories": ["tool"],
+  // 可选：只在一个平台能跑时**必须**声明（省略 = 全平台）
+  // "platforms": ["macos"],        // macos | windows | linux（照 Rust target_os 写，不是 darwin/win32）
+  // "arch": ["x64"],               // x64 | arm64，省略 = 不限制
   "commands": [
     {
       "name": "<command>",
@@ -70,6 +73,8 @@ plugins/<name>/
 ```
 
 没有 no-view/script 命令时：`build` 只留 `build:view`，也不要 `Cargo.toml` 与 `@types/node`。
+
+新字段（`platforms` / `arch` 等）别忘了同步 `scripts/lib/manifest-keys.mjs` 的白名单 —— 不在白名单里的字段会被构建裁掉。
 
 ## vite.config.ts（UI）
 

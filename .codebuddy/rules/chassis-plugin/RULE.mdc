@@ -1,5 +1,5 @@
 ---
-description: 插件开发硬约束（plugins/ 下 8 个出厂插件；view 层 Vue / 逻辑层 Rust）：宿主调用直连 SDK、命令名与产物文件名必须一致、apiVersion 2 与 Rust crate 登记、@launcher/ui 依赖解析、性能与安全的红线
+description: 插件开发硬约束（plugins/ 下 13 个出厂插件；view 层 Vue / 逻辑层 Rust）：宿主调用直连 SDK、命令名与产物文件名必须一致、apiVersion 2 与 Rust crate 登记、单平台插件必须声明 platforms/arch、@launcher/ui 依赖解析、性能与安全的红线
 alwaysApply: true
 enabled: true
 provider:
@@ -7,7 +7,7 @@ provider:
 
 # 插件开发铁律（view 层 Vue / 逻辑层 Rust）
 
-`plugins/` 下 8 个出厂插件（app-launcher / file-search / web-open / internal-settings / totp / host-manager / text-diff / json-tools）的硬约束。
+`plugins/` 下 13 个出厂插件（app-launcher / file-search / web-open / internal-settings / totp / host-manager / text-diff / json-tools / snips / calc-pad / markdown-notes / todo / screen-recorder）的硬约束。
 **view 层仍是 Vite + Vue；`no-view` / `script` 逻辑层是 Rust 可执行产物（v2，ADR-0005）**——逻辑层 crate 根 = 插件目录，源码直接放该插件的 `src/`。
 下面每一条都是「不遵守就一定出问题」的；完整背景见 `docs/plugin-dev-guide.md`（历史与踩坑），
 操作流程见 skill `chassis-plugin-dev`。
@@ -32,6 +32,9 @@ provider:
 - 逻辑层构建走 `build:scripts` = `cargo build --release -p <crate>` + `node ../../scripts/build-plugin.mjs <id> --copy-scripts`（带 view 的再加 `--keep-dist`，且顺序先 view 后 scripts；单一 bin 天然自包含，不存在 chunk 拆分问题。v1 的 `vite.worker.config.ts` + 逐入口构建是过渡期写法）。配套 `test:scripts` = `cargo test -p <crate>`。
 - `vite.config.ts` **必须** `base: './'`，且不要启用 `manualChunks`。
 - `dist/` 必须包含 `index.html` + `assets/` + `package.json`（含完整 `commands`）+ 每个逻辑层命令的可执行产物。
+- **只在一个平台能跑的插件必须声明 `platforms`**（`["macos"]` / `["windows"]` / `["linux"]`，架构限制再加 `arch: ["x64"]` / `["arm64"]`；省略的维度 = 不限制）：内核在扫描期就整包跳过，用户不会看到「点开没反应」的插件，安装时也会明确报 `PLATFORM_MISMATCH**（plugin-spec §3.5）。取值照 Rust `target_os` 写（`macos` / `windows`），**不是** `host.info().platform` 的 `darwin` / `win32`。
+  - 全平台插件**不要写**（写了反而要跟着平台扩展维护）；空数组非法（会被 `MANIFEST_INVALID` 拒）。
+  - 只是**个别命令**依赖平台工具（如 `mdfind`）⇒ 用 `#[cfg(target_os)]` + 降级，不要整包声明平台。
 
 ## 逻辑层（`no-view` / `script`，v2，Rust）
 
@@ -43,7 +46,7 @@ provider:
 - 一次性执行：`ctx.done` 后必须退出；**不要**自己 daemon 化 / 常驻 —— 常驻能力走 `contributes: true`（宿主按需启停 + 空闲回收）。
 - 失败语义：`run` 超时默认 10s（上限 5min，超时 `TIMEOUT`）；非零退出 / `fail` 只影响本次调用，连续 3 次该命令 `degraded`。
 - **同一份纯逻辑被 view（TS）与逻辑层（Rust）双份实现时，必须建共享 fixture 向量**（输入 + 操作序列 → 期望输出，两侧测试都读它；参考 `plugins/host-manager/test/fixtures/blocks-vectors.json`）—— 双份实现漂移 = 预览与写入不一致（写系统文件时是危险事故）。
-- 平台限定命令（`mdfind` / `sips` / `osascript` 等）在 Rust 侧用 `#[cfg(target_os = "macos")]` 隔离，并在清单 / 文档标注；M6 要补 Windows 后端（`docs/m5-rust-and-windows.md` §B2）。
+- 平台限定命令（`mdfind` / `sips` / `osascript` 等）在 Rust 侧用 `#[cfg(target_os = "macos")]` 隔离，并在清单 / 文档标注；M6 要补 Windows 后端（`docs/m5-rust-and-windows.md` §B2）。**整包**只在一个平台可用则改为声明清单的 `platforms`（见上一条），两者别混着用。
 
 ## 模块解析
 

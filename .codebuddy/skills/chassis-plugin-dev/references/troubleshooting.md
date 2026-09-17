@@ -13,6 +13,8 @@
 1. `cat dist/package.json` —— 有没有 `commands` 数组？字段名对不对（`title` 才是搜索关键词）？
 2. 宿主是**启动时**扫描 `extensions/`，装完必须重启。
 3. `searchable: true` 才会进全局搜索；`script` 命令本来就**不应该**出现在面板里，那是正常的。
+4. **搜不到也完全不出现在设置页** ⇒ 先看内核日志有没有「跳过插件 X：platforms 声明 […]，当前是 …」：清单声明的 `platforms` / `arch` 不含当前运行环境时，内核在**扫描期**整包跳过（不注册命令、不进设置页），这是设计行为，不是加载失败（plugin-spec §3.5）。
+5. 反过来：写了 `platforms: ["win"]` 这类**非法值**不会被跳过，而是以 `error` 状态出现在设置页并给出 `MANIFEST_INVALID` 原因 —— 取值只能是 `macos` / `windows` / `linux`（**不是** `darwin` / `win32`），`arch` 只能是 `x64` / `arm64`，且不能是空数组。
 
 ## 逻辑层命令（no-view / script）不生效 / `exec.run` 返回 null
 
