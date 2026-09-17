@@ -323,7 +323,11 @@ onMounted(async () => {
   // 搜索框里如果已经敲了算式，直接接过来当草稿（插件页打开时搜索框已卸载，只能读一次初值）
   const seed = await hostUi.getSearchContent().catch(() => '')
   const text = seed.trim()
-  if (text && /[0-9]/.test(text) && !/^[\u4e00-\u9fff]+$/.test(text)) draft.value = text
+  if (text && /[0-9]/.test(text) && !/^[\u4e00-\u9fff]+$/.test(text)) {
+    draft.value = text
+    // 光标放末尾：带进来的算式是「接着算」的起点
+    void nextTick(() => inputEl.value?.setSelectionRange(text.length, text.length))
+  }
   focusInput()
 })
 

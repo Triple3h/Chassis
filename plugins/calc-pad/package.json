@@ -2,8 +2,8 @@
   "name": "calc-pad",
   "title": "计算稿纸",
   "author": "triple3h",
-  "description": "像稿纸一样一行行算下去：实时求值、变量复用、自动保存",
-  "version": "0.1.0",
+  "description": "像稿纸一样一行行算下去：实时求值、变量复用、自动保存；在启动台输入算式会直接给出结果并回车打开稿纸",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "apiVersion": "2",
@@ -35,14 +35,23 @@
         "换算"
       ],
       "icon": "calculator"
+    },
+    {
+      "name": "calc-eval",
+      "title": "算式求值（脚本）",
+      "mode": "script",
+      "contributes": true,
+      "icon": "calculator"
     }
   ],
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build && npm run build:scripts",
     "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:scripts": "cargo build --release -p launcher-plugin-calc-pad && node ../../scripts/build-plugin.mjs calc-pad --copy-scripts --keep-dist",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "test": "node ../../scripts/run-ts.mjs test/expr.test.ts && node ../../scripts/run-ts.mjs test/pads.test.ts",
+    "test:scripts": "cargo test -p launcher-plugin-calc-pad",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -14,7 +14,7 @@
 | `text-diff` | `diff`（view） | Vite + Vue | — |
 | `json-tools` | `json`（view） | Vite + Vue | — |
 | `snips` | `snips`（view） | Vite + Vue | — |
-| `calc-pad` | `calc-pad`（view） | Vite + Vue | — |
+| `calc-pad` | `calc-pad`（view）+ `calc-eval`（script，贡献型） | Vite + Vue | Rust |
 | `markdown-notes` | `notes`（view） | Vite + Vue | — |
 | `todo` | `todo`（view） | Vite + Vue | — |
 | `screen-recorder`（macOS 专属） | `recorder`（view） + `rec-start` / `rec-stop` / `rec-status` / `rec-shot` / `rec-permission` / `rec-list`（script） | Vite + Vue | Rust |

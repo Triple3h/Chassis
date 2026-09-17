@@ -31,7 +31,7 @@ Chassis 的选择是把边界一条条钉死：
 ## 核心特性
 
 - **唤出** —— 默认热键 `⌥Space`（被占用自动回退并提示实际生效的键）；托盘左键唤出 / 隐藏；单实例；失焦或 `Esc` 隐藏；唤出时自动带入前台选中的文本。
-- **搜索** —— 拼音（全拼 / 首字母 / 多音字变体）、前缀与模糊匹配；多插件结果合并后按「匹配 + 最近使用 + 频率」打分；已固定与最近使用参与搜索。
+- **搜索** —— 拼音（全拼 / 首字母 / 多音字变体）、前缀与模糊匹配；多插件结果合并后按「匹配 + 最近使用 + 频率」打分；已固定与最近使用参与搜索；输入算式（如 `10+22`）会直接给出结果，回车打开计算稿纸接着算。
 - **图标网格** —— 分区（已固定 / 最近使用 / 最佳匹配）可折叠，列数按窗口宽度计算；键盘全网格导航、动作菜单、二级面板、固定项拖拽重排；超过 200 条自动虚拟滚动。
 - **开箱可用** —— 13 个出厂插件：应用启动、文件搜索、网址直达、TOTP 验证码、Hosts 块管家、文本比对、JSON 工具箱、备忘快贴、计算稿纸、Markdown 笔记、ToDo 待办、录屏助手、设置与插件管理。
 - **可扩展** —— 插件 = 一个目录：`package.json` 清单 + 可选 iframe 页面（`view`）+ 可选逻辑层可执行产物（`no-view` / `script`）；支持目录 / zip 安装（zip 也可直接拖进窗口），用到的能力必须在清单里声明。
@@ -239,7 +239,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | `text-diff` | `diff`（view） | Vite + Vue / — |
 | `json-tools` | `json`（view） | Vite + Vue / — |
 | `snips` | `snips`（view） | Vite + Vue / — |
-| `calc-pad` | `calc-pad`（view） | Vite + Vue / — |
+| `calc-pad` | `calc-pad`（view）+ `calc-eval`（script，贡献型） | Vite + Vue / Rust |
 | `markdown-notes` | `notes`（view） | Vite + Vue / — |
 | `todo` | `todo`（view） | Vite + Vue / — |
 | `screen-recorder`（macOS 专属，清单声明 `platforms`） | `recorder`（view）+ `rec-start` / `rec-stop` / `rec-status` / `rec-shot` / `rec-permission` / `rec-list`（script） | Vite + Vue / Rust |

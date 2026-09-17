@@ -513,6 +513,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "launcher-plugin-calc-pad"
+version = "0.2.0"
+dependencies = [
+ "launcher-plugin-sdk",
+ "serde_json",
+]
+
+[[package]]
 name = "launcher-plugin-file-search"
 version = "0.1.0"
 dependencies = [
