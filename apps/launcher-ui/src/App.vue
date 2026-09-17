@@ -5,8 +5,11 @@ import DetailPanel from './components/DetailPanel.vue'
 import FooterBar from './components/FooterBar.vue'
 import IconGlyph from './components/IconGlyph.vue'
 import PluginView from './components/PluginView.vue'
+import ResetSizeButton from './components/ResetSizeButton.vue'
 import ResultGrid from './components/ResultGrid.vue'
 import SearchBox from './components/SearchBox.vue'
+import SystemStats from './components/SystemStats.vue'
+import WindowResizeHandles from './components/WindowResizeHandles.vue'
 import { api, subscribeEvents } from './lib/api'
 import {
   FOOTER_HEIGHT,
@@ -37,9 +40,25 @@ const ui = useUiStore()
 const searchBox = ref<InstanceType<typeof SearchBox> | null>(null)
 const pluginRef = ref<InstanceType<typeof PluginView> | null>(null)
 const viewportHeight = ref(420)
-/** 网格容器实测宽度 → 列数（窗口固定 720，通常恒为 7 列） */
+/** 网格容器实测宽度 → 列数（默认 720 ⇒ 7 列；窗口被拉宽后自动跟随） */
 const containerWidth = ref(720)
 let disposeEvents: (() => void) | null = null
+
+/**
+ * 窗口尺寸由用户说了算（requirements §3.1「尺寸记忆」）。
+ *
+ * 拖过缩放把手就置位：内容高度不再改窗口（否则下一次搜索会立刻把手动调的尺寸顶回去）。
+ * 同时把尺寸**按模式**记进 config（`windowSizes.host` / `.plugin`），
+ * 下次唤出 / 进入插件页时还原；只有「恢复默认大小」会清掉它。
+ */
+const manualResized = ref(false)
+/** 尺寸记忆的键：宿主搜索态与插件页各记一份，互不影响 */
+const sizeMode = computed<'host' | 'plugin'>(() => (ui.inPluginView ? 'plugin' : 'host'))
+const savedSize = computed(() => data.config?.windowSizes?.[sizeMode.value] ?? null)
+/** 「恢复默认大小」只在当前模式确实被改过时露出（刚拖完还没落盘的那一瞬也算） */
+const canResetSize = computed(() => manualResized.value || savedSize.value !== null)
+/** 尺寸落盘的防抖定时器：拖动过程中 resize 事件是连续的，松手后 400ms 才认为定稿 */
+let sizeSaveTimer = 0
 
 /**
  * 窗口是否已被壳藏起来 —— 整个「弹窗动效」的总开关。
@@ -84,6 +103,9 @@ function setWindowVisible(visible: boolean): void {
   if (!visible) {
     windowHidden.value = true
     hiddenAtMs = performance.now()
+    // 离场前把"用户刚拖出来的尺寸"立刻落盘：防抖窗口里的那次保存不该随着窗口隐藏被推迟 ——
+    // 而窗口藏起来之后再读 innerWidth/innerHeight 未必准（下一次唤出会按错的尺寸还原）。
+    void flushSizeSave()
     armExitAck(token)
     return
   }
@@ -98,7 +120,10 @@ function setWindowVisible(visible: boolean): void {
   const reveal = (): void => {
     if (token !== visibilityToken) return
     void waitForPaint().then(() => {
-      if (token === visibilityToken) windowHidden.value = false
+      if (token !== visibilityToken) return
+      windowHidden.value = false
+      // 唤出 = 回到"这个模式该有的尺寸"：有记忆就用记忆，没有就内容自适应
+      applyModeSize()
     })
   }
   if (document.visibilityState === 'hidden') {
@@ -239,9 +264,12 @@ onMounted(async () => {
   }
   disposeEvents = subscribeAll()
   window.addEventListener('keydown', onKeydown, true)
-  window.addEventListener('resize', measure)
+  window.addEventListener('resize', onWindowResize)
   window.addEventListener('focus', clearHiddenByFocus)
   measure()
+  // 挂载时也应用一次：UI 可能刚重载（内核重启 / 手动刷新），而窗口尺寸还停在上一次的模式上
+  // （`inPluginView` 此刻必然是空的，所以这里应用的就是宿主态该有的尺寸）
+  applyModeSize()
   searchBox.value?.focus()
   // 触发点可能是「壳在 UI 加载完之前就显示过窗口」：只有问内核才知道当前该不该播入场动画。
   // 只在**明确**回答 false 时收起界面 —— null 表示内核问不到壳（standalone / `pnpm dev`），
@@ -259,8 +287,9 @@ onUnmounted(() => {
   // 作废还在等「窗口能画」的那次揭示、还在等回执的那次离场：组件都卸载了，别再动相位
   visibilityToken += 1
   window.clearTimeout(exitAckTimer)
+  window.clearTimeout(sizeSaveTimer)
   window.removeEventListener('keydown', onKeydown, true)
-  window.removeEventListener('resize', measure)
+  window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('focus', clearHiddenByFocus)
 })
 
@@ -268,7 +297,106 @@ function measure(): void {
   viewportHeight.value = Math.max(120, window.innerHeight - SEARCH_BAR_HEIGHT - FOOTER_HEIGHT - 18)
 }
 
-watch(desiredHeight, (height) => setWindowHeight(height))
+/** 窗口尺寸变了：重算可视区，并（在用户改过的模式里）把新尺寸记下来 */
+function onWindowResize(): void {
+  measure()
+  scheduleSizeSave()
+}
+
+/** 内容高度 → 窗口高度；尺寸被用户接管（拖过 or 当前模式有记忆）时不动窗口 */
+watch(desiredHeight, (height) => {
+  if (manualResized.value || savedSize.value) return
+  setWindowHeight(height)
+})
+
+/** 切 宿主 ⇄ 插件页：各自回到自己记着的尺寸（没记过就是各自的默认形态） */
+watch(
+  () => ui.inPluginView,
+  () => applyModeSize(),
+)
+
+/** 缩放把手按下：从这一刻起窗口尺寸由用户说了算 */
+function onResizeStart(): void {
+  manualResized.value = true
+}
+
+/** 拖完尺寸后落盘（防抖 400ms：拖动过程中 resize 事件是连续的，松手才算定稿） */
+function scheduleSizeSave(): void {
+  if (!manualResized.value) return
+  window.clearTimeout(sizeSaveTimer)
+  sizeSaveTimer = window.setTimeout(() => void flushSizeSave(), 400)
+}
+
+/** 立即把当前窗口尺寸记进 config（防抖到点 / 离场前调用；值没变就不写） */
+async function flushSizeSave(): Promise<void> {
+  window.clearTimeout(sizeSaveTimer)
+  sizeSaveTimer = 0
+  if (!manualResized.value) return
+  const width = Math.round(window.innerWidth)
+  const height = Math.round(window.innerHeight)
+  if (width <= 0 || height <= 0) return
+  const mode = sizeMode.value
+  const known = data.config?.windowSizes
+  if (known?.[mode]?.width === width && known?.[mode]?.height === height) return
+  try {
+    // 整个 `windowSizes` 一起写回：patchConfig 是浅合并，只给一个键会把另一个模式抹掉
+    await api.patchConfig({ windowSizes: { ...(known ?? {}), [mode]: { width, height } } })
+  } catch {
+    // 内核没连上（standalone / 退出中）：静默 —— 下次拖还会再试一次
+  }
+}
+
+/**
+ * 应用当前模式该有的尺寸。
+ *  - 有记忆 ⇒ 用 `setSize`（宽高一起）并保持"用户接管"状态；
+ *  - 没记忆 ⇒ 清掉接管状态、用 `setHeight` 回到内容自适应。
+ *
+ * `force` 是必需的：窗口被拉过之后 `setWindowHeight` 内部记的 `latest` 和真实尺寸
+ * 早就对不上了，不强制发一次就回不到默认形态。
+ */
+function applyModeSize(): void {
+  const size = savedSize.value
+  if (size) {
+    manualResized.value = true
+    void api.setWindowSize(size.width, size.height).catch(() => undefined)
+    return
+  }
+  // 本来就在自适应轨道上（没记忆、也没人手动改过）：交给 `desiredHeight` 的 watch 就好，
+  // 这里再 force 一次只会让窗口在唤出那一刻被无谓地设两遍尺寸
+  if (!manualResized.value) return
+  manualResized.value = false
+  setWindowHeight(desiredHeight.value, { immediate: true, force: true })
+}
+
+/** 「恢复默认大小」：忘掉当前模式的记忆尺寸，回到默认形态 */
+async function resetWindowSize(): Promise<void> {
+  manualResized.value = false
+  window.clearTimeout(sizeSaveTimer)
+  sizeSaveTimer = 0
+  const mode = sizeMode.value
+  const known = { ...(data.config?.windowSizes ?? {}) }
+  if (known[mode]) {
+    delete known[mode]
+    await api.patchConfig({ windowSizes: known }).catch(() => undefined)
+  }
+  setWindowHeight(desiredHeight.value, { immediate: true, force: true })
+}
+
+/**
+ * 按住面板拖动窗口（无边框窗口没有系统标题栏）。
+ *
+ * 触发面由 `data-drag-region` 收口：搜索栏那一行（搜索框 / 按钮除外）与顶缘热区；
+ * 结果网格、详情面板、菜单都**不**参与 —— 那里每一次 mousedown 都有正经用途
+ * （选中、拖拽固定项、点空白回搜索框），把整块面板变成拖拽区会毁掉它们。
+ */
+function onPanelMouseDown(event: MouseEvent): void {
+  if (event.button !== 0) return
+  const target = event.target as HTMLElement | null
+  if (!target || !target.closest('[data-drag-region]')) return
+  if (target.closest('input, textarea, button, a, select, [contenteditable="true"]')) return
+  event.preventDefault()
+  void api.startWindowDrag().catch(() => undefined)
+}
 
 // 外观三项都要盯住：设置页改主题色 / 密度后内核会广播 `config/changed`，
 // 只监听 theme 的话另外两项要等下次重载才生效（用户看到的就是「改了没反应」）。
@@ -714,7 +842,10 @@ const defaultHints = computed(() => {
 </script>
 
 <template>
-  <div class="shell" :class="{ 'is-window-hidden': windowHidden }">
+  <div class="shell" :class="{ 'is-window-hidden': windowHidden }" @mousedown="onPanelMouseDown">
+    <!-- 顶缘拖拽热区：搜索栏上方那几像素空白，专门用来"按住搬窗口"（无边框窗口没有标题栏） -->
+    <div class="drag-strip" data-drag-region />
+
     <!-- 插件视图 -->
     <template v-if="ui.inPluginView && ui.pluginView">
       <PluginView
@@ -727,8 +858,10 @@ const defaultHints = computed(() => {
         :buttons="ui.footer"
         :default-hints="defaultHints"
         back
+        :can-reset-size="canResetSize"
         @action="onFooterAction"
         @back="leavePluginView"
+        @reset-size="resetWindowSize"
       />
     </template>
 
@@ -740,7 +873,14 @@ const defaultHints = computed(() => {
         :busy="data.searching"
         @update:model-value="ui.setQuery"
         @settings="openSettings"
-      />
+      >
+        <template #trailing>
+          <!-- 尺寸被改过才露出：一键忘掉记忆、回到内容自适应的默认形态 -->
+          <ResetSizeButton v-if="canResetSize" @reset="resetWindowSize" />
+          <!-- 窗口隐藏时不轮询：状态条只在"看得见"的时候才有意义 -->
+          <SystemStats :active="!windowHidden" />
+        </template>
+      </SearchBox>
       <div class="relative flex-1 min-h-0 flex">
         <ResultGrid
           v-if="items.length > 0"
@@ -808,5 +948,8 @@ const defaultHints = computed(() => {
         {{ ui.toast }}
       </div>
     </Transition>
+
+    <!-- 四边 / 四角的缩放把手（无边框窗口没有系统边框可抓） -->
+    <WindowResizeHandles @resize-start="onResizeStart" />
   </div>
 </template>

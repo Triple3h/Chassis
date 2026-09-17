@@ -33,7 +33,8 @@ defineExpose({ focus, input })
 </script>
 
 <template>
-  <div class="flex items-center gap-3 px-4 h-[58px] shrink-0">
+  <!-- data-drag-region：这一行（除输入框与按钮外）是「按住拖动窗口」的手柄，见 App.vue -->
+  <div class="flex items-center gap-3 px-4 h-[58px] shrink-0" data-drag-region>
     <IconGlyph name="search" :size="20" />
     <input
       ref="input"
@@ -48,6 +49,8 @@ defineExpose({ focus, input })
     <div v-if="busy" class="text-[var(--fg-muted)] animate-spin shrink-0">
       <IconGlyph name="loader" :size="15" />
     </div>
+    <!-- 宿主注入的尾部件（当前是 CPU / 内存状态条） -->
+    <slot name="trailing" />
     <button type="button" class="settings-btn" title="设置 (⌘,)" @click="emit('settings')">
       <IconGlyph name="settings" :size="17" />
     </button>

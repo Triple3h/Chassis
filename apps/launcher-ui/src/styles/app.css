@@ -145,6 +145,28 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* ── 无边框窗口的拖拽热区（requirements §3.1「拖动」）─────────────────
+   顶缘这一条是"按住搬窗口"的入口；搜索栏那一行由 SearchBox 自己标
+   `data-drag-region`（见 App.vue 的 onPanelMouseDown）。
+   z-index 要低于缩放把手（60）：四个角上缩放优先。 */
+.drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  z-index: 40;
+  /* WebKit 原生拖动区：支持时由系统直接接管（零 IPC、手感最好），
+     不支持时这条被忽略，由 App.vue 的 mousedown → `window.startDragging` 兜底。
+     只有这一条 8px 条带用它：它下面没有任何交互元素，即便某个 WebKit 版本的
+     `no-drag` 有出入也不会把点击（输入框 / 按钮）变成拖动。 */
+  -webkit-app-region: drag;
+}
+
+.drag-strip:hover {
+  cursor: grab;
+}
+
 /* 结果网格：滚动条会破坏「整片图标墙」的观感（ZTools 同样隐藏） */
 .no-scrollbar {
   scrollbar-width: none;

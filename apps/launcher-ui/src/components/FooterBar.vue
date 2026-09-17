@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import IconGlyph from './IconGlyph.vue'
+import ResetSizeButton from './ResetSizeButton.vue'
 import { formatKeys } from '../lib/keys'
 import type { FooterButtonView } from '../stores/ui'
 
@@ -10,11 +11,15 @@ import type { FooterButtonView } from '../stores/ui'
  * 宿主不能再叠一条标题栏上去。于是窗口上没有任何"关闭"的视觉线索，
  * 只能靠 `Esc` / `⌘W` —— 对不知道这两个键的人来说，插件页就是一间隔绝的屋子。
  * 放在 footer 而不是浮在右上角：右上角会被插件自己的顶栏内容压住。
+ *
+ * `canResetSize` 同理是宿主的东西（插件页改过窗口大小后要能一键回到默认），
+ * 而插件页里没有搜索栏可挂 —— 只有这条 footer 是宿主画的地方。
  */
 defineProps<{
   buttons: FooterButtonView[]
   defaultHints: Array<{ keys: string[]; label: string }>
   back?: boolean
+  canResetSize?: boolean
 }>()
 
 /** 两个等价的退出键（App.vue 的键盘处理里它们走同一条分支）：Esc 与 ⌘W */
@@ -23,6 +28,7 @@ const backKeys = formatKeys(['Escape', 'Mod+W'])
 const emit = defineEmits<{
   (e: 'action', button: FooterButtonView, itemId?: string): void
   (e: 'back'): void
+  (e: 'reset-size'): void
 }>()
 </script>
 
@@ -58,6 +64,7 @@ const emit = defineEmits<{
     </div>
 
     <div class="ml-auto flex items-center gap-3">
+      <ResetSizeButton v-if="canResetSize" label @reset="emit('reset-size')" />
       <span v-for="hint in defaultHints" :key="hint.label" class="flex items-center gap-1">
         <span v-for="key in hint.keys" :key="key" class="kbd">{{ key }}</span>
         <span>{{ hint.label }}</span>

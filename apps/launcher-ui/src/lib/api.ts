@@ -61,6 +61,37 @@ export interface PluginViewData {
   title: string
 }
 
+/** 状态条数据（内核 `services/systemStats.ts` 采样）：主角是启动台自身占用 */
+export interface SystemStats {
+  /** 启动台自身（壳 + 内核两个进程） */
+  app: {
+    rss: number
+    rssShell: number
+    rssKernel: number
+    /** 占整机 CPU 百分比（一位小数）；没有基线时为 null */
+    cpu: number | null
+    cores: number
+  }
+  /** 整机 CPU 使用率（0–100，对照用） */
+  cpu: number
+  /** 整机已用 / 总内存（bytes，对照用） */
+  memUsed: number
+  memTotal: number
+  loadAvg: number[]
+  sampledAt: number
+}
+
+/** 无边框窗口的八向缩放手柄（与壳侧 `ResizeDirection` 一一对应） */
+export type ResizeDirection =
+  | 'north'
+  | 'south'
+  | 'east'
+  | 'west'
+  | 'northEast'
+  | 'northWest'
+  | 'southEast'
+  | 'southWest'
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${kernelBase()}${path}`, {
     ...init,
@@ -114,6 +145,20 @@ export const api = {
     request<{ ok: boolean }>('/api/session/crashed', { method: 'POST', body: JSON.stringify({ sid, reason }) }),
   setWindowHeight: (height: number) =>
     request<{ ok: boolean }>('/api/window/setHeight', { method: 'POST', body: JSON.stringify({ height }) }),
+  /**
+   * 用户记忆的窗口尺寸（requirements §3.1「尺寸记忆」）：唤出 / 进插件页时还原用。
+   * 与 `setWindowHeight`（内容自适应）是两条路，别混用。
+   */
+  setWindowSize: (width: number, height: number) =>
+    request<{ ok: boolean }>('/api/window/setSize', { method: 'POST', body: JSON.stringify({ width, height }) }),
+  /**
+   * 无边框窗口的拖动：拖拽区 mousedown 时调一次即可 —— 系统接管后的移动
+   * 不会再经过这里（不是每帧请求，也不会跟动画抢频）。
+   */
+  startWindowDrag: () => request<{ ok: boolean }>('/api/window/startDrag', { method: 'POST' }),
+  /** 四边 / 四角缩放：把手 mousedown 时调一次 */
+  startWindowResize: (direction: ResizeDirection) =>
+    request<{ ok: boolean }>('/api/window/startResize', { method: 'POST', body: JSON.stringify({ direction }) }),
   hideWindow: () => request<{ ok: boolean }>('/api/window/hide', { method: 'POST' }),
   /**
    * 离场回执：离场动画的最后一帧**已经画出来了** → 内核可以真正隐藏窗口了。
@@ -128,6 +173,8 @@ export const api = {
   windowVisible: () => request<{ ok: boolean; visible: boolean | null }>('/api/window/visible'),
   reportTheme: (theme: 'light' | 'dark') =>
     request<{ ok: boolean }>('/api/ui/theme', { method: 'POST', body: JSON.stringify({ theme }) }),
+  /** 状态条：CPU / 内存占用（UI 自己决定刷新节奏，窗口隐藏时不拉） */
+  systemStats: () => request<{ ok: boolean; stats: SystemStats }>('/api/system/stats'),
   audit: (limit = 200) => request<{ ok: boolean; records: AuditRecord[] }>(`/api/audit?limit=${limit}`),
   clearAudit: () => request<{ ok: boolean }>('/api/audit/clear', { method: 'POST' }),
   quit: () => request<{ ok: boolean }>('/api/app/quit', { method: 'POST' }),

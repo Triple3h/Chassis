@@ -28,15 +28,22 @@ const prefersReducedMotion = (): boolean =>
 
 /**
  * 把窗口高度调到 `target`（逻辑像素）。
- * 同一个高度重复调用会被忽略；带 `immediate` 时直接落位不缓动。
+ * 同一个高度重复调用会被忽略；带 `immediate` 时直接落位不缓动；
+ * `force` 连「同一个高度」的判断也跳过 —— 用于用户手动缩放之后**恢复默认尺寸**：
+ * 这时窗口真实尺寸早已不是 `latest` 记的那个值，不强制发一次就复位不了。
  */
-export function setWindowHeight(target: number, options: { immediate?: boolean } = {}): void {
+export function setWindowHeight(target: number, options: { immediate?: boolean; force?: boolean } = {}): void {
   const to = Math.round(target)
-  if (to === latest && started) return
+  if (to === latest && started && options.force !== true) return
   const from = Math.round(window.innerHeight)
   latest = to
 
-  const snap = options.immediate === true || !started || Math.abs(to - from) > MAX_ANIMATED_DELTA || prefersReducedMotion()
+  const snap =
+    options.immediate === true ||
+    options.force === true ||
+    !started ||
+    Math.abs(to - from) > MAX_ANIMATED_DELTA ||
+    prefersReducedMotion()
   started = true
   const token = ++generation
 
