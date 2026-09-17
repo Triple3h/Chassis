@@ -22,6 +22,7 @@
 | D4 | **不做 JS 插件兼容层**（明确不支持 `.mjs` 逻辑层产物） | 出厂插件全走 Rust 子进程 ⇒ 机器上不需要 Node，且这是**明确承诺**（沙箱外没有任何 JS 执行路径）。依据：`extensions/` 与 `devPlugins` 均为空、无第三方生态（2026-09-17 实测）。明确不支持 > 半支持。未来若确有需要，按 §A3.4 增量补（纯增量，不动协议与数据） |
 | D5 | **数据格式一律不变** | `config.json` / `history.json` / `pinned.json` / `plugin-overrides.json` / `plugin-settings.json` / `quicklinks.json` / `logs/audit-*.jsonl` 与 `extensions/`、`plugins/<id>/` 布局逐字段兼容 |
 | D6 | **Windows 作为阶段 B**，单独验收、单独打包 | 壳的平台分支、app-launcher / file-search 的 Windows 后端、NSIS 打包与给同事的安装包 |
+| D7 | **能力按契约定义，后端按平台实现**（2026-09-17 拍板） | 平台差异**只收在后端实现里**，对外契约（宿主 / UI / 结果项）不分叉，且每条能力都必须有降级路径。首个应用面是 `file-search`：macOS = Spotlight(`mdfind`) + Quick Look，**不需要 Everything**；Windows = Everything 优先 + **自建索引回退**（§B2.6 / §B2.7） |
 
 ### 0.1 目标 / 非目标
 
@@ -29,7 +30,7 @@
 
 - G1：macOS 上 Rust 内核全面接管，UI 与插件视图零视觉差异，31 个测试文件的断言在新宿主上全绿。
 - G2：机器上**没有 Node** 也能完整运行（出厂插件全部为 Rust 子进程）。
-- G3：Windows 10/11 上可安装、可唤出、可搜索、可启动应用、文件搜索可用、hosts 插件可用。
+- G3：Windows 10/11 上可安装、可唤出、可搜索、可启动应用、文件搜索可用（**未装 Everything 也要可用**，§B2.6）、hosts 插件可用。
 - G4：产出一个可以直接发给同事的 Windows 安装包 + 一页使用说明。
 
 **明确不做**
@@ -474,10 +475,122 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 | # | 插件 | 任务 | 估工 |
 |---|---|---|---|
 | B2.1 | `app-launcher` | 扫描后端：开始菜单（`%ProgramData%\Microsoft\Windows\Start Menu\Programs`、`%APPDATA%\...\Start Menu\Programs`）+ 桌面 + 注册表 `App Paths` + UWP（`shell:AppsFolder`）；`.lnk` 解析（`IShellLink` COM）；图标提取（`SHGetFileInfo` / `ExtractIconEx` → `image` 编码 PNG data URL，沿用现有缓存目录与 hash key 规则） | 3–5 天 |
-| B2.2 | `file-search` | 后端二选一：**优先 Everything**（用户装了就用其 IPC/HTTP 接口）；回退**自建索引**（扫固定盘 + `notify` 增量 + 内存索引）；`reveal` 走 `open.reveal`（壳已支持 `explorer /select,`） | 3–5 天 |
+| B2.2 | `file-search` | 后端二选一：**优先 Everything**（用户装了就用其 IPC/HTTP 接口）；回退**自建索引**（扫固定盘 + `notify` 增量 + 内存索引）；`reveal` 走 `open.reveal`（壳已支持 `explorer /select,`）。**跨平台契约与降级策略见 §B2.6** | 3–5 天 |
 | B2.3 | `host-manager` | hosts 路径 `%SystemRoot%\System32\drivers\etc\hosts`（已有）；提权走 UAC：`ShellExecuteEx(verb=runas)` 调 PowerShell 复制 → 已有 TS 参考实现，翻译即可 | 0.5 天 |
 | B2.4 | `totp` | 默认扫描目录已含 `Pictures\Screenshots`；验证即可 | 0.5 天 |
 | B2.5 | `web-open` / 其余 view 插件 | 无改动 | — |
+| B2.6 | `file-search`（跨平台） | 抽出**能力契约层**（文件名搜索 / 内容搜索 / 元数据 / 预览），平台差异只收在后端实现里：**macOS = Spotlight(`mdfind`) + Quick Look**，**Windows = Everything + IShellItemImageFactory**。详见 §B2.6 | 0.5 天（随 B2.2 做） |
+| B2.7 | `file-search`（预览） | 结果二级面板：先上**文本 / 元数据**预览（走现有 `detail` 字段，零变更）；**富预览**（图片缩略图 / 表格 / PDF）另议，需要新 capability `file.read` + 结果项缩略图字段。详见 §B2.7 | 0.5 天 + 富预览 1–2 天（可选） |
+| B2.8 | **插件平台维度** | ✅ **已实现**（2026-09-17）：清单 `platforms` / `arch` + 内核扫描期过滤，见 §B2.8 | — |
+| B2.9 | **`clipboard-history`（新插件，Windows 专属）** | 依赖 §B2.8（机制已就绪）。详见 §B2.9 | 6–8 天 |
+
+### B2.6 文件搜索：跨平台后端契约（Spotlight ↔ Everything）
+
+**一句话结论（2026-09-17 拍板）**：**macOS 不需要 Everything**。`mdfind`（Spotlight）是系统自带、免权限、免常驻服务的等价物，`file-search` 现在就在用它（`plugins/file-search/src/lib.rs:83`，`-onlyin <root> -name <q>`）。Windows 之所以要 Everything，是因为 NTFS 没有可用的全盘文件名索引 —— 这是**平台缺口**，不是产品缺陷。因此设计原则定为：
+
+> **能力按契约定义，后端按平台实现。契约不分叉，平台差异全部收在后端实现里，且每条能力都必须有降级路径。**
+
+**对照坐标**：uTools「本地搜索」在 Windows 上内嵌绿色版 Everything（Win 没别的办法 + 它是闭源发行，能接受塞一个常驻进程）。我们刻意不同（理由见下）。
+
+#### 契约层（对宿主 / 对 UI 完全一致，六个动词）
+
+| 能力 | 语义 | macOS 后端 | Windows 后端（优先 → 回退） |
+|---|---|---|---|
+| `search_name(q)` | 文件名模糊匹配 | `mdfind -onlyin <root> -name q`（已落地） | Everything IPC / HTTP → 自建索引（内存中线性匹配，按打分截断） |
+| `search_content(q)` | 文件内容包含 q | `mdfind -onlyin <root> q`（**去掉 `-name` 即可**，几乎白送） | Everything 的 `content:` 语法 → 自建索引只对「文本类小文件」朴素匹配 |
+| `stat(path)` | 元数据（大小 / 类型 / 修改时间） | `mdls` + `std::fs` 元数据 | `std::fs` 元数据（`SHGetFileInfo` 补友好类型名） |
+| `preview(path)` | 预览，见 §B2.7 | Quick Look（`qlmanage -t` / `QLThumbnailGenerator`） | `IShellItemImageFactory` 缩略图 → `SHGetFileInfo` 大图标 |
+| `open` | 用默认程序打开 | 壳原语 `open.path` | 同左（壳侧已封装） |
+| `reveal` | 在文件管理器中显示 | `open -R` | `explorer /select,`（B2.2 已覆盖） |
+
+`open` / `reveal` **不分平台**：都走壳原语，符合「内核零能力 + 系统原语只由壳提供」。
+
+#### Windows：Everything 的集成口径
+
+- **怎么接**：检测到用户已装且在运行 → 用其进程外接口取结果（命名管道 IPC 优先；HTTP 服务需在 Everything 选项里开启，作为次选）。具体管道名 / 查询字段名在实现时按当时的 Everything SDK 文档核对，**不照抄二手笔记**。探测失败、超时、返回为空一律静默降级。
+- **不随包分发 Everything 二进制**：① 我们是开源插件体系，「复用系统能力 / 用户已有依赖」比「塞一个常驻第三方服务」更符合产品定位；② 第三方二进制的许可证与再分发口径要单独确认，不在本阶段范围；③ 坚决避免"看似可用、实则依赖一个用户不知道的后台进程"。
+- **降级路径要当一等公民做**：多数同事机器上不会有 Everything ⇒ 自建索引必须与同一套契约等价。方案：固定盘首次全盘建索引（排除 `Windows\` / `\$Recycle.Bin` / `Recovery` 等系统目录，可选跳 `node_modules` / `.git`），`notify` crate（Windows 上即 `ReadDirectoryChangesW`）做增量；索引落 `<dataRoot>/plugins/file-search/index/`（插件唯一可写处）；冷启动先出上一轮索引的结果、后台重建。
+- **mac 侧对照**：Spotlight 索引由系统维护，所以 macOS **没有**「自建索引」这一层；`-onlyin` 的根列表（`search_roots()`）在 Windows 上换成**盘符 + `%USERPROFILE%`**。两端差异全部落在 `#[cfg(target_os)]` 分支内（符合「平台限定逻辑必须隔离」）。
+
+#### 落地顺序（每步都能独立验收）
+
+1. **先抽接口**（`FileBackend` trait + macOS 实现）：纯重构、行为不变、现有单测全绿 —— **这一步在 macOS 上就能做完并验收**。
+2. Windows 上先只实现降级路径（自建索引），目标「能搜」。
+3. Everything 作为**加速件**后补：契约不变，只是多一个后端实现 + 探测逻辑。
+
+### B2.7 文件搜索预览：跨平台实现（可选增量）
+
+参考 uTools「本地搜索」的形态（左列表 + 右预览）：我们的短板**只在预览**，搜索 / 打开 / 在资源管理器中显示现在全有（`files` 命令已有 `actions`：reveal + 复制路径）。
+
+- **第一步（建议做，成本低，不改契约）**：结果项的 `detail` 字段（plugin-spec §9.2，二级面板**纯文本**）承载——文本 / 代码 / Markdown 填前 N 行；二进制填**元数据**（类型 / 大小 / 尺寸 / 时长，来自 `stat`）。同一份代码跑两端：「文本类」判定 = 扩展名白名单 + 大小上限 + 首 8KB 无 NUL 字节。
+- **第二步（可选，需改契约）**：富预览（图片缩略图 / 表格 / PDF 首页）两条路，届时二选一：
+  - **A｜宿主二级面板支持缩略图**：结果项扩一个预览字段（`plugin-spec` §9.2 变更）+ `apps/launcher-ui` 渲染；观感最接近截图，但要动 UI。
+  - **B｜走插件 view 命令**：结果项加一项 `actions` → 打开 `file-search` 自己的 `preview` 页面（Vue + iframe，现有机制即可承载；与 §B2.9 里 `clipboard-history` 的预览页同理）。
+  - 两条路都需要**新 capability `file.read`**（plugin-spec §8 表，属 minor 变更），并确定图片来源口径（缩略图以 data URL 或插件页内部返回，**不走 CDN**，CSP 按 §7 现有方针）。
+- **I/O 边界**：预览读取一律在插件侧（**内核零能力**不变）；`file-search` 现在是纯 script 插件，加 view 命令后变成 view + script 混合，`build-plugin.mjs --copy-scripts` 已支持。
+- **Windows 侧**：图片 / 视频 / PDF 缩略图交给 `IShellItemImageFactory`（走系统缩略图缓存，不用自己带解码器），取不到就退回 `SHGetFileInfo` 大图标 —— 与 macOS 上「Quick Look 缩略图 → 通用图标」的降级链条**严格对称**。
+
+### B2.8 插件的平台维度（预置插件能分 Mac / Win 吗？）—— ✅ 已实现（2026-09-17）
+
+**能。** 清单新增两个可选字段，内核在**扫描期**过滤：
+
+```jsonc
+{ "platforms": ["windows"], "arch": ["x64", "arm64"] }   // 省略的维度 = 不限制
+```
+
+**设计要点（完整规范见 plugin-spec §3.5）**：
+
+| 要点 | 决定 |
+|---|---|
+| 标识口径 | `platforms` = `macos` / `windows` / `linux`（Rust `std::env::consts::OS`，照 `#[cfg(target_os)]` 写）；`arch` = `x64` / `arm64`。**刻意不等于** `host.info().platform`（那是 Node 口径 `darwin`/`win32`，为兼容契约保留） |
+| 过滤时机 | **加载前**（`PluginManager::scan()`），唯一闸门 ⇒ 命令注册 / 设置页 / 历史 / 插件页服务全部不会发生；运行时不做二次判定 |
+| 不匹配处理 | 跳过 + 日志 `info`「跳过插件 X：platforms 声明 [windows]，当前是 macos」；出厂基础插件被过滤提到 `warn` |
+| 声明**非法**（`"windows"` / `[]` / `["win"]`） | **不跳过** ⇒ 由 `validate_manifest()` 报 `MANIFEST_INVALID`，插件以 `error` 状态出现在设置页。**宁可让用户看见"清单写错了"，也不让插件无声消失** |
+| 安装期（`installDir` / `installZip`） | 明确失败 `PLATFORM_MISMATCH`（显式动作必须有回执） |
+| 兼容性 | 省略 = 不限制（只增不减，spec §11）⇒ **现有 8 个插件一行都不用改**；**不**在打包脚本里过滤（那样会让 dev 与打包行为不一致） |
+
+**落点**（两份契约同步，与既有约束一致）：`apps/kernel/src/manifest.rs`（常量 `PLATFORMS`/`ARCHS`、`current_platform()`/`current_arch()`、`supports_runtime()`、`raw_platform_mismatch()` 宽容判定）+ `apps/kernel/src/plugin/manager.rs`（`platform_skip_reason()`）+ `packages/plugin-manifest/src/{types,validate}.ts` + `scripts/lib/manifest-keys.mjs` 白名单。
+
+**实机验证**（真内核 + 三个临时插件，跑完已清理）：`demo-win`（`platforms:["windows"]`）被跳过（日志带原因）、`demo-mac` 与 `demo-any` 正常激活、`/api/plugins` 只返回后两个；声明写成 `["win"]` 的 `demo-bad` 以 `error` 状态可见并给出原因；`installDir` 装 Windows 专属插件返回 `PLATFORM_MISMATCH`。
+
+**首批使用者**（2026-09-17，uTools 五件套移植）：`screen-recorder`（录屏助手）整包依赖系统 `screencapture` 与 CoreGraphics 的屏幕录制权限 ⇒ 清单声明 `"platforms": ["macos"]`，Windows 上由扫描期直接跳过；同批的 `snips` / `calc-pad` / `markdown-notes` / `todo` 都是纯 view 插件（只用 `storage` / `hostUi` / `clipboard.*` / `notify.show`，壳侧原语均有跨平台实现）⇒ **按约定不声明**（省略 = 全平台）。回归：真内核下 `screen-recorder` 在 macOS 正常激活（7 条命令），`platforms:["windows"]` 的假插件被跳过且日志带原因。
+
+### B2.9 剪贴板历史插件 `clipboard-history`（Windows 专属）
+
+**动机**：Windows 上要一个"复制历史"；**macOS 明确不实现**（用户 2026-09-17 确认：Mac 不需要这个功能）。
+
+**为什么它属于 Windows 而不是 macOS**：
+
+- Windows 有**原生事件**：`AddClipboardFormatListener` → `WM_CLIPBOARDUPDATE`，**零轮询**；macOS 只能轮询 `NSPasteboard.changeCount`（300–500ms，无通知 API）。
+- Windows **读写剪贴板不需要任何系统授权**；macOS 粘贴要辅助功能（AX）权限（ad-hoc 重签还会重弹 TCC），且 macOS 16 据报将加"读取提示横幅"。
+- Win10+ 自带的 Win+V 云剪贴板能力弱（条数少、依赖云、不能本地大历史），不构成替代。
+- 移动端与浏览器扩展**做不了系统级剪贴板历史**（Android 10+ 后台禁读、iOS 无后台监听）⇒ 这个能力天然属于桌面端；协议设计保持平台无关，将来要在 macOS 补做只需加壳后端。
+
+**架构（守三铁律：能力在壳）**：
+
+| 层 | 改动 |
+|---|---|
+| 壳 | 新原语 `clipboard.watch`（注册/注销由内核按需驱动）、`clipboard.readText` / `readImage` / `readFiles`（现有 `primitives/clipboard.rs` 只有纯文本，`arboard` 还是 `default-features = false`）；变化时发**通知** `clipboard/changed { changeCount, kinds:['text','image','file'] }` —— **不带内容** |
+| 内核 | 新 capability `clipboard.watch`（中风险、安装时提示、用户可拒绝 → 插件必须有降级路径）；收到通知 → `exec.run(plugin, 'record')`（短命令，spawn→done→回收，冷启动 ~10ms，**不受** `exec.rs::SEARCH_IDLE` 5 分钟回收影响）；搜索侧另用常驻 `search` worker（ADR-0002 现成机制）；壳→内核通知已有先例（`window/toggled` 等） |
+| 插件 | `clipboard-history`，`platforms: ['windows']`；贡献型搜索 + view 页做预览（`ResultItem.detail` 只支持纯文本，**图片预览必须进 view 会话**） |
+| 契约 | `plugin-spec` §8 加 `clipboard.watch`、§7 加事件语义；`requirements` §6.1 加原语行（spec-first） |
+
+**存储与隐私（必做）**：
+
+- 落 `<dataRoot>/plugins/clipboard-history/`：元信息 JSONL + 图片 blob（`blobs/<sha1>.png`，上限 200MB，LRU 淘汰）；条数上限 500。
+- **文件只存路径引用**（`CF_HDROP` 本质是路径），不复制文件内容（文件随时会变/删）。
+- 连续重复按内容 hash 合并（只更新计数与时间）；元信息常驻内存供搜索、正文按需读。
+- 过滤：高熵串（疑似密码）、Luhn 通过的卡号、`BEGIN PRIVATE KEY`、`token/secret/password` 上下文；来源 App 黑名单（近似值：复制瞬间的前台窗口）。
+- 暂停开关（5 / 30 分钟 / 直到重启）、单条删除、一键清空；落盘权限受限；**默认本地、不联网**（spec §7 已禁插件访问 localhost）。公开仓库还要在 README 隐私段与"会弹哪些权限"对照表补一条。
+
+**工期**（建议先只做文本，2–3 天即可用）：
+
+| 项 | 天数 |
+|---|---|
+| 平台字段（§B2.8） | 0.5 |
+| 壳原语 + 内核接线 + 契约测试 | 1 |
+| 插件 MVP（仅文本） | 2–3 |
+| 图片 / 文件 + 预览页 | 2–3 |
 
 ### B3 打包与分发
 
@@ -540,12 +653,19 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 - [ ] 拖动、四边四角缩放、尺寸记忆（重启后仍是上次尺寸）
 - [ ] 搜索：应用（图标正确）、文件、网页、快捷键
 - [ ] 启动应用 / 打开文件 / 在资源管理器中显示 / 复制路径
+- [ ] **文件搜索（未装 Everything 的机器）**：首次冷启动有索引结果 → 搜文件名命中 → 后台索引重建完成（§B2.6）
+- [ ] **文件搜索（装了 Everything 的机器）**：结果一致且更快；**关掉 Everything 进程后仍可用**（降级路径实测）
+- [ ] 文件预览（若本期做）：文本前 N 行 / 二进制元数据；图片缩略图可取到，取不到时退回大图标（§B2.7）
 - [ ] 选中文本唤出带入（支持的应用内；不支持的应用静默跳过）
 - [ ] 插件页：totp / host-manager / text-diff / json-tools 全部可用；Esc 退出；主题跟随
 - [ ] hosts 读写（UAC 提权 + 区外字节不动）
 - [ ] 托盘菜单 / 状态条 / 设置项（自启、热键、主题）生效
 - [ ] 退出：托盘退出 → 进程无残留（任务管理器确认）
 - [ ] 关机 / 注销时无残留报错
+- [ ] **平台字段**：macOS 上看不到 `clipboard-history`（设置页与搜索都没有），且**不产生** error 级审计（§B2.8）
+- [ ] **剪贴板历史**：复制文本 → 历史出现；搜索命中 → 回车回写剪贴板；固定 / 删除 / 清空生效（§B2.9）
+- [ ] **剪贴板隐私**：密码类 / 卡号不入库；暂停记录期间不入库；数据只落在 `<dataRoot>/plugins/clipboard-history/`
+- [ ] **剪贴板图片 / 文件**（若本期做）：图片缩略图预览、文件路径可打开、容量上限生效
 
 ---
 
@@ -563,6 +683,10 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 | R8 | WebView2 透明窗口/失焦观感差于 macOS | 同事体感变差 | B1.8 单独留 2–3 天实机调；最坏情况退回"有边框 + 常规阴影"（功能优先） | 调整两天仍不达标 |
 | R9 | 功能冻结期用户提新需求 | 计划失控 | 新需求一律记入 backlog，阶段 A/B 结束后统一处理 | 任何新需求 |
 | R10 | 升级后旧 `.mjs` 插件（若存在）直接不可用 | 低（当前无存量插件） | 升级说明写明"逻辑层插件须为可执行产物"；个案需要时按 §A3.4 补兼容层，或把该插件重写为 Rust | 出现任何存量 JS 插件的实际使用 |
+| R13 | Everything 接口漂移（管道名 / HTTP 选项 / SDK 字段随版本变） | Windows 上"装了它反而搜不到" | 接入层只依赖**当时核对过的官方 SDK 文档**；探测失败 / 超时 / 空结果一律降级；**CI 上没有 Everything ⇒ 验证的永远是降级路径**（§B2.6） | 任何一次"搜不到文件"的报告 |
+| R14 | 自建索引质量不及预期（慢 / 内存涨 / 漏文件）——Windows 上没有 Spotlight 兜底 | Windows 侧文件搜索不好用，退化成"只有装 Everything 才可用" | 降级路径按**一等公民**做：索引落盘可复用、冷启动先出旧结果、排除系统目录限定规模；先在真机上量一次，超标就收紧根范围 | 索引 > 200 万条或常驻 > 150MB |
+| R11 | ~~插件无平台维度~~ | ~~Windows 专属插件在 macOS 上仍会装载~~ | ✅ **已消除**（2026-09-17 §B2.8：清单 `platforms`/`arch` + 扫描期过滤） | — |
+| R12 | Windows 剪贴板监听依赖窗口消息循环（`WM_CLIPBOARDUPDATE`） | 监听静默失效 | 监听器挂在**常驻窗口**上，窗口销毁/重建（含重启内核）时重新 `AddClipboardFormatListener`；`clipboard.watch` 提供 `start/stop` 幂等接口 | 窗口重建路径改动时 |
 
 ## 回滚策略
 
@@ -581,7 +705,9 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 | A3 | 收尾（测试矩阵 / 打包 / 清理） | 2–3 h | 1–2 天 | 1–2 周 |
 | **A 小计** | **全 Rust（macOS）** | **9–14 h** | **4–6 个工作日** | **7–10 周** |
 | B | Windows 平台化 + 打包 + 实机 | 8–12 h | 4–6 个工作日 | 3–5 周 |
-| **合计** | | **17–26 h** | **8–12 个工作日** | **10–15 周** |
+| B2.8+B2.9 | 插件平台维度 + `clipboard-history`（Windows 专属，建议先只做文本） | 1–2 h | 0.5–1 个工作日 | 1–1.5 周 |
+| B2.6+B2.7 | 文件搜索跨平台契约（含 Windows 自建索引）+ 结果预览（富预览可选） | 0.5–1.5 h | 0.5–1 个工作日 | 3–5 天（富预览另计 1–2 天） |
+| **合计** | | **19–30 h** | **9.5–14.5 个工作日** | **11.5–17.5 周** |
 
 日历口径的瓶颈（不是写代码速度）：实机验收要人点（TCC 挡住自动化）、协议/SDK 需拍板往返、Rust 编译迭代、Windows 需要独立机器或 CI。
 
@@ -593,6 +719,7 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 4. **M5.4 换包**：macOS 上 `pnpm app:local` 出包、换包、日常使用（A3 完成）。
 5. **M6.1 Windows 可跑**：同事机器上安装、唤出、搜索、启动应用。
 6. **M6.2 Windows 全功能**：B5 清单全绿 + 安装包交付。
+7. **M6.3 剪贴板历史（Windows 专属）**：平台字段生效 + 文本 MVP 可用（B2.8 / B2.9）。
 
 ## 附录
 
@@ -608,6 +735,8 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 | 搜索打分 | `apps/kernel/src/search.ts` + `pinyin.ts` | `apps/kernel/src/search/*.rs` |
 | 数据兼容 | `config.ts` / `history.ts` / `legacy.ts` / `overrides.ts` / `pluginSettings.ts` | 同名 `.rs` |
 | 壳原语 | `apps/shell/src/primitives/*.rs` | 增加 Windows 分支（B1） |
+| 剪贴板原语 | `apps/shell/src/primitives/clipboard.rs`（**只有纯文本**；`arboard` 为 `default-features = false`） | 加 `watch` / 读图 / 读文件（Windows：`AddClipboardFormatListener`，§B2.9） |
+| 插件平台维度 | 无（白名单 `scripts/lib/manifest-keys.mjs`） | 清单 `platforms` + `plugin/manager.rs` 装配期跳过（§B2.8） |
 | 插件逻辑层 | `plugins/*/src/no-view/*.ts`（10 文件 / ≈1700 行） | `plugins/*/src/*.rs`（crate 根 = 插件目录） |
 | 构建 | `scripts/{build-all,pack-local-app,spec-check}.mjs` | 增加 Rust 构建与 `scripts/pack-win.mjs` |
 
