@@ -1,37 +1,18 @@
 import { ctx, log, onError, onQuery } from '@launcher/api-node'
-import { storage } from '@launcher/api-node'
-import { DEFAULT_ENGINES, parseQuery, type Engine } from '../core/parse'
+import { parseQuery, resolveEngine } from '../core/parse'
 
 onError()
-const { pluginId } = ctx()
-void pluginId
+// 设置在 worker 启动时快照一次；用户在设置页改完会重载插件，新值随新 worker 生效
+const { settings } = ctx()
+const engine = resolveEngine(settings.engine)
+log(`默认搜索引擎：${engine.name}`, undefined, 'debug')
 
-let engines: Engine[] = DEFAULT_ENGINES
-let ready: Promise<void> | null = null
-
-async function ensureEngines(): Promise<void> {
-  if (ready) return ready
-  ready = (async () => {
-    try {
-      const saved = await storage.get<Engine[]>('engines')
-      if (Array.isArray(saved) && saved.length > 0) {
-        engines = saved.filter((e) => e && typeof e.template === 'string' && e.template.includes('{q}'))
-        log(`已加载 ${engines.length} 个搜索引擎`, undefined, 'debug')
-      }
-    } catch {
-      /* 用默认引擎 */
-    }
-  })()
-  return ready
-}
-
-onQuery(async ({ query }) => {
-  await ensureEngines()
-  return parseQuery(query, engines).map((hit) => {
+onQuery(({ query }) => {
+  return parseQuery(query, engine).map((hit) => {
     const isDirect = hit.kind === 'url'
     return {
       id: `web:${hit.url}`,
-      title: isDirect ? hit.label : hit.label,
+      title: hit.label,
       subtitle: isDirect ? '直接打开' : hit.url,
       icon: isDirect ? 'globe' : 'search',
       score: hit.score,

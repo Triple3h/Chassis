@@ -26,4 +26,6 @@ export const MANIFEST_KEYS = [
   'essential',
   // 不计入「最近使用」（底座自身入口用）
   'history',
+  // 插件设置声明（设置页渲染通用表单）
+  'settings',
 ]

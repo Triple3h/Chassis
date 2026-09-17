@@ -100,6 +100,7 @@ my-plugin/
 | `categories` | 可选 | string[] | | 分类标签（展示用） |
 | `essential` | 可选 | boolean | 默认 `false` | 底座基础能力：**不可禁用**（设置页不提供开关，内核 `setDisabled` 直接拒绝）。判定标准：禁用它会让启动台基本功能残废（搜应用 / 搜文件），或让用户失去自救入口（设置与插件管理被禁用后，界面上再没有地方能改回来） |
 | `history` | 可选 | boolean | 默认 `true` | 是否计入「最近使用」（§7.5）：声明 `false` 的插件，其条目**不写历史**，启动时还会把已有条目摘掉。底座自身入口（设置 / 插件管理 / 应用启动 / 文件搜索）用它 —— 一用就占满最近使用，而这些入口随时搜得到。只影响最近使用，搜索结果与固定项不受影响 |
+| `settings` | 可选 | SettingDecl[] | ≤ 16 条 | 插件设置声明（§3.4）：设置页渲染成通用表单；用户改过的值单独存，**不写清单** |
 | `private` | 可选 | boolean | | 仅源工程用，产物中剥掉 |
 
 ### 3.2 `commands[]`（CommandDecl）
@@ -147,6 +148,37 @@ my-plugin/
 | 每个 script/no-view 命令的产物存在 | `ENTRY_MISSING` |
 | 有 view 命令时 `index.html` 存在 | `ENTRY_MISSING` |
 | 全局 id 未与已加载插件冲突 | `PLUGIN_ID_CONFLICT` |
+
+### 3.4 `settings[]`（插件设置声明）
+
+```ts
+interface SettingDecl {
+  key: string          // ^[a-z][a-z0-9-]{0,31}$，插件内唯一
+  type: 'select' | 'switch' | 'text'
+  title: string        // 1–40 字符
+  description?: string // ≤ 120 字符，显示在标题下
+  default?: string | boolean   // select / text 用字符串，switch 用布尔；select 的 default 必须在 options 里
+  options?: Array<{ value: string; label: string }>  // type=select 必须提供（2–32 项，value 唯一）
+}
+```
+
+声明只描述「有哪些设置、长什么样」；**用户改过的值不写清单**（插件产物是构建产物，重装 / 更新即丢）——
+内核统一存 `<dataRoot>/plugin-settings.json`（与别名的覆盖层同款）。**生效值 = 用户值 ?? `default`**。
+
+- **插件侧怎么读**：script / no-view 用 `ctx().settings`（`@launcher/api-node`）：
+
+  ```ts
+  const { settings } = ctx()
+  const engine = typeof settings.engine === 'string' ? settings.engine : 'google'
+  ```
+
+  值在 **worker 启动时快照一次** —— 用户在设置页改完，内核会重载该插件，新值随新 worker 生效；
+  长驻 worker **不得**假设设置会在自己的生命周期内变化（要动态生效就每次 `ctx()` 重新读，但拿到的仍是启动时的快照）。
+- **设置页怎么改**：设置 → 插件 → 详情的**「设置」页签**（这一页**由声明激活**：没声明 `settings`
+  的插件不出现）—— select 用自绘下拉 / switch / text，改完立即保存；未改过的项显示 `default`，
+  改过的项提供「恢复默认」（删掉用户值、回落清单值）。
+- **卸载即清**：卸载插件时其设置一并删除（重装不背旧值）；清单里删掉的键、类型对不上的残留值会被过滤。
+- 声明 `settings` **不需要**任何 capability（不是权限）；没声明的插件在设置页不出现「插件设置」区块。
 
 ---
 

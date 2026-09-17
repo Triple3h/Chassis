@@ -4,6 +4,7 @@ import { ConfigStore, type Config } from './config'
 import { EventBus } from './events'
 import { HistoryStore } from './history'
 import { OverrideStore } from './overrides'
+import { PluginSettingStore } from './pluginSettings'
 import { ShellLink } from './jsonrpc'
 import { Pipeline } from './pipeline'
 import { CommandRegistry, SearchResultHub } from './registry'
@@ -68,6 +69,8 @@ export class Kernel {
   readonly history: HistoryStore
   /** 插件别名等用户覆盖（`<dataRoot>/plugin-overrides.json`） */
   readonly overrides: OverrideStore
+  /** 插件设置的用户值（`<dataRoot>/plugin-settings.json`） */
+  readonly pluginSettings: PluginSettingStore
   readonly registry = new CommandRegistry()
   readonly hub = new SearchResultHub()
   readonly sessions = new SessionManager()
@@ -100,6 +103,7 @@ export class Kernel {
     this.audit = new AuditLog(opts.dataRoot)
     this.history = new HistoryStore(opts.dataRoot)
     this.overrides = new OverrideStore(opts.dataRoot)
+    this.pluginSettings = new PluginSettingStore(opts.dataRoot)
     this.storage = new PluginStorage(opts.dataRoot, this.audit)
     this.quicklinks = new QuicklinkStore(opts.dataRoot, this.audit)
     this.primitives = new Primitives(this.link, this.audit)
@@ -109,6 +113,8 @@ export class Kernel {
       resolvePluginDir: (pluginId) => this.plugins?.dirOf(pluginId),
       dataPathFor: (pluginId) => pluginDataPath(opts.dataRoot, pluginId),
       dataRoot: opts.dataRoot,
+      // 延迟求值：exec 比 plugins 先构造，worker 真正启动时 plugins 早已就绪
+      settingsFor: (pluginId) => this.plugins?.settingsOf(pluginId) ?? {},
       log: (level, message, data) => this.log(level, message, data),
       onFailure: (pluginId, command) => this.plugins?.noteFailure(pluginId, command),
       handleRpc: (pluginId, method, params) => this.handleScriptRpc(pluginId, method, params),
@@ -149,6 +155,7 @@ export class Kernel {
       builtinRoots: opts.builtinRoots,
       config: this.config,
       overrides: this.overrides,
+      pluginSettings: this.pluginSettings,
       audit: this.audit,
       bus: this.bus,
       registry: this.registry,
@@ -210,6 +217,7 @@ export class Kernel {
     this.admin = new PluginAdmin({
       plugins: this.plugins,
       overrides: this.overrides,
+      pluginSettings: this.pluginSettings,
       config: this.config,
       primitives: this.primitives,
     })
@@ -235,6 +243,8 @@ export class Kernel {
     const config = await this.config.load()
     // 覆盖层要在插件装配（plugins.init）之前就位，否则首轮注册拿不到用户别名
     await this.overrides.load()
+    // 设置值同理：搜索 worker 的预热在装配期就发生，晚加载会让首个 worker 读到空设置
+    await this.pluginSettings.load()
     await this.audit.init()
     await this.history.load(config.historyLimit)
     // 插件改过 id：历史 / 固定项里的旧 pluginId 与 key 前缀一次性迁移（否则老条目一律被判「插件不可用」置灰）

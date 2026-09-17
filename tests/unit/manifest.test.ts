@@ -69,6 +69,52 @@ test('history 只接受布尔值；不写 = 未声明（默认计入最近使用
   assertEqual(wrong.code, 'MANIFEST_INVALID')
 })
 
+test('settings：三类设置项都能声明，select 必须带 options 且 default 在选项内', () => {
+  const result = validateManifest({
+    ...VALID,
+    settings: [
+      {
+        key: 'engine',
+        type: 'select',
+        title: '引擎',
+        default: 'alpha',
+        options: [
+          { value: 'alpha', label: 'Alpha' },
+          { value: 'beta', label: 'Beta' },
+        ],
+      },
+      { key: 'flag', type: 'switch', title: '开关', default: false },
+      { key: 'note', type: 'text', title: '备注' },
+    ],
+  })
+  assert(result.ok, '应当通过')
+  assertEqual(result.manifest.settings?.length, 3)
+  assertEqual(result.manifest.settings?.[0]?.options?.length, 2)
+})
+
+test('settings：非法声明一律拒绝（key / type / options / default / 重复）', () => {
+  const bad = [
+    { settings: [{ key: 'Engine', type: 'text', title: 'x' }] },
+    { settings: [{ key: 'ok', type: 'radio', title: 'x' }] },
+    { settings: [{ key: 'ok', type: 'select', title: 'x' }] },
+    { settings: [{ key: 'ok', type: 'select', title: 'x', options: [{ value: 'a', label: 'A' }] }] },
+    { settings: [{ key: 'ok', type: 'select', title: 'x', options: [{ value: 'a', label: 'A' }, { value: 'a', label: 'B' }] }] },
+    {
+      settings: [
+        { key: 'ok', type: 'select', title: 'x', default: 'z', options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] },
+      ],
+    },
+    { settings: [{ key: 'ok', type: 'switch', title: 'x', default: 'true' }] },
+    { settings: [{ key: 'ok', type: 'text', title: 'x' }, { key: 'ok', type: 'text', title: 'y' }] },
+    { settings: 'engine' },
+  ]
+  for (const patch of bad) {
+    const result = validateManifest({ ...VALID, ...patch })
+    assert(!result.ok, `${JSON.stringify(patch)} 应当失败`)
+    assertEqual(result.code, 'MANIFEST_INVALID', JSON.stringify(patch))
+  }
+})
+
 test('未知 apiVersion 报 API_VERSION_UNSUPPORTED', () => {
   const result = validateManifest({ ...VALID, apiVersion: '2' })
   assert(!result.ok)

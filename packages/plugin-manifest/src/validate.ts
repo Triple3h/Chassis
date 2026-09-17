@@ -8,6 +8,8 @@ import {
   type CommandDecl,
   type CommandMode,
   type PluginManifest,
+  type SettingDecl,
+  type SettingOption,
 } from './types'
 
 export type ManifestValidation =
@@ -16,6 +18,9 @@ export type ManifestValidation =
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 const MAX_COMMANDS = 32
+const SETTING_KEY_RE = /^[a-z][a-z0-9-]{0,31}$/
+const MAX_SETTINGS = 16
+const MAX_SETTING_OPTIONS = 32
 
 function fail(code: ManifestErrorCode, message: string): ManifestValidation {
   return { ok: false, code, message }
@@ -90,6 +95,78 @@ function validateCommand(
     cmd.capabilities = raw.capabilities as string[]
   }
   return { ok: true, cmd }
+}
+
+function validateSetting(
+  raw: unknown,
+  index: number,
+): { ok: true; decl: SettingDecl } | { ok: false; message: string } {
+  if (!isPlainObject(raw)) return { ok: false, message: `settings[${index}] 必须是对象` }
+
+  const key = raw.key
+  if (typeof key !== 'string' || !SETTING_KEY_RE.test(key)) {
+    return { ok: false, message: `settings[${index}].key 不符合 /^[a-z][a-z0-9-]{0,31}$/（收到 ${JSON.stringify(key)}）` }
+  }
+  const type = raw.type
+  if (type !== 'select' && type !== 'switch' && type !== 'text') {
+    return { ok: false, message: `settings[${index}].type 必须是 select | switch | text` }
+  }
+  const title = raw.title
+  if (typeof title !== 'string' || title.length < 1 || title.length > 40) {
+    return { ok: false, message: `settings[${index}].title 必须是 1–40 字符` }
+  }
+
+  const decl: SettingDecl = { key, type, title }
+
+  if (raw.description !== undefined) {
+    if (typeof raw.description !== 'string' || raw.description.length > 120) {
+      return { ok: false, message: `settings[${index}].description 必须是 ≤120 字符的字符串` }
+    }
+    decl.description = raw.description
+  }
+  if (raw.options !== undefined) {
+    if (type !== 'select') return { ok: false, message: `settings[${index}]：只有 type=select 才能声明 options` }
+    if (!Array.isArray(raw.options) || raw.options.length < 2 || raw.options.length > MAX_SETTING_OPTIONS) {
+      return { ok: false, message: `settings[${index}].options 必须是 2–${MAX_SETTING_OPTIONS} 项` }
+    }
+    const options: SettingOption[] = []
+    const seen = new Set<string>()
+    for (const [i, item] of raw.options.entries()) {
+      if (!isPlainObject(item)) return { ok: false, message: `settings[${index}].options[${i}] 必须是对象` }
+      const value = item.value
+      const label = item.label
+      if (typeof value !== 'string' || value.length === 0) {
+        return { ok: false, message: `settings[${index}].options[${i}].value 必须是非空字符串` }
+      }
+      if (typeof label !== 'string' || label.length === 0 || label.length > 40) {
+        return { ok: false, message: `settings[${index}].options[${i}].label 必须是 1–40 字符` }
+      }
+      if (seen.has(value)) return { ok: false, message: `settings[${index}].options 值重复：${value}` }
+      seen.add(value)
+      options.push({ value, label })
+    }
+    decl.options = options
+  }
+  if (type === 'select' && !decl.options) {
+    return { ok: false, message: `settings[${index}]：type=select 必须提供 options` }
+  }
+  if (raw.default !== undefined) {
+    if (type === 'switch') {
+      if (typeof raw.default !== 'boolean') {
+        return { ok: false, message: `settings[${index}].default 必须是布尔（type=switch）` }
+      }
+      decl.default = raw.default
+    } else {
+      if (typeof raw.default !== 'string') {
+        return { ok: false, message: `settings[${index}].default 必须是字符串（type=${type}）` }
+      }
+      if (type === 'select' && !(decl.options ?? []).some((option) => option.value === raw.default)) {
+        return { ok: false, message: `settings[${index}].default 不在 options 里：${raw.default}` }
+      }
+      decl.default = raw.default
+    }
+  }
+  return { ok: true, decl }
 }
 
 /**
@@ -208,6 +285,20 @@ export function validateManifest(raw: unknown): ManifestValidation {
   if (raw.history !== undefined) {
     if (typeof raw.history !== 'boolean') return fail('MANIFEST_INVALID', 'history 必须是布尔值')
     manifest.history = raw.history
+  }
+  if (raw.settings !== undefined) {
+    if (!Array.isArray(raw.settings)) return fail('MANIFEST_INVALID', 'settings 必须是数组')
+    if (raw.settings.length > MAX_SETTINGS) return fail('MANIFEST_INVALID', `settings 不得超过 ${MAX_SETTINGS} 条`)
+    const settings: SettingDecl[] = []
+    const seenKeys = new Set<string>()
+    for (const [index, item] of raw.settings.entries()) {
+      const result = validateSetting(item, index)
+      if (!result.ok) return fail('MANIFEST_INVALID', result.message)
+      if (seenKeys.has(result.decl.key)) return fail('MANIFEST_INVALID', `settings.key 重复：${result.decl.key}`)
+      seenKeys.add(result.decl.key)
+      settings.push(result.decl)
+    }
+    manifest.settings = settings
   }
 
   return { ok: true, manifest, warnings }

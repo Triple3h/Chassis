@@ -21,10 +21,26 @@
       "icon": "globe"
     }
   ],
+  "settings": [
+    {
+      "key": "engine",
+      "type": "select",
+      "title": "默认搜索引擎",
+      "description": "搜索时只给出这一个引擎的结果项；改完立即生效",
+      "default": "google",
+      "options": [
+        { "value": "google", "label": "Google" },
+        { "value": "bing", "label": "Bing" },
+        { "value": "baidu", "label": "百度" },
+        { "value": "github", "label": "GitHub" }
+      ]
+    }
+  ],
   "scripts": {
     "build": "node ../../scripts/build-plugin.mjs web-open",
     "build:scripts": "node ../../scripts/build-plugin.mjs web-open",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/parse.test.ts"
   },
   "dependencies": {
     "@launcher/api-node": "workspace:*"

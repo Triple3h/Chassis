@@ -22,6 +22,30 @@ export interface CommandDecl {
   hidden?: boolean
 }
 
+export interface SettingOption {
+  value: string
+  label: string
+}
+
+/**
+ * 插件设置声明（设置页渲染成通用表单）。
+ *
+ * 声明只描述「有哪些设置、长什么样」；**用户改过的值不写清单** —— 存
+ * `<dataRoot>/plugin-settings.json`（与别名覆盖层同款，重装 / 更新插件都不丢），
+ * 未改过的用 `default`。插件侧在 script / no-view 里用 `ctx().settings` 读生效值。
+ */
+export interface SettingDecl {
+  /** 插件内唯一，`^[a-z][a-z0-9-]{0,31}$` */
+  key: string
+  type: 'select' | 'switch' | 'text'
+  title: string
+  description?: string
+  /** 缺省值：select / text 用字符串，switch 用布尔 */
+  default?: string | boolean
+  /** type=select 必须提供（2–32 项） */
+  options?: SettingOption[]
+}
+
 export interface PluginManifest {
   /** 插件 id，同时是数据目录名 */
   name: string
@@ -55,6 +79,8 @@ export interface PluginManifest {
    * 与 `essential` 不同，第三方插件也能声明 —— 它只影响自己的条目，不是权限提升。
    */
   history?: boolean
+  /** 插件设置（≤16 条）：设置页的「插件 → 插件设置」按声明渲染，用户改完重载插件生效 */
+  settings?: SettingDecl[]
 }
 
 /** 全局命令 id：`${pluginId}:${name}` */

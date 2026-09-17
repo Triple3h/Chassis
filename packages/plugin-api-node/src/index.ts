@@ -16,6 +16,13 @@ export interface NodeContext {
   dataRoot: string
   pluginId: string
   mode: 'run' | 'search'
+  /**
+   * 生效的插件设置（清单 `settings` 声明 ∪ 用户值，见 plugin-spec §3.4）。
+   *
+   * 在 worker 启动时快照一次：用户在设置页改完会重载插件，新值随新 worker 生效 ——
+   * 不要在这里面缓存中间态，每次读 `ctx()` 拿的都是本 worker 生命周期内的固定值。
+   */
+  settings: Record<string, string | boolean>
 }
 
 export type LogLevel = 'info' | 'debug' | 'warn' | 'error'
@@ -55,6 +62,7 @@ export function ctx(): NodeContext {
     dataRoot: wd.dataRoot ?? '',
     pluginId: wd.pluginId ?? '',
     mode: wd.mode === 'search' ? 'search' : 'run',
+    settings: wd.settings && typeof wd.settings === 'object' ? wd.settings : {},
   }
 }
 

@@ -135,6 +135,20 @@ export interface HostInfo {
   sid: string
 }
 
+/** 设置项的运行时视图：清单声明 + 生效值（设置页据此渲染表单） */
+export interface PluginSettingInfo {
+  key: string
+  type: 'select' | 'switch' | 'text'
+  title: string
+  description?: string
+  default?: string | boolean
+  options?: Array<{ value: string; label: string }>
+  /** 当前生效值 = 用户值 ?? default（两者都没有时为 undefined） */
+  value?: string | boolean
+  /** 用户改过（界面据此显示「恢复默认」） */
+  customized: boolean
+}
+
 export interface PluginRuntimeInfo {
   id: string
   title: string
@@ -150,6 +164,8 @@ export interface PluginRuntimeInfo {
   keywords: string[]
   /** 是否被用户改过（界面据此显示「恢复默认」） */
   keywordsCustomized: boolean
+  /** 插件设置（清单声明 + 用户值）；没有声明时为空数组 */
+  settings: PluginSettingInfo[]
   commands: Array<{
     name: string
     title: string

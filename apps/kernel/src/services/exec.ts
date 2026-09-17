@@ -14,6 +14,8 @@ export interface ScriptRuntimeOptions {
   resolvePluginDir: (pluginId: string) => string | undefined
   dataPathFor: (pluginId: string) => string
   dataRoot: string
+  /** 插件生效设置（清单声明 + 用户值），worker 启动时注入 `ctx().settings` */
+  settingsFor: (pluginId: string) => Record<string, string | boolean>
   log: (level: 'info' | 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
   /** 连续失败计数回调（连续 3 次 → degraded） */
   onFailure: (pluginId: string, command: string) => void
@@ -272,6 +274,8 @@ export class ScriptRuntime {
       dataRoot: this.opts.dataRoot,
       mode,
       host: 'launcher',
+      // 设置值在 worker 启动时快照一次：用户在设置里改完会重载插件，新值随新 worker 生效
+      settings: this.opts.settingsFor(pluginId),
     }
   }
 

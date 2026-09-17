@@ -1,12 +1,15 @@
-import { LauncherError } from '@launcher/plugin-manifest'
+import { LauncherError, type SettingDecl } from '@launcher/plugin-manifest'
 import type { ConfigStore } from './config'
 import type { OverrideStore } from './overrides'
+import { isValidSettingValue, type PluginSettingStore } from './pluginSettings'
 import type { PluginManager, PluginRecord } from './plugin'
 import type { Primitives } from './services/shell'
 
 export interface PluginAdminDeps {
   plugins: PluginManager
   overrides: OverrideStore
+  /** 插件设置的用户值层（设置页 / HTTP API 写入） */
+  pluginSettings: PluginSettingStore
   config: ConfigStore
   primitives: Primitives
 }
@@ -73,6 +76,22 @@ export class PluginAdmin {
         this.deps.plugins.applyOverrides(plugin.id)
         return { ok: true, plugins: this.deps.plugins.info() }
       }
+      case 'setSetting': {
+        // 插件设置：值存用户值层，改完重载插件 —— script / no-view 的设置在 worker 启动时注入
+        const { decl } = this.requireSettingTarget(id, payload)
+        if (!isValidSettingValue(decl, payload.value)) {
+          throw new LauncherError('BAD_ARGS', `设置值不合法：${decl.key}`)
+        }
+        await this.deps.pluginSettings.set(id, decl.key, payload.value)
+        await this.deps.plugins.reloadOrLoad(id)
+        return { ok: true, plugins: this.deps.plugins.info() }
+      }
+      case 'resetSetting': {
+        const { decl } = this.requireSettingTarget(id, payload)
+        await this.deps.pluginSettings.reset(id, decl.key)
+        await this.deps.plugins.reloadOrLoad(id)
+        return { ok: true, plugins: this.deps.plugins.info() }
+      }
       case 'setCapability': {
         // 用户拒绝 / 恢复某项高风险能力（安装时确认的落点）
         const capability = typeof payload.capability === 'string' ? payload.capability : ''
@@ -88,6 +107,19 @@ export class PluginAdmin {
       default:
         throw new LauncherError('BAD_ARGS', `未知插件动作：${action}`)
     }
+  }
+
+  /** setSetting / resetSetting 的入参校验：插件存在，且清单里声明了该设置项 */
+  private requireSettingTarget(
+    id: string,
+    payload: Record<string, unknown>,
+  ): { plugin: PluginRecord; decl: SettingDecl } {
+    const plugin = this.deps.plugins.get(id)
+    if (!plugin) throw new LauncherError('NOT_FOUND', `插件不存在：${id}`)
+    const key = typeof payload.key === 'string' ? payload.key : ''
+    const decl = (plugin.manifest?.settings ?? []).find((item) => item.key === key)
+    if (!decl) throw new LauncherError('NOT_FOUND', `插件未声明该设置项：${id}:${key || '(空)'}`)
+    return { plugin, decl }
   }
 
   /** setKeywords / resetKeywords 的入参校验：插件必须存在，命令（若给）必须在清单里 */

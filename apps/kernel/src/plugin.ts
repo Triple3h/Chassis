@@ -31,6 +31,12 @@ import {
   pluginKeywordsOf,
   type OverrideStore,
 } from './overrides'
+import {
+  effectiveSettings,
+  sanitizeSettingValues,
+  type PluginSettingStore,
+  type SettingValue,
+} from './pluginSettings'
 
 export type PluginState =
   | 'discovered'
@@ -65,6 +71,8 @@ export interface PluginManagerDeps {
   config: ConfigStore
   /** 用户覆盖层（别名等）：装配命令时与清单合并 */
   overrides: OverrideStore
+  /** 插件设置的用户值层（`<dataRoot>/plugin-settings.json`） */
+  pluginSettings: PluginSettingStore
   audit: AuditLog
   bus: EventBus
   registry: CommandRegistry
@@ -226,6 +234,8 @@ export class PluginManager {
         // 插件级别名（兜底给全部入口命令）；customized = 被用户覆盖层改过（界面显示「恢复默认」）
         keywords: pluginKeywords,
         keywordsCustomized: override?.keywords !== undefined,
+        // 插件设置：声明 + 生效值 + 是否被用户改过（设置页渲染通用表单）
+        settings: this.settingsInfo(record),
         commands: (record.manifest?.commands ?? []).map((decl) => ({
           name: decl.name,
           title: decl.title,
@@ -247,6 +257,37 @@ export class PluginManager {
         ...(record.devUrl ? { devUrl: record.devUrl } : {}),
       }
     })
+  }
+
+  /** 设置页用的视图：清单声明 + 生效值（用户值优先，回落 default） */
+  private settingsInfo(record: PluginRecord): PluginRuntimeInfo['settings'] {
+    const decls = record.manifest?.settings ?? []
+    if (decls.length === 0) return []
+    const values = this.deps.pluginSettings.getFor(record.id)
+    return decls.map((decl) => {
+      const effective = values?.[decl.key] ?? decl.default
+      return {
+        key: decl.key,
+        type: decl.type,
+        title: decl.title,
+        ...(decl.description ? { description: decl.description } : {}),
+        ...(decl.default !== undefined ? { default: decl.default } : {}),
+        ...(decl.options ? { options: decl.options.map((option) => ({ ...option })) } : {}),
+        ...(effective !== undefined ? { value: effective } : {}),
+        customized: values?.[decl.key] !== undefined,
+      }
+    })
+  }
+
+  /**
+   * script / no-view 的生效设置（worker 启动时注入 `ctx().settings`）。
+   * 声明里删掉的键与类型对不上的残留值会被过滤掉。
+   */
+  settingsOf(pluginId: string): Record<string, SettingValue> {
+    const decls = this.records.get(pluginId)?.manifest?.settings ?? []
+    if (decls.length === 0) return {}
+    const values = sanitizeSettingValues(this.deps.pluginSettings.getFor(pluginId), decls)
+    return effectiveSettings(decls, values)
   }
 
   /**
@@ -747,8 +788,9 @@ export class PluginManager {
     if (record.builtin) throw new LauncherError('FORBIDDEN', '出厂插件不可卸载（可禁用）')
     await this.disable(id, 'uninstall')
     await fsp.rm(record.dir, { recursive: true, force: true })
-    // 覆盖层跟着插件走：重装后不该还带着上一份别名
+    // 覆盖层 / 设置值跟着插件走：重装后不该还带着上一份别名与配置
     await this.deps.overrides.clear(id)
+    await this.deps.pluginSettings.clear(id)
     this.records.delete(id)
     this.emitChanged()
   }

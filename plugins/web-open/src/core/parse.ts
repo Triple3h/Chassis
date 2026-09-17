@@ -18,12 +18,21 @@ export interface Engine {
   template: string
 }
 
-export const DEFAULT_ENGINES: Engine[] = [
+/** 可选引擎；清单 `settings` 的 options 与这里一一对应（改一处要改两处） */
+export const ENGINES: Engine[] = [
   { id: 'google', name: 'Google', icon: 'search', template: 'https://www.google.com/search?q={q}' },
   { id: 'bing', name: 'Bing', icon: 'search', template: 'https://www.bing.com/search?q={q}' },
   { id: 'baidu', name: '百度', icon: 'search', template: 'https://www.baidu.com/s?wd={q}' },
   { id: 'github', name: 'GitHub', icon: 'terminal', template: 'https://github.com/search?q={q}' },
 ]
+
+const FALLBACK_ENGINE = ENGINES[0]!
+
+/** 设置里的引擎 id → 引擎；认不出来就回落第一个（用户配置异常也不至于没有搜索入口） */
+export function resolveEngine(id: unknown): Engine {
+  if (typeof id !== 'string') return FALLBACK_ENGINE
+  return ENGINES.find((engine) => engine.id === id) ?? FALLBACK_ENGINE
+}
 
 export function normalizeUserUrl(input: string): string | null {
   const raw = input.trim()
@@ -35,10 +44,12 @@ export function normalizeUserUrl(input: string): string | null {
 }
 
 /**
- * 解析输入：优先当作网址，其次给出多引擎搜索入口。
- * 单一搜索项排在第一（Enter 直接搜），其余引擎作为动作项。
+ * 解析输入：能当网址就直接打开，否则给**一条**默认引擎的搜索项。
+ *
+ * 只出一条是刻意的：四个引擎全出时，「最佳匹配」整个分区都是同一个查询串，
+ * 真正命中的命令反而被挤到后面。引擎在设置里换（`ctx().settings.engine`）。
  */
-export function parseQuery(input: string, engines: Engine[]): UrlHit[] {
+export function parseQuery(input: string, engine: Engine = FALLBACK_ENGINE): UrlHit[] {
   const raw = input.trim()
   if (!raw) return []
 
@@ -47,17 +58,13 @@ export function parseQuery(input: string, engines: Engine[]): UrlHit[] {
     return [{ url: direct, label: `打开 ${direct.replace(/^https?:\/\//, '')}`, kind: 'url', score: 1 }]
   }
 
-  const hits: UrlHit[] = []
-  const enabled = engines.length > 0 ? engines : DEFAULT_ENGINES
-  const encoded = encodeURIComponent(raw)
-  enabled.forEach((engine, index) => {
-    hits.push({
-      url: engine.template.replace('{q}', encoded),
+  return [
+    {
+      url: engine.template.replace('{q}', encodeURIComponent(raw)),
       label: `用 ${engine.name} 搜索「${raw}」`,
       kind: 'search',
       engine: engine.id,
-      score: index === 0 ? 0.8 : 0.5,
-    })
-  })
-  return hits
+      score: 0.8,
+    },
+  ]
 }
