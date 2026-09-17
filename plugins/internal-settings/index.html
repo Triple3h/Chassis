@@ -246,14 +246,41 @@
       .install-box { display: flex; flex-direction: column; gap: 6px; }
       .mdetail { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 28px; }
       .dempty { display: flex; height: 100%; align-items: center; justify-content: center; }
-      .dhead { display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+      .dhead { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; }
       .dtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      /* 详情分页：tab 栏吸顶（详情很长时「设置」不该被命令列表挤下去），下边框兼作头部与内容的分隔 */
+      .dtabs {
+        position: sticky; top: 0; z-index: 2;
+        display: flex; align-items: flex-end; gap: 2px;
+        margin: 0 0 10px; padding-top: 2px;
+        background: var(--bg); border-bottom: 1px solid var(--border);
+      }
+      .dtab {
+        display: inline-flex; align-items: center; gap: 5px;
+        border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+        background: transparent; color: var(--muted); font: inherit; font-size: 12.5px;
+        padding: 5px 9px 7px; cursor: pointer; border-radius: 7px 7px 0 0;
+      }
+      .dtab:hover { color: var(--fg); background: var(--hover); }
+      .dtab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+      .dtab i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+      .dbody .dsec:first-child { padding-top: 6px; }
+      /* 插件信息：两列定义列表 */
+      .kv { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 5px 12px; align-items: baseline; }
+      .kv .k { color: var(--muted); font-size: 11.5px; }
+      .kv .v { min-width: 0; word-break: break-all; font-size: 12.5px; }
       .dsec { padding: 14px 0; border-bottom: 1px solid var(--border); }
       .dsec h3 {
         font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
         margin: 0 0 8px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
       }
       .dsec h3 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+      /* 插件设置：一行一项（左标题 + 右控件），与 .row 同款但用在详情区 */
+      .srow { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+      .srow:first-of-type { border-top: 0; padding-top: 2px; }
+      .srow .slabel { flex: 1; min-width: 0; }
+      .srow .slabel .hint { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+      .srow .scontrol { display: flex; align-items: center; gap: 8px; }
       .caps { display: flex; gap: 6px; flex-wrap: wrap; }
       .cap {
         border: 1px solid var(--border); background: var(--hover); color: var(--fg);

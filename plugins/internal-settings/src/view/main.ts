@@ -31,6 +31,19 @@ interface CommandLike {
   error?: string
 }
 
+/** 插件设置项（清单声明 + 生效值；渲染成通用表单） */
+interface SettingLike {
+  key: string
+  type: 'select' | 'switch' | 'text'
+  title: string
+  description?: string
+  default?: string | boolean
+  options?: Array<{ value: string; label: string }>
+  value?: string | boolean
+  /** 被用户改过（显示「恢复默认」） */
+  customized: boolean
+}
+
 interface PluginLike {
   id: string
   title: string
@@ -49,6 +62,8 @@ interface PluginLike {
   /** 插件级别名：兜底给全部入口命令 */
   keywords: string[]
   keywordsCustomized: boolean
+  /** 插件设置（清单未声明时为空数组） */
+  settings: SettingLike[]
   commands: CommandLike[]
 }
 
@@ -295,6 +310,7 @@ function digestOf(list: PluginLike[]): string {
       plugin.capabilities,
       plugin.deniedCapabilities,
       plugin.keywords ?? [],
+      plugin.settings.map((setting) => [setting.key, setting.value ?? null, setting.customized]),
       plugin.commands.map((command) => [command.name, command.keywords ?? [], command.error ?? '']),
     ]),
   )
@@ -361,16 +377,94 @@ function renderPluginList(): string {
   )
 }
 
+/**
+ * 插件设置：按清单声明渲染（select / switch / text）。
+ * 控件带 `data-setting="<pluginId>:<key>"`，值变化走事件委托 → `setSetting`（内核重载该插件）。
+ * select 复用自绘下拉，id 前缀 `setting:` 由 SELECT 落值处分流。
+ */
+function renderSettingRows(plugin: PluginLike): string {
+  return plugin.settings
+    .map((setting) => {
+      const value = setting.value ?? setting.default
+      const id = escapeHtml(settingEditId(plugin.id, setting.key))
+      let control: string
+      if (setting.type === 'select') {
+        control = selectHtml(`setting:${settingEditId(plugin.id, setting.key)}`, String(value ?? ''), setting.options ?? [])
+      } else if (setting.type === 'switch') {
+        control = `<input type="checkbox" data-setting="${id}" ${value === true ? 'checked' : ''} />`
+      } else {
+        control = `<input type="text" data-setting="${id}" value="${escapeHtml(value ?? '')}" />`
+      }
+      const reset = setting.customized
+        ? `<button class="btn tiny" data-setting-reset="${id}">恢复默认</button>`
+        : ''
+      return `
+        <div class="srow">
+          <div class="slabel">
+            <div>${escapeHtml(setting.title)}</div>
+            ${setting.description ? `<div class="hint">${escapeHtml(setting.description)}</div>` : ''}
+          </div>
+          <div class="scontrol">${control}${reset}</div>
+        </div>`
+    })
+    .join('')
+}
+
 /** chip 编辑器外壳（内容由 chipsInnerHtml 生成，增删时只重建这一个容器） */
 function renderChips(plugin: PluginLike, command?: string): string {
   const key = editKey(plugin.id, command)
   return `<div class="kwords" data-chips="${escapeHtml(key)}">${chipsInnerHtml(plugin, command)}</div>`
 }
 
-function renderPluginDetail(): string {
-  const plugin = pluginById(selectedPluginId)
-  if (!plugin) return '<div class="dempty muted">选择左侧的插件查看详情</div>'
+// ── 详情分页（TAB）──────────────────────────────────────────
+type DetailTab = 'overview' | 'settings' | 'keywords' | 'commands'
 
+/** 当前详情页；会话内记忆，切插件时保留（换到没有该页的插件时回落「概览」） */
+let detailTab: DetailTab = 'overview'
+
+/**
+ * 详情页由**插件声明**驱动：「设置」只在清单声明了 `settings` 时激活（内核 `info()` 里带的就是
+ * 声明 + 生效值）——声明了设置就自动多出一页，设置页不用为哪个插件特判。
+ * 小圆点 = 这一页里有「被用户改过」的东西（设置项 / 别名），一眼看出动过哪里。
+ */
+function detailTabsOf(plugin: PluginLike): Array<{ id: DetailTab; label: string; dot: boolean }> {
+  const tabs: Array<{ id: DetailTab; label: string; dot: boolean }> = [{ id: 'overview', label: '概览', dot: false }]
+  if (plugin.settings.length > 0) {
+    tabs.push({ id: 'settings', label: '设置', dot: plugin.settings.some((setting) => setting.customized) })
+  }
+  tabs.push({
+    id: 'keywords',
+    label: '别名',
+    dot: plugin.keywordsCustomized || plugin.commands.some((command) => command.keywordsCustomized),
+  })
+  tabs.push({ id: 'commands', label: `命令 ${plugin.commands.length}`, dot: false })
+  return tabs
+}
+
+/** 头部：只留「这是谁、什么状态」（元信息与操作都在「概览」页里） */
+function renderDetailHead(plugin: PluginLike): string {
+  return `
+    <div class="dhead">
+      <div class="dtitle">
+        <strong>${escapeHtml(plugin.title)}</strong>
+        <span class="muted">${escapeHtml(plugin.version)}</span>
+        ${stateBadge(plugin)}
+        ${
+          plugin.essential
+            ? '<span class="badge accent">基础能力</span>'
+            : plugin.builtin
+              ? '<span class="badge">出厂自带</span>'
+              : ''
+        }
+      </div>
+      ${plugin.description ? `<div class="hint">${escapeHtml(plugin.description)}</div>` : ''}
+      ${plugin.error ? `<div class="hint danger-text">${escapeHtml(plugin.error)}</div>` : ''}
+    </div>
+  `
+}
+
+/** 概览：插件信息（id / apiVersion / 作者 / 目录）+ 能力 + 操作 */
+function renderOverviewTab(plugin: PluginLike): string {
   const capabilities = plugin.capabilities
     .map((cap) => `<button class="cap" data-cap="${escapeHtml(cap)}" title="点击拒绝该能力">${escapeHtml(cap)}</button>`)
     .join('')
@@ -382,6 +476,73 @@ function renderPluginDetail(): string {
     .join('')
   const capabilityHtml = capabilities || denied ? `${capabilities}${denied}` : '<span class="muted">无</span>'
 
+  const actions = [
+    plugin.essential
+      ? ''
+      : plugin.state === 'disabled'
+        ? `<button class="btn" data-action="enable" data-id="${escapeHtml(plugin.id)}">启用</button>`
+        : `<button class="btn" data-action="disable" data-id="${escapeHtml(plugin.id)}">禁用</button>`,
+    `<button class="btn" data-action="reload" data-id="${escapeHtml(plugin.id)}">重载</button>`,
+    `<button class="btn" data-action="reveal" data-id="${escapeHtml(plugin.id)}">打开目录</button>`,
+    `<button class="btn" data-action="openData" data-id="${escapeHtml(plugin.id)}">数据目录</button>`,
+    plugin.builtin
+      ? ''
+      : `<button class="btn danger" data-action="uninstall" data-id="${escapeHtml(plugin.id)}">卸载</button>`,
+  ].join('')
+
+  return `
+    <section class="dsec">
+      <h3>插件信息</h3>
+      <div class="kv">
+        <div class="k">插件 id</div>
+        <div class="v">${escapeHtml(plugin.id)}</div>
+        <div class="k">apiVersion</div>
+        <div class="v">${escapeHtml(plugin.apiVersion)}</div>
+        ${plugin.author ? `<div class="k">作者</div><div class="v">${escapeHtml(plugin.author)}</div>` : ''}
+        <div class="k">安装目录</div>
+        <div class="v path">${escapeHtml(plugin.dir)}</div>
+      </div>
+    </section>
+
+    <section class="dsec">
+      <h3>能力 <span class="hint">点一下即可拒绝 / 恢复（会重载该插件）</span></h3>
+      <div class="caps">${capabilityHtml}</div>
+    </section>
+
+    <section class="dsec">
+      <h3>操作</h3>
+      ${
+        plugin.essential
+          ? '<div class="hint">底座基础能力：不可禁用、不可卸载 —— 禁用会让启动台失去基本功能，或让你没有办法把设置改回来</div>'
+          : ''
+      }
+      <div class="dactions">${actions}</div>
+    </section>
+  `
+}
+
+/** 设置：仅在插件声明了 `settings` 时才有这一页 */
+function renderSettingsTab(plugin: PluginLike): string {
+  return `
+    <section class="dsec">
+      <h3>插件设置 <span class="hint">改完立即保存（插件会重载一次）</span></h3>
+      ${renderSettingRows(plugin)}
+    </section>
+  `
+}
+
+/** 别名：插件级别的兜底别名（命令自己的别名在「命令」页） */
+function renderKeywordsTab(plugin: PluginLike): string {
+  return `
+    <section class="dsec">
+      <h3>插件别名 <span class="hint">兜底给该插件的全部入口命令；单条命令的别名在「命令」页</span></h3>
+      ${renderChips(plugin)}
+    </section>
+  `
+}
+
+/** 命令：逐条列出，可就地改命令级别名 */
+function renderCommandsTab(plugin: PluginLike): string {
   const commands =
     plugin.commands
       .map((command) => {
@@ -407,66 +568,40 @@ function renderPluginDetail(): string {
       `
       })
       .join('') || '<p class="muted">没有命令</p>'
-
-  const actions = [
-    plugin.essential
-      ? ''
-      : plugin.state === 'disabled'
-        ? `<button class="btn" data-action="enable" data-id="${escapeHtml(plugin.id)}">启用</button>`
-        : `<button class="btn" data-action="disable" data-id="${escapeHtml(plugin.id)}">禁用</button>`,
-    `<button class="btn" data-action="reload" data-id="${escapeHtml(plugin.id)}">重载</button>`,
-    `<button class="btn" data-action="reveal" data-id="${escapeHtml(plugin.id)}">打开目录</button>`,
-    `<button class="btn" data-action="openData" data-id="${escapeHtml(plugin.id)}">数据目录</button>`,
-    plugin.builtin
-      ? ''
-      : `<button class="btn danger" data-action="uninstall" data-id="${escapeHtml(plugin.id)}">卸载</button>`,
-  ].join('')
-
   return `
-    <div class="dhead">
-      <div class="dtitle">
-        <strong>${escapeHtml(plugin.title)}</strong>
-        <span class="muted">${escapeHtml(plugin.version)}</span>
-        ${stateBadge(plugin)}
-        ${
-          plugin.essential
-            ? '<span class="badge accent">基础能力</span>'
-            : plugin.builtin
-              ? '<span class="badge">出厂自带</span>'
-              : ''
-        }
-      </div>
-      ${plugin.description ? `<div class="hint">${escapeHtml(plugin.description)}</div>` : ''}
-      <div class="hint">${escapeHtml(plugin.id)} ｜ apiVersion ${escapeHtml(plugin.apiVersion)}${
-        plugin.author ? ` ｜ ${escapeHtml(plugin.author)}` : ''
-      }</div>
-      ${plugin.error ? `<div class="hint danger-text">${escapeHtml(plugin.error)}</div>` : ''}
-    </div>
-
-    <section class="dsec">
-      <h3>能力 <span class="hint">点一下即可拒绝 / 恢复（会重载该插件）</span></h3>
-      <div class="caps">${capabilityHtml}</div>
-    </section>
-
-    <section class="dsec">
-      <h3>插件别名 <span class="hint">兜底给该插件的全部入口命令</span></h3>
-      ${renderChips(plugin)}
-    </section>
-
     <section class="dsec">
       <h3>命令（${plugin.commands.length}）</h3>
       ${commands}
     </section>
+  `
+}
 
-    <section class="dsec danger">
-      ${
-        plugin.essential
-          ? '<div class="hint">底座基础能力：不可禁用、不可卸载 —— 禁用会让启动台失去基本功能，或让你没有办法把设置改回来</div>'
-          : ''
-      }
-      <div class="hint path">${escapeHtml(plugin.dir)}</div>
-      <div class="dactions">${actions}</div>
-    </section>
+function renderDetailTab(plugin: PluginLike, tab: DetailTab): string {
+  if (tab === 'settings') return renderSettingsTab(plugin)
+  if (tab === 'keywords') return renderKeywordsTab(plugin)
+  if (tab === 'commands') return renderCommandsTab(plugin)
+  return renderOverviewTab(plugin)
+}
+
+function renderPluginDetail(): string {
+  const plugin = pluginById(selectedPluginId)
+  if (!plugin) return '<div class="dempty muted">选择左侧的插件查看详情</div>'
+  const tabs = detailTabsOf(plugin)
+  const active = tabs.some((tab) => tab.id === detailTab) ? detailTab : 'overview'
+
+  return `
+    ${renderDetailHead(plugin)}
+    <nav class="dtabs" role="tablist">
+      ${tabs
+        .map(
+          (tab) =>
+            `<button class="dtab${tab.id === active ? ' active' : ''}" role="tab" aria-selected="${
+              tab.id === active
+            }" data-dtab="${tab.id}">${escapeHtml(tab.label)}${tab.dot ? '<i title="有改动过的项"></i>' : ''}</button>`,
+        )
+        .join('')}
+    </nav>
+    <div class="dbody">${renderDetailTab(plugin, active)}</div>
   `
 }
 
@@ -814,6 +949,75 @@ async function resetKeywords(pluginId: string, command?: string): Promise<void> 
   render()
 }
 
+// ── 插件设置（清单声明 → 通用表单）──────────────────────────────
+function settingEditId(pluginId: string, key: string): string {
+  return `${pluginId}:${key}`
+}
+
+function parseSettingEditId(id: string): { pluginId: string; key: string } {
+  const index = id.indexOf(':')
+  if (index <= 0) return { pluginId: '', key: '' }
+  return { pluginId: id.slice(0, index), key: id.slice(index + 1) }
+}
+
+/** 设置项的当前生效值（用户值缺失时回落 default） */
+function settingValueOf(pluginId: string, key: string): string | boolean | undefined {
+  const setting = pluginById(pluginId)?.settings.find((item) => item.key === key)
+  return setting ? (setting.value ?? setting.default) : undefined
+}
+
+function applyPluginsSnapshot(result: { plugins?: PluginLike[] }): void {
+  if (!Array.isArray(result.plugins)) return
+  plugins = result.plugins
+  pluginsDigest = digestOf(plugins)
+}
+
+/**
+ * 只重建右侧详情：设置改完要把生效值与「恢复默认」回填，列表本身没变。
+ * 控件会被重建 ⇒ 重渲染前记下焦点，渲染后还回去（键盘操作不该被踢回 body）。
+ */
+function rerenderPluginDetail(): void {
+  const detail = panelEl.querySelector<HTMLElement>('.mdetail')
+  if (!detail) return
+  const active = document.activeElement as HTMLElement | null
+  let restore = ''
+  if (active && detail.contains(active)) {
+    if (active.dataset.setting) restore = `[data-setting="${active.dataset.setting}"]`
+    else if (active.dataset.lselect) restore = `[data-lselect="${active.dataset.lselect}"] .lselect-trigger`
+    else if (active.dataset.dtab) restore = `[data-dtab="${active.dataset.dtab}"]`
+  }
+  detail.innerHTML = renderPluginDetail()
+  if (restore) detail.querySelector<HTMLElement>(restore)?.focus()
+}
+
+async function savePluginSetting(id: string, value: string | boolean): Promise<void> {
+  const { pluginId, key } = parseSettingEditId(id)
+  if (!pluginId || !key) return
+  // 值没变就别重载插件（下拉点了同一个选项、输入框失焦但没改内容都会走到这里）
+  if (settingValueOf(pluginId, key) === value) return
+  const result = await guard(
+    () => settings.pluginAction('setSetting', { id: pluginId, key, value }) as Promise<{ plugins?: PluginLike[] }>,
+    null,
+  )
+  if (!result) return
+  applyPluginsSnapshot(result)
+  toast('已保存')
+  rerenderPluginDetail()
+}
+
+async function resetPluginSetting(id: string): Promise<void> {
+  const { pluginId, key } = parseSettingEditId(id)
+  if (!pluginId || !key) return
+  const result = await guard(
+    () => settings.pluginAction('resetSetting', { id: pluginId, key }) as Promise<{ plugins?: PluginLike[] }>,
+    null,
+  )
+  if (!result) return
+  applyPluginsSnapshot(result)
+  toast('已恢复默认')
+  rerenderPluginDetail()
+}
+
 /** 把输入框里的文本并成 chip（回车 / 逗号 / 失焦都走这里） */
 function commitKeywordInput(input: HTMLInputElement): void {
   const key = input.dataset.chipInput
@@ -887,8 +1091,11 @@ function selectPlugin(id: string): void {
   selectedPluginId = id
   const list = panelEl.querySelector('.mitems')
   if (list) list.innerHTML = renderPluginList()
-  const detail = panelEl.querySelector('.mdetail')
-  if (detail) detail.innerHTML = renderPluginDetail()
+  const detail = panelEl.querySelector<HTMLElement>('.mdetail')
+  if (detail) {
+    detail.innerHTML = renderPluginDetail()
+    detail.scrollTop = 0
+  }
 }
 
 function setPluginFilter(filter: PluginFilter): void {
@@ -977,6 +1184,15 @@ function pickSelectOption(root: HTMLElement, option: HTMLElement): void {
   const id = root.dataset.lselect ?? ''
   const value = option.dataset.value ?? ''
   closeSelect(true)
+  applySelectValue(id, value)
+}
+
+/** 自绘下拉落值：插件设置走 `setting:` 前缀，其余是全局配置（语言 / 主题 / 密度） */
+function applySelectValue(id: string, value: string): void {
+  if (id.startsWith('setting:')) {
+    void savePluginSetting(id.slice('setting:'.length), value)
+    return
+  }
   SELECT_PATCH[id]?.(value)
 }
 
@@ -1018,6 +1234,28 @@ function onPanelClick(event: Event): void {
   if (lselectOption) {
     const root = lselectOption.closest<HTMLElement>('.lselect')
     if (root) pickSelectOption(root, lselectOption)
+    return
+  }
+  // 详情分页：只重建右侧详情，并把滚动位置拉回顶部（否则切到短页会看到一片空白）
+  const dtab = node.closest<HTMLElement>('[data-dtab]')
+  if (dtab?.dataset.dtab) {
+    detailTab = dtab.dataset.dtab as DetailTab
+    const detail = panelEl.querySelector<HTMLElement>('.mdetail')
+    if (detail) {
+      detail.innerHTML = renderPluginDetail()
+      detail.scrollTop = 0
+    }
+    return
+  }
+  // 插件设置：开关点一下即保存；文本在失焦 / 回车时保存（focusout 分支）
+  const settingReset = node.closest<HTMLElement>('[data-setting-reset]')
+  if (settingReset?.dataset.settingReset) {
+    void resetPluginSetting(settingReset.dataset.settingReset)
+    return
+  }
+  const settingInput = node.closest<HTMLInputElement>('input[data-setting]')
+  if (settingInput?.dataset.setting) {
+    if (settingInput.type === 'checkbox') void savePluginSetting(settingInput.dataset.setting, settingInput.checked)
     return
   }
   // 开关必须排在「选中」之前：它长在列表项里面（点击会同时命中 data-select）
@@ -1091,6 +1329,19 @@ function onPanelKeydown(event: KeyboardEvent): void {
     return
   }
 
+  // 详情分页：← → 在 tab 之间切（Enter / 空格由按钮自身的 click 处理）
+  const dtabEl = target.closest<HTMLElement>('[data-dtab]')
+  if (dtabEl && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+    event.preventDefault()
+    const tabs = [...panelEl.querySelectorAll<HTMLElement>('[data-dtab]')]
+    const index = tabs.findIndex((item) => item === dtabEl)
+    if (index >= 0) {
+      const delta = event.key === 'ArrowRight' ? 1 : -1
+      tabs[(index + delta + tabs.length) % tabs.length]?.click()
+    }
+    return
+  }
+
   // 列表开关（role=switch）用 Enter / 空格切换 —— 别让它落到外层列表项的默认行为上
   const switchEl = (event.target as HTMLElement).closest<HTMLElement>('[data-toggle]')
   if (switchEl) {
@@ -1101,7 +1352,15 @@ function onPanelKeydown(event: KeyboardEvent): void {
     return
   }
 
-  const input = (event.target as HTMLElement).closest<HTMLInputElement>('.chip-input')
+  // 插件设置里的文本项：回车即保存（走失焦分支，与点别处一致）
+  const settingInput = target.closest<HTMLInputElement>('input[data-setting]')
+  if (settingInput?.dataset.setting && settingInput.type === 'text' && event.key === 'Enter') {
+    event.preventDefault()
+    settingInput.blur()
+    return
+  }
+
+  const input = target.closest<HTMLInputElement>('.chip-input')
   if (!input) return
   if (event.key === 'Enter' || event.key === ',' || event.key === '，') {
     event.preventDefault()
@@ -1126,7 +1385,13 @@ function onPanelInput(event: Event): void {
 }
 
 function onPanelFocusOut(event: Event): void {
-  const input = (event.target as HTMLElement).closest<HTMLInputElement>('.chip-input')
+  const target = event.target as HTMLElement
+  const settingInput = target.closest<HTMLInputElement>('input[data-setting]')
+  if (settingInput?.dataset.setting && settingInput.type === 'text') {
+    void savePluginSetting(settingInput.dataset.setting, settingInput.value)
+    return
+  }
+  const input = target.closest<HTMLInputElement>('.chip-input')
   if (input) commitKeywordInput(input)
 }
 
