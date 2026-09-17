@@ -157,7 +157,10 @@ my-plugin/
 - 入口固定 `index.html`，多个 view 命令共用；用 `?cmd=` 区分，**必须**按 `cmd` 做内部分支或路由
 - 会话：宿主打开命令时创建一个会话（`sid`），关闭页面即销毁；**不保证**会话跨次保留（要持久化用 `ctx.storage`）
 - 尺寸：宿主窗口宽度固定；页面高度自适应并**自滚动**，不要嵌套滚动容器
-- 关闭：`Esc` 由宿主处理（父窗口先收面板再隐藏）；插件可用 `ctx.commands.close` 主动关闭会话
+- 关闭：footer「返回」/ `Esc` / `⌘W` 由宿主统一收口（**回到搜索态**，不是隐藏窗口）；插件也可用 `ctx.commands.close` 主动关闭会话。
+  插件页是独立文档，宿主的键盘监听收不到焦点在 iframe 里的按键 —— `@launcher/api` 已兜底：**没有被插件消费**的 `Esc`
+  自动交还宿主（等价 `commands.close()`）。插件消费 Esc（关掉自己画的弹层、清空搜索框）时**必须** `preventDefault()`
+  （`stopPropagation()` 同样有效，`UiDialog` / `UiSelect` 就是这么做的）
 
 ### 4.2 `no-view`
 
@@ -416,7 +419,7 @@ type ActionDecl =
 
 | 键 | 约定 |
 |---|---|
-| `Esc` | 先关插件内的弹层/面板；没有时由宿主隐藏窗口 |
+| `Esc` | 先关插件内的弹层/面板（自己画的弹层要 `preventDefault()`；`UiDialog` / `UiSelect` 已内建）；都没人消费时回到搜索态 —— SDK 自动交还宿主，等价 `commands.close()` |
 | `⌘W` / `Ctrl+W` | 关闭当前会话（等价 `commands.close()`） |
 | `⌘K` | 打开宿主动作面板 |
 | 其它 | 插件自管，但**不得**占用全局热键 |

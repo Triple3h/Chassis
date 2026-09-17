@@ -346,8 +346,13 @@ function handleKernelEvent(event: string, payload: unknown): void {
     const view = ui.pluginView
     if (!view || info?.sid !== view.sid) return
     if (info.reason === 'reload') return
+    // `ui` 是插件页自己关自己（SDK 交还的 Esc / 插件调 commands.close）：
+    // 走「返回」那条收尾（含焦点交还搜索框）—— 从插件页出来，用户下一句一定是打字。
+    if (info.reason === 'ui') {
+      void leavePluginView()
+      return
+    }
     ui.closePluginView()
-    // `ui` 是插件页自己关自己（commands.close），安静卸载就行
     const notice = info.reason === 'uninstall' ? '插件已卸载，页面已关闭' : info.reason === 'disable' ? '插件已停用，页面已关闭' : ''
     if (notice) ui.showToast(notice)
     return

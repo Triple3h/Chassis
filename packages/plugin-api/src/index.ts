@@ -390,6 +390,31 @@ export const search = {
   },
 }
 
+/**
+ * 插件页里的 `Esc` 交还给宿主 —— 「在插件页里按 Esc 退回启动台」这条路径的接缝。
+ *
+ * iframe 是独立文档：宿主 UI 挂在顶层 window 上的键盘监听**收不到**焦点在插件页里的按键
+ * （事件不跨文档冒泡），所以只能由插件侧交还。约定：插件消费了这次 Esc（关掉自己的弹层 /
+ * 清空搜索词）就 `preventDefault()`（`stopPropagation()` 同样有效，`UiDialog` / `UiSelect`
+ * 就是这么做的）；没人消费时 SDK 把它变成一次 `commands.close()`，宿主按既有的
+ * `session/closed{reason:'ui'}` 安静卸载 —— 与 footer「返回」是同一条收尾。
+ *
+ * 判定必须等事件派发**彻底结束**（microtask 里再读）：SDK 的监听注册得比插件自己的 handler 早，
+ * 当场读到的 `defaultPrevented` 永远是 false。
+ */
+function handBackEscape(): void {
+  if (typeof window === 'undefined' || !isInLauncher()) return
+  window.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.key !== 'Escape') return
+    queueMicrotask(() => {
+      if (event.defaultPrevented || event.cancelBubble) return
+      void commands.close().catch(() => undefined)
+    })
+  })
+}
+
+handBackEscape()
+
 /** 插件清理（SDK 统一回收，plugin-spec §6.2） */
 export function onCleanup(fn: () => void): () => void {
   cleanups.push(fn)

@@ -546,6 +546,7 @@ interface CommandDecl {
 http://127.0.0.1:<port>/index.html?sid=<uuid>&cmd=<command>&theme=dark|light&token=<perSessionToken>
 ```
 - 每次打开 view 命令 = 一个新会话（同插件复用同一 listener/端口，`sid` 区分）
+- 退出：footer 最左「返回」/ `Esc` / `⌘W` 三条路径统一由宿主收口（回到搜索态）。插件页是独立文档，宿主收不到焦点在 iframe 里的按键 ⇒ `@launcher/api` 在插件侧兜底：**没有被插件消费**的 `Esc` 自动交还宿主（等价 `ctx.commands.close`）；插件消费 Esc（关自己的弹层 / 清空搜索）必须 `preventDefault()`
 - 只绑 `127.0.0.1`（**不要 0.0.0.0**，避免 macOS 防火墙弹窗）
 - 静态服务只暴露插件目录，禁止目录穿越；响应头带 CSP：`default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https:; frame-src 'none'`（`'wasm-unsafe-eval'` 只放行随包 wasm 的编译，不放行 JS 的 `eval`）
 
