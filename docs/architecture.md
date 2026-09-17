@@ -194,7 +194,7 @@ active → degraded（脚本连续失败 3 次）
 | 插件 | 工具链 | 说明 |
 |---|---|---|
 | 内置（app-launcher / file-search / web-open / internal-settings） | esbuild，无框架 | 与底座同一套发布节奏 |
-| Vue 插件（totp / hosts / text-diff / json-tools） | Vite + Vue + Tailwind，共用工作区包 `@launcher/ui`（`packages/ui`：UI 积木 + 前端工具） | 2026-09-16 起与内置插件同目录维护、直连底座 SDK；见 `plugins/README.md` |
+| Vue 插件（totp / host-manager / text-diff / json-tools） | Vite + Vue + Tailwind，共用工作区包 `@launcher/ui`（`packages/ui`：UI 积木 + 前端工具） | 2026-09-16 起与内置插件同目录维护、直连底座 SDK；见 `plugins/README.md` |
 
 开发态从仓库根加载：内核 `--builtin-plugins` 接受**逗号分隔的多个目录**（默认 `plugins/`），
 壳的开发态回退指向同一处；打包时 `scripts/lib/resources.mjs` 把各插件的 `dist/` 拷进 `builtin-plugins/`。
@@ -265,4 +265,4 @@ node scripts/smoke-first-batch.mjs   # 四个 Vue 插件端到端（HTTP 驱动�
 | 插件用例 | `plugins/*/test/`、`packages/*` | 各插件的 core 纯函数与 script 胶水；`packages/ui` 等公共库（`pnpm test` 一并收集） |
 
 **人工验收（自动化覆盖不到的部分）**：自动化已覆盖「会话能开、生产资源可达、桥与脚本正确、能力越权被拒、数据落点正确」；
-下面这些在发版/大改后仍需人点一遍：粘贴→格式化→树视图（json-tools）、footer 按键与 `Esc` 分级退出、截图→粘贴导入（totp）、hosts 提权写入与回读校验、拖拽重排后的固定顺序落库。
+下面这些在发版/大改后仍需人点一遍：粘贴→格式化→树视图（json-tools）、footer 按键与 `Esc` 分级退出、截图→粘贴导入（totp）、host-manager 的块开关与提权写入回读校验、拖拽重排后的固定顺序落库。

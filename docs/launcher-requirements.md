@@ -654,7 +654,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 - dev 注册：dev server 通过内核的本地 control 端口（仅 127.0.0.1 + 一次性 token）把 `devUrl` 挂上，内核把插件页指向 vite dev server ⇒ **热更新免重启**
 - 调试：设置里有"打开插件 DevTools"（macOS WKWebView 用 `isInspectable` + Safari 开发者菜单；开发构建可用）
 - 自测：`pnpm test`（含各插件 core·script 用例）+ `pnpm spec-check`（清单 / 产物 / 能力 / 数据目录）+ `tests/fixtures/echo-plugin` 的协议自检
-- 新建插件：暂无脚手架包（`packages/plugin-cli` 属待办），照抄 `plugins/totp` / `plugins/hosts` 最快；配置模板见 `docs/plugin-dev-guide.md` §4
+- 新建插件：暂无脚手架包（`packages/plugin-cli` 属待办），照抄 `plugins/totp` / `plugins/host-manager` 最快；配置模板见 `docs/plugin-dev-guide.md` §4
 
 ---
 
@@ -737,7 +737,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 ### M2 — 脚本运行时 + 第一个官方插件（1–1.5 周）
 **交付**：`services/exec.ts`（worker_threads）+ `plugins/app-launcher`（macOS 扫描 + 启动）。
 **验收**：
-- **`hosts` 跑通**（含提权脚本的确认提示）
+- **`hosts`（现 `host-manager`）跑通**（含提权脚本的确认提示）
 - `app-launcher` 能搜到 `/Applications` 下的应用并启动；历史里能出现"最近启动的应用"
 - 脚本超时/异常不拖垮内核
 

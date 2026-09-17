@@ -177,7 +177,7 @@ new Worker('/abs/path/dist/xxx.mjs', { workerData: { command: 'xxx', args: {...}
 - ✅ 通过 `ctx().dataPath` 读写自己的数据目录（`pluginPath` 是只读安装目录）
 - ❌ 不能弹 UI、不能长期驻留（一次性执行，`done()` 后结束）
 - ⚠️ 能力越强越要自己收紧：本项目 `read-image` 只做「扫描白名单目录 + 扩展名白名单 + 文件头魔数校验 + 单文件 20MB 上限」
-- ⚠️ 需要改系统文件（如 hosts）时：**目标路径绝不能来自调用方入参**，只认平台默认路径 —— 否则「能提权写文件」的脚本就成了任意文件写入的跳板；提权一律走系统自带对话框（macOS `osascript … with administrator privileges`、Windows `-Verb RunAs`、Linux `pkexec`），并且**写前备份、写后回读逐字节校验**，提权不可用时回落到「把待生效内容落盘 + 给用户一条可复制的命令」。完整范例见 `plugins/hosts/src/no-view/_hosts-file.ts`
+- ⚠️ 需要改系统文件（如 hosts）时：**目标路径绝不能来自调用方入参**，只认平台默认路径 —— 否则「能提权写文件」的脚本就成了任意文件写入的跳板；提权一律走系统自带对话框（macOS `osascript … with administrator privileges`、Windows `-Verb RunAs`、Linux `pkexec`），并且**写前备份、写后回读逐字节校验**，提权不可用时回落到「把待生效内容落盘 + 给用户一条可复制的命令」。完整范例见 `plugins/host-manager/src/no-view/_hosts-file.ts`（它更进一步：调用方给的是**托管区文本**，写的一刻才读盘、只换标记之间那一段，区外那些行一个字节都不动）
 
 ---
 
@@ -407,9 +407,9 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **现象**：插件里有 `hosts-read.ts` 和 `hosts-write.ts` 两个入口，构建后 `dist/` 里除两个 `.mjs` 之外还多出 `dist/assets/_hosts-file-xxx.mjs`，入口文件里只剩一条 `import './assets/…'`。
 - **原因**：Rollup 在多入口模式下，**被两个入口共用的模块必须提取成共享 chunk**（否则就得把同一份代码复制两份，Rollup 不做这件事）。`output.manualChunks: undefined` 也拦不住，它不是用户配置能改的默认行为。
 - **风险**：宿主只把 `dist/<name>.mjs` 当 Worker 入口拉起。这条跨文件相对 import 一旦因为「用户只拷了单个 `.mjs`」「打包时漏了 `assets/`」「宿主换了加载方式」而断掉，命令直接失效——而且报错发生在宿主侧，插件里根本看不见。单入口插件（只一个 script 命令）不会触发，所以很容易到第二个入口才踩到。
-- **对策**：**逐入口各跑一次构建**，每个产物自包含。本仓库做法（`plugins/hosts`）：
+- **对策**：**逐入口各跑一次构建**，每个产物自包含。本仓库做法（`plugins/host-manager`）：
   - `vite.worker.config.ts` 用 `build.lib.entry` 指向**单个**入口，输出名由 `fileName` 固定，入口由环境变量 `PLUGIN_WORKER_ENTRY` 选择；
-  - `plugins/hosts/scripts/build-no-view.mjs` 扫一遍 `src/no-view/*.ts`，逐个 `execFileSync(vite, ['build', '--config', 'vite.worker.config.ts'])`，每次带上不同的环境变量；
+  - `plugins/host-manager/scripts/build-no-view.mjs` 扫一遍 `src/no-view/*.ts`，逐个 `execFileSync(vite, ['build', '--config', 'vite.worker.config.ts'])`，每次带上不同的环境变量；
   - `package.json` 的 `build` 末段改成 `node scripts/build-no-view.mjs`。
 - **顺带**：Vite 的 `defineConfig` **不接受配置数组**，CLI 会直接报 `config must export or return an object`，所以「多配置」只能自己在脚本里循环调用。
 
@@ -459,7 +459,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - API 权威定义：`packages/plugin-api/src/index.ts`（UI 侧）、`packages/plugin-api-node/src/index.ts`（脚本侧）
 - 现有范例：
   - `plugins/totp` —— view + script + 对话框 + 口令加密（`src/core/vault.ts`）
-  - `plugins/hosts` —— 提权写系统文件、写前备份 + 写后回读校验
+  - `plugins/host-manager` —— 提权写系统文件、只换自己的托管区、写前备份 + 写后回读校验
   - `plugins/text-diff` —— Web Worker 计算 + 主线程降级 + 虚拟滚动
   - `plugins/json-tools` —— 手写词法扫描（不丢数字精度）+ 树视图
-- 本仓库四个真实插件：`plugins/totp`（含 script 命令）、`plugins/text-diff`（Worker + 虚拟滚动）、`plugins/json-tools`（无损解析 + 树视图）、`plugins/hosts`（读盘 + 提权写入 + 无损回写）
+- 本仓库四个真实插件：`plugins/totp`（含 script 命令）、`plugins/text-diff`（Worker + 虚拟滚动）、`plugins/json-tools`（无损解析 + 树视图）、`plugins/host-manager`（读盘 + 提权写入 + 托管区无损回写）

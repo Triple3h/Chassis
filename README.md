@@ -13,7 +13,7 @@
 - **唤出** —— 默认热键 `⌥Space`（被占用会自动回退并提示实际生效的键）；托盘左键唤出 / 隐藏；单实例；失焦或 `Esc` 隐藏。
 - **搜索** —— 拼音 / 首字母 / 模糊匹配，多插件结果合并后按「匹配 + 最近使用 + 频率」打分；已固定与最近使用可参与搜索。
 - **图标网格** —— 分区（已固定 / 最近使用 / 最佳匹配）可折叠，列数按窗口宽度计算；键盘全网格导航、动作菜单、二级面板、固定项拖拽重排。
-- **开箱可用** —— 应用启动、Spotlight 文件搜索、网址直达、TOTP、hosts 管家、文本比对、JSON 工具箱、设置与插件管理。
+- **开箱可用** —— 应用启动、Spotlight 文件搜索、网址直达、TOTP、Hosts 块管家、文本比对、JSON 工具箱、设置与插件管理。
 - **可扩展** —— 插件 = 一个目录（`package.json` 清单 + 可选 iframe 页面 + 可选 Node 脚本）；从文件夹或 zip 安装，用到的能力必须在清单里声明。
 - **可审计** —— 插件 → 宿主的每次调用走统一入口并落本地审计日志；未声明的 capability 在装配期就不挂载。
 
@@ -102,7 +102,7 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run / tauri dev）
 | `web-open` | `web`（script，贡献型） | esbuild |
 | `internal-settings` | `settings` + `manage`（view） | esbuild |
 | `totp` | `totp`（view）+ `read-image`（script） | Vite + Vue |
-| `hosts` | `hosts`（view）+ `hosts-read` / `hosts-write`（script） | Vite + Vue |
+| `host-manager` | `hosts`（view）+ `hosts-read` / `hosts-write`（script） | Vite + Vue |
 | `text-diff` | `diff`（view） | Vite + Vue |
 | `json-tools` | `json`（view） | Vite + Vue |
 

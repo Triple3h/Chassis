@@ -10,7 +10,7 @@
 | `web-open` | `web`（script，贡献型） | esbuild |
 | `internal-settings` | `settings` + `manage`（view） | esbuild |
 | `totp` | `totp`（view） + `read-image`（script） | Vite + Vue |
-| `hosts` | `hosts`（view） + `hosts-read` / `hosts-write`（script） | Vite + Vue |
+| `host-manager` | `hosts`（view） + `hosts-read` / `hosts-write`（script） | Vite + Vue |
 | `text-diff` | `diff`（view） | Vite + Vue |
 | `json-tools` | `json`（view） | Vite + Vue |
 
@@ -26,8 +26,9 @@
 
 > 4 个 Vue 插件 2026-09-16 搬进本目录：与内置插件同出厂流程，
 > 但保留自己的 Vite + Vue 工具链，并直连底座 SDK（`@launcher/api` / `@launcher/api-node`）。
-> 插件 id 简化为 `totp` / `hosts` / `text-diff` / `json-tools`，旧数据目录由内核首次加载时接手
-> （映射见 `apps/kernel/src/plugin.ts` 的 `LEGACY_PLUGIN_IDS`）。
+> 插件 id 简化为 `totp` / `text-diff` / `json-tools`；hosts 后来改名为 `host-manager`。
+> 旧数据目录与历史 / 固定项由内核首次加载时接手，**改名链**（`sofast-hosts` → `hosts` → `host-manager`）
+> 见 `apps/kernel/src/legacy.ts` 的 `RENAME_CHAINS`。
 
 ## 目录
 
@@ -123,7 +124,7 @@ CSP 或老 WebView 下 Worker 可能创建失败，降级分支不是可选项�
 - **可变数据只写 `ctx().dataPath`**（N2）；`pluginPath` 只许读。
 - 清单**必须**带 `apiVersion: "1"` 与 `capabilities`（只声明真正用到的）。
 - `commands[].name` 对 `no-view`/`script` 必须等于 `dist/<name>.mjs`。
-- 有**多个** script 入口时**逐入口各构建一次**（`hosts/scripts/build-no-view.mjs`）：Rollup 多入口会把
+- 有**多个** script 入口时**逐入口各构建一次**（`host-manager/scripts/build-no-view.mjs`）：Rollup 多入口会把
   共用模块拆成 `dist/assets/*.mjs`，入口里只剩一条相对 import，宿主只认 `dist/<name>.mjs`。
   构建后 `grep -h '^import' dist/*.mjs` 应只见 `node:*` 与 `worker_threads`。
 - `vite.config.ts` 必须 `base: './'`，**不要开 `manualChunks`**。
@@ -131,7 +132,7 @@ CSP 或老 WebView 下 Worker 可能创建失败，降级分支不是可选项�
   `pluginAliases(root)` 只为 `vue` 去重（保证 SFC 与插件代码共用一个运行时），`devFsAllow(root)` 让 dev server 能读 `packages/ui`。
 - Tailwind v4 不会跨界扫描：每个插件的 `src/styles/app.css` 要用 `@source` 显式声明插件 `src` 与 `../../packages/ui` 两个范围。
 - 可能超 200 行的列表用虚拟滚动（`@launcher/ui/virtual`）；敏感数据（密钥、验证码）默认不落明文。
-- 危险操作（写系统文件 / 提权）**不接受调用方传入的目标路径**（参考 `hosts/src/no-view/_hosts-file.ts`）。
+- 危险操作（写系统文件 / 提权）**不接受调用方传入的目标路径**（参考 `host-manager/src/no-view/_hosts-file.ts`）。
 
 ## 知识资产
 
@@ -146,4 +147,4 @@ CSP 或老 WebView 下 Worker 可能创建失败，降级分支不是可选项�
 - 这里的「预置」指**出厂预装**，用户仍可在设置里禁用/卸载；只有 `internal-*` 不可卸载。
 - 插件不享受底座内部特权：`ctx.settings` 只注入 `internal-*` 插件。
 - 规范真源在仓库根的 `docs/plugin-spec.md`；`spec-check` 是它 §13 检查清单的可执行化。
-- **hosts 旧备份未迁移**：历史版本把备份放在安装目录的 `data/backups`；只有「手工把旧插件目录拷进底座」才会两者共存 —— 旧备份仍留在磁盘、不再列出。迁移涉及可提权写路径，留待单独处理。
+- **host-manager 旧备份未迁移**：历史版本把备份放在安装目录的 `data/backups`；只有「手工把旧插件目录拷进底座」才会两者共存 —— 旧备份仍留在磁盘、不再列出。迁移涉及可提权写路径，留待单独处理。

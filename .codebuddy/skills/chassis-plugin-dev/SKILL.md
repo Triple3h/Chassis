@@ -1,6 +1,6 @@
 ---
 name: chassis-plugin-dev
-description: 开发、修改、构建或发布本仓库的 Vue 插件（plugins/{totp,hosts,text-diff,json-tools}）时使用。触发场景：新建一个 Vue 插件、增删 commands 清单、实现 view/no-view/script 命令、用 exec.run 调用脚本、把产物装进 extensions 目录、排查插件白屏或宿主 API 报错。关键词：插件、extension、commands、exec.run、extensions 目录、Vite + Vue。
+description: 开发、修改、构建或发布本仓库的 Vue 插件（plugins/{totp,host-manager,text-diff,json-tools}）时使用。触发场景：新建一个 Vue 插件、增删 commands 清单、实现 view/no-view/script 命令、用 exec.run 调用脚本、把产物装进 extensions 目录、排查插件白屏或宿主 API 报错。关键词：插件、extension、commands、exec.run、extensions 目录、Vite + Vue。
 allowed-tools:
 disable: false
 ---
