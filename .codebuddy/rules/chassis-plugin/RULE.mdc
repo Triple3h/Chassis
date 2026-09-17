@@ -41,6 +41,7 @@ provider:
 - 表单控件写 `class="launcher-input"`（背景 / 边框 / focus 环跟着主题与主题色走）。
 - **下拉框用 `@launcher/ui/UiSelect.vue`，不要写原生 `<select>`**：它的弹出菜单由 macOS 系统（NSMenu）绘制，不跟主题、不跟主题色。用法 `:model-value` + `@update:model-value`（`v-model` 可，数字字段自己 `Number()` 转）。
 - 弹窗用 `@launcher/ui/UiDialog.vue`（自带遮罩 / Esc 关闭 / 进场），别自己叠一层。
+- 主题色派生的**半透明填充不要写 `color-mix`**：构建器（Lightning CSS）会把它拆成「实色兜底 + 真值」两条规则，实色兜底在老一点的 WebKit 上会把整块面刷成纯色（选中卡片直接变纯蓝）。写法：插件自己的 `:root` / `[data-theme='dark']` 里定义 rgba 令牌（参考 `plugins/totp/src/styles/app.css` 的 `--totp-*`），色值取自 `theme.css` 的 `--launcher-accent` / `--launcher-success`。
 
 ## 性能
 

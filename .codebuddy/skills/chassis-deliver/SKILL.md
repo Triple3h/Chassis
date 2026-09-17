@@ -33,6 +33,9 @@ disable: false
 - 改插件页 / 宿主边界：起静态服务器打开生产 `dist/` 实机点一遍（`python3 -m http.server 5233 --directory dist`），**别只信 dev server**（生产资源路径不同）。
 - 改 shell / 窗口行为：必须 `pnpm app:local` 打包实机验证（dev 模式跑不出窗口显隐与系统权限的真实行为）。
 - 改 UI / 主题：截图核对（agent-browser 或手动），明暗两套主题 + 主题色各看一眼。
+- **插件页（iframe）内部的验证走 CDP**：跨源 iframe 用不了 DOM 选择器 / `get box`。`agent-browser get cdp-url` 拿 browser ws → `curl <host>/json/list` 找页面 target → 连上 `Runtime.enable`，插件 iframe 是**同进程、不会单独出 target**，要从 `executionContextCreated` 里按 origin 挑上下文，再用 `Runtime.evaluate` + `contextId` 读真实计算样式 / DOM / 触发 `el.click()`（Node 22+ 自带全局 `WebSocket`，写十几行即可）。
+- **`agent-browser screenshot` 抓不到 CSS 动画**（定格/禁用，表现为「倒计时环、呼吸动画没在跑」的假象）。验证动画是否真在跑：CDP `Page.captureScreenshot` 连抓两帧（间隔 0.3–0.5s）比像素差。
+- **别凭观感读截图**：明暗与配色一律像素取样（`sips -s format bmp x.png --out x.bmp` → python 直读 24/32bpp BMP，注意 `h<0` 表示行自顶向下、每行 4 字节对齐）。观感会把深色页面看成浅色、把已经渲染的描边看成没渲染。
 
 ## 第 3 步：提交（用户要求「分批提交」）
 
