@@ -36,34 +36,35 @@ await fsp.writeFile(
   ),
 )
 await fsp.writeFile(path.join(source, 'dist', 'index.html'), '<!doctype html><title>alias</title>')
-await h.kernel.plugins.installFromDirectory(source, { overwrite: true })
-assertEqual(h.kernel.plugins.get('alias-demo')?.state, 'active', '示例插件应当装配成功')
+const installed = await h.pluginAction('installDir', { path: source, overwrite: true })
+assert(installed.ok, `安装应当成功：${JSON.stringify(installed.error ?? {})}`)
+assertEqual((await h.plugin('alias-demo'))?.state, 'active', '示例插件应当装配成功')
 
 const search = (query: string) =>
-  h.api<{ groups: { best: Array<{ pluginId: string }> } }>('/api/search', {
+  h.api<{ groups: { best: Array<{ pluginId: string; item: { title: string } }> } }>('/api/search', {
     method: 'POST',
     body: JSON.stringify({ query }),
   })
 
-const action = (payload: Record<string, unknown>) =>
-  h.api<{ ok: boolean; plugins: PluginInfo[] }>('/api/plugins/action', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+const action = (payload: Record<string, unknown>) => h.pluginAction(payload.action as string, payload)
 
 const infoOf = async (): Promise<PluginInfo> => {
-  const listed = await h.api<{ plugins: PluginInfo[] }>('/api/plugins')
-  const record = listed.plugins.find((plugin) => plugin.id === 'alias-demo')
+  const record = (await h.plugin('alias-demo')) as unknown as PluginInfo | undefined
   assert(record, '插件应当在列表里')
   return record
 }
 
 const hit = async (query: string): Promise<boolean> =>
-  (await search(query)).groups.best.some((item) => item.pluginId === 'alias-demo')
+  (await search(query)).groups.best.some((entry) => entry.pluginId === 'alias-demo')
 
 test('起点：中文标题搜英文名搜不到（zhaohui）', async () => {
   assertEqual(await hit('totp'), false, '清单里没有 totp 别名时不应命中')
-  assertEqual(await hit('shuangchong'), true, '中文标题的拼音本该命中（对照组）')
+  // 对照组同时守多音字：**每个读音都进索引**（R1 校准，见 apps/kernel/src/pinyin.rs）——
+  // 「重」在逐字词典里首选 zhong，词组读音 chong 由变体补齐，两个都该搜得到
+  assertEqual(await hit('shuang'), true, '中文标题的拼音前缀本该命中')
+  assertEqual(await hit('shuangchong'), true, '多音字读音之一（chong）应当命中')
+  assertEqual(await hit('shuangzhong'), true, '首选读音（zhong）同样命中')
+  assertEqual(await hit('scyzm'), true, '首字母变体（c）应当命中')
   const info = await infoOf()
   assertDeepEqual(info.keywords, [])
   assertEqual(info.keywordsCustomized, false)
@@ -72,12 +73,12 @@ test('起点：中文标题搜英文名搜不到（zhaohui）', async () => {
 test('编辑插件级别名：搜索立刻生效，不用重载插件', async () => {
   const result = await action({ action: 'setKeywords', id: 'alias-demo', keywords: ['totp', '验证码'] })
   assert(result.ok, '写入应当成功')
-  const info = result.plugins.find((plugin) => plugin.id === 'alias-demo')
-  assertDeepEqual(info?.keywords, ['totp', '验证码'], 'action 应当回传新的插件列表')
-  assertEqual(info?.keywordsCustomized, true)
+  const listed = (result.plugins as PluginInfo[]).find((plugin) => plugin.id === 'alias-demo')
+  assertDeepEqual(listed?.keywords, ['totp', '验证码'], 'action 应当回传新的插件列表')
+  assertEqual(listed?.keywordsCustomized, true)
 
   assertEqual(await hit('totp'), true, '插件级别名应当作用于入口命令')
-  assertEqual(h.kernel.plugins.get('alias-demo')?.state, 'active', '不重载插件即可生效')
+  assertEqual((await h.plugin('alias-demo'))?.state, 'active', '不重载插件即可生效')
 })
 
 test('命令级别名单独生效，界面拿到的仍是「命令自己」的别名', async () => {
@@ -107,18 +108,16 @@ test('恢复默认：删掉覆盖后回到清单原值', async () => {
 
 test('覆盖落盘：重启内核后别名仍在', async () => {
   await action({ action: 'setKeywords', id: 'alias-demo', keywords: ['totp'] })
-  const overrides = await fsp.readFile(path.join(h.dataRoot, 'plugin-overrides.json'), 'utf8')
-  assert(overrides.includes('totp'), `覆盖层应当落盘：${overrides}`)
+  const overrides = await h.readData<Record<string, { keywords?: string[] }>>('plugin-overrides.json')
+  assertDeepEqual(overrides['alias-demo']?.keywords, ['totp'], `覆盖层应当落盘：${JSON.stringify(overrides)}`)
 
   await action({ action: 'resetKeywords', id: 'alias-demo' })
   await action({ action: 'resetKeywords', id: 'alias-demo', command: 'verify' })
 })
 
 test('未知插件 / 未知命令：拒绝而不是静默写入', async () => {
-  await h.api('/api/plugins/action', {
-    method: 'POST',
-    body: JSON.stringify({ action: 'setKeywords', id: 'not-installed', keywords: ['x'] }),
-  }).catch(() => undefined)
+  const bad = await h.pluginAction('setKeywords', { id: 'not-installed', keywords: ['x'] })
+  assertEqual(bad.ok, false, '未知插件应当被拒')
   const info = await infoOf()
   assertEqual(info.keywordsCustomized, false, '无效请求不应改动任何东西')
 })

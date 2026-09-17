@@ -6,7 +6,7 @@
  * 一次 `ctx.storage.get` 落 **2 条**同 method / 同能力的记录，而审计环形缓冲只有 500 条
  * ⇒ 可追溯窗口被砍半，设置页审计列表成对重复。
  *
- * 现在的分工（见 bridge.ts 的 `SELF_AUDITED_PREFIXES`）：
+ * 现在的分工（见 `apps/kernel/src/bridge.rs` 的 `SELF_AUDITED`）：
  * - 自带审计的服务：成功路径**恰好 1 条**（服务层那一条）；
  * - 其余方法（host / commands / searchResult / exec / settings / log）：**恰好 1 条**（桥那一条）；
  * - 失败路径：**至少 1 条**，允许 2 条 —— 参数 / 能力校验可能发生在服务层记录之前，
@@ -21,9 +21,9 @@ const h = await createHarness({ fixtures: ['echo-plugin'], label: 'bridge-audit'
 
 /** 跑一次桥调用，返回它新增的审计条数 */
 async function auditCount(fn: () => Promise<unknown>): Promise<number> {
-  const before = h.kernel.audit.query({ limit: 500 }).length
+  const before = (await h.audit(500)).length
   await fn()
-  return h.kernel.audit.query({ limit: 500 }).length - before
+  return (await h.audit(500)).length - before
 }
 
 test('自带审计的服务：成功路径恰好一条（不双记）', async () => {

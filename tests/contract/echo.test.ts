@@ -1,17 +1,21 @@
 /**
  * 契约测试（requirements §11 / plugin-spec §14）：
  * 用真 HTTP listener 覆盖 §8.6 全表，含未授权路径与 token 校验。
+ *
+ * fixture 是 Rust 版本（v2）：逻辑层产物 = SDK 的 echo 示例二进制（`tests/helpers/fixtures.ts` 负责铺）。
  */
 import { assert, assertEqual, run, test } from '../helpers/assert'
 import { createHarness } from '../helpers/harness'
+import { materializeEchoPlugin } from '../helpers/fixtures'
 
+await materializeEchoPlugin()
 const h = await createHarness({ fixtures: ['echo-plugin'], label: 'contract' })
 
-test('echo-plugin 加载成功且清单命令全部注册', () => {
-  const plugin = h.kernel.plugins.get('echo-plugin')
+test('echo-plugin 加载成功且清单命令全部注册', async () => {
+  const plugin = await h.plugin('echo-plugin')
   assert(plugin, '插件应当被发现')
-  assertEqual(plugin?.state, 'active', plugin?.error ?? '')
-  const commands = h.kernel.registry.byPlugin('echo-plugin').map((c) => c.decl.name).sort()
+  assertEqual(plugin?.state, 'active', JSON.stringify(plugin?.error ?? ''))
+  const commands = ((plugin?.commands ?? []) as Array<{ name: string }>).map((item) => item.name).sort()
   assertEqual(commands.join(','), 'compute,echo,feed,job')
 })
 
@@ -65,41 +69,58 @@ test('token 与会话校验：错误 token / 未知 sid / 未知方法', async (
   const unknown = await h.bridge(sid, token, 'ctx.nope.nothing')
   assertEqual(unknown.error?.code, 'NOT_FOUND')
 
-  // 未声明的能力走同一入口时给出 CAPABILITY_DENIED（方法存在但被拒的场景）
-  const audit = h.kernel.audit.query({ pluginId: 'echo-plugin', limit: 100 })
-  assert(audit.some((r) => r.method === 'ctx.host.info' && r.ok), '成功调用应当有审计记录')
-  assert(audit.some((r) => !r.ok), '失败调用应当有审计记录')
+  const audit = (await h.audit(100)).filter((row) => row.pluginId === 'echo-plugin')
+  assert(audit.some((row) => row.method === 'ctx.host.info' && row.ok), '成功调用应当有审计记录')
+  assert(audit.some((row) => !row.ok), '失败调用应当有审计记录')
 })
 
-test('结果项契约：searchResult.set 进入当前搜索槽', async () => {
+test('结果项契约：带 token 的注入被接受，非法形状被拒', async () => {
   const { sid, token } = await h.openSession('echo-plugin', 'echo')
-  h.kernel.hub.setCurrent(999)
-  h.kernel.hub.open(999, 'q')
+  const search = await h.api<{ token: number }>('/api/search', { method: 'POST', body: JSON.stringify({ query: 'contract' }) })
+
   const res = await h.bridge(sid, token, 'ctx.searchResult.set', {
     items: [{ id: 'x', title: '注入结果', action: { type: 'command', command: 'job' } }],
-    token: 999,
+    token: search.token,
   })
   assert(res.ok, `set 失败：${JSON.stringify(res.error)}`)
-  const slot = h.kernel.hub.results(999)
-  assertEqual(slot.get('echo-plugin')?.length, 1)
+
+  // 槽位本身只对内核可见（v1/v2 都是「落槽 + 参与下次 compose」）；这里守写入的校验面
+  const bad = await h.bridge(sid, token, 'ctx.searchResult.set', { items: 'not-an-array', token: search.token })
+  assertEqual(bad.ok, false, '非法 items 必须被拒')
+  assertEqual(bad.error?.code, 'BAD_ARGS')
 })
 
 test('贡献型搜索：script 搜索源返回结果并被内核采纳', async () => {
-  const response = await h.kernel.search.search('contract')
-  const titles = response.groups.best.map((item) => item.item.title)
+  const response = await h.api<{ groups: { best: Array<{ item: { title: string } }> } }>('/api/search', {
+    method: 'POST',
+    body: JSON.stringify({ query: 'contract' }),
+  })
+  const titles = response.groups.best.map((entry) => entry.item.title)
   assert(titles.some((title) => title === 'echo: contract'), `未采纳 feed 结果：${titles.join(' | ')}`)
 })
 
-test('禁用插件：命令撤回、监听器关闭、worker 回收', async () => {
-  const { sid } = await h.openSession('echo-plugin', 'echo')
-  await h.kernel.plugins.setDisabled('echo-plugin', true)
-  assertEqual(h.kernel.plugins.get('echo-plugin')?.state, 'disabled')
-  assertEqual(h.kernel.registry.byPlugin('echo-plugin').length, 0, '命令应全部撤回')
-  assertEqual(h.kernel.sessions.get(sid), undefined, '会话应被关闭')
+test('禁用插件：命令撤回（搜不到）、会话失效、启用后恢复', async () => {
+  const searchable = async (): Promise<boolean> => {
+    const res = await h.api<{ groups: { best: Array<{ pluginId: string }> } }>('/api/search', {
+      method: 'POST',
+      body: JSON.stringify({ query: '契约自检' }),
+    })
+    return res.groups.best.some((entry) => entry.pluginId === 'echo-plugin')
+  }
 
-  await h.kernel.plugins.setDisabled('echo-plugin', false)
-  assertEqual(h.kernel.plugins.get('echo-plugin')?.state, 'active')
-  assertEqual(h.kernel.registry.byPlugin('echo-plugin').length, 4, '启用后命令应恢复')
+  const { sid, token } = await h.openSession('echo-plugin', 'echo')
+  assertEqual(await searchable(), true, '启用状态下命令应当能搜到')
+
+  await h.pluginAction('disable', { id: 'echo-plugin' })
+  assertEqual((await h.plugin('echo-plugin'))?.state, 'disabled')
+  assertEqual(await searchable(), false, '命令应全部撤回（搜索结果里不再出现）')
+  const stale = await h.bridge(sid, token, 'ctx.host.info')
+  assertEqual(stale.ok, false, '会话应被关闭')
+  assertEqual(stale.error?.code, 'SESSION_INVALID')
+
+  await h.pluginAction('enable', { id: 'echo-plugin' })
+  assertEqual((await h.plugin('echo-plugin'))?.state, 'active')
+  assertEqual(await searchable(), true, '启用后命令应恢复')
 })
 
 const failed = await run('契约测试（echo-plugin）')

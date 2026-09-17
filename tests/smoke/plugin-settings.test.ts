@@ -1,11 +1,15 @@
 /**
  * 插件设置（清单 `settings` 声明）的端到端等价物 —— 设置页「插件设置」调用的同一条 pluginAction：
- * 改值 → 落盘 `plugin-settings.json` → 重载插件 → script worker 用新值（`ctx().settings` 的来源）。
+ * 改值 → 落盘 `plugin-settings.json` → 重载插件 → 逻辑层子进程用新值（`ctx.settings` 的来源）。
+ *
+ * 逻辑层产物用 SDK 的 echo 示例二进制（`probe` 命令：把宿主注入的 settings 原样写进结果项标题），
+ * 这样「注入通道」是被真正走了一遍，而不是断言内核内部状态。
  */
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { assert, assertEqual, run, test } from '../helpers/assert'
 import { createHarness } from '../helpers/harness'
+import { installEchoBinaries } from '../helpers/fixtures'
 
 interface SettingInfo {
   key: string
@@ -33,7 +37,7 @@ await fsp.writeFile(
       title: '设置示例',
       version: '1.0.0',
       type: 'module',
-      apiVersion: '1',
+      apiVersion: '2',
       capabilities: [],
       commands: [{ name: 'probe', title: '探测设置', mode: 'script', contributes: true }],
       settings: [
@@ -55,40 +59,15 @@ await fsp.writeFile(
     2,
   ),
 )
-// 手写最小 worker 产物（不依赖 SDK）：把宿主注入的 settings 原样回显成结果项标题，
-// 这样「注入通道」是被真正走了一遍，而不是断言内核内部状态。
-await fsp.writeFile(
-  path.join(source, 'dist', 'probe.mjs'),
-  [
-    "import { parentPort, workerData } from 'node:worker_threads'",
-    'parentPort.on("message", (msg) => {',
-    '  if (!msg || msg.type !== "query") return',
-    '  const settings = workerData.settings ?? {}',
-    '  parentPort.postMessage({',
-    '    type: "result",',
-    '    token: msg.token,',
-    '    data: [{',
-    '      id: "probe",',
-    '      title: `engine=${settings.engine}|flag=${settings.flag}|note=${settings.note}`,',
-    '      action: { type: "copy", text: "probe" },',
-    '    }],',
-    '  })',
-    '})',
-    '',
-  ].join('\n'),
-)
-await h.kernel.plugins.installFromDirectory(source, { overwrite: true })
-assertEqual(h.kernel.plugins.get('settings-demo')?.state, 'active', '示例插件应当装配成功')
+await installEchoBinaries(source, ['probe'])
+const installed = await h.pluginAction('installDir', { path: source, overwrite: true })
+assert(installed.ok, `安装应当成功：${JSON.stringify(installed.error ?? {})}`)
+assertEqual((await h.plugin('settings-demo'))?.state, 'active', '示例插件应当装配成功')
 
-const action = (payload: Record<string, unknown>) =>
-  h.api<{ ok: boolean; plugins?: PluginInfo[]; error?: { code: string; message: string } }>('/api/plugins/action', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+const action = (payload: Record<string, unknown>) => h.pluginAction(payload.action as string, payload)
 
 const infoOf = async (): Promise<PluginInfo> => {
-  const listed = await h.api<{ plugins: PluginInfo[] }>('/api/plugins')
-  const record = listed.plugins.find((plugin) => plugin.id === 'settings-demo')
+  const record = (await h.plugin('settings-demo')) as unknown as PluginInfo | undefined
   assert(record, '插件应当在列表里')
   return record
 }
@@ -99,7 +78,7 @@ const settingOf = (info: PluginInfo, key: string): SettingInfo => {
   return setting
 }
 
-/** 贡献型 worker 冷启动可能超一次搜索预算：重试到命中为止（最多约 1.5s） */
+/** 贡献型来源冷启动可能超一次搜索预算：重试到命中为止（最多约 1.5s） */
 async function probeTitle(): Promise<string> {
   for (let i = 0; i < 15; i += 1) {
     const res = await h.api<{ groups: { best: Array<{ item: { title: string } }> } }>('/api/search', {
@@ -113,7 +92,7 @@ async function probeTitle(): Promise<string> {
   throw new Error('搜索始终没有命中 settings-demo 的结果项')
 }
 
-test('默认值随 worker 启动注入（三类设置项都在）', async () => {
+test('默认值随子进程启动注入（三类设置项都在）', async () => {
   assertEqual(await probeTitle(), 'engine=alpha|flag=false|note=hi')
   const info = await infoOf()
   assertEqual(settingOf(info, 'engine').value, 'alpha')
@@ -122,18 +101,15 @@ test('默认值随 worker 启动注入（三类设置项都在）', async () => 
   assertEqual(settingOf(info, 'note').value, 'hi')
 })
 
-test('改设置：值落盘 + 重载后 worker 读到新值', async () => {
+test('改设置：值落盘 + 重载后子进程读到新值', async () => {
   const result = await action({ action: 'setSetting', id: 'settings-demo', key: 'engine', value: 'beta' })
   assert(result.ok, '写入应当成功')
-  const updated = result.plugins?.find((plugin) => plugin.id === 'settings-demo')
+  const updated = (result.plugins as PluginInfo[] | undefined)?.find((plugin) => plugin.id === 'settings-demo')
   assertEqual(settingOf(updated as PluginInfo, 'engine').value, 'beta')
   assertEqual(settingOf(updated as PluginInfo, 'engine').customized, true)
 
-  assertEqual(await probeTitle(), 'engine=beta|flag=false|note=hi', '重载后的 worker 应当拿到新值')
-  const file = JSON.parse(await fsp.readFile(path.join(h.dataRoot, 'plugin-settings.json'), 'utf8')) as Record<
-    string,
-    Record<string, unknown>
-  >
+  assertEqual(await probeTitle(), 'engine=beta|flag=false|note=hi', '重载后的插件应当拿到新值')
+  const file = await h.readData<Record<string, Record<string, unknown>>>('plugin-settings.json')
   assertEqual(file['settings-demo']?.engine, 'beta', '用户值应当落盘到 plugin-settings.json')
 })
 
@@ -170,11 +146,9 @@ test('恢复默认：删掉用户值，回落清单 default', async () => {
 
 test('卸载插件时清掉它的设置（重装不背旧值）', async () => {
   await action({ action: 'setSetting', id: 'settings-demo', key: 'engine', value: 'beta' })
-  await h.kernel.plugins.uninstall('settings-demo')
-  const file = JSON.parse(await fsp.readFile(path.join(h.dataRoot, 'plugin-settings.json'), 'utf8')) as Record<
-    string,
-    unknown
-  >
+  const removed = await h.pluginAction('uninstall', { id: 'settings-demo' })
+  assertEqual(removed.ok, true, `卸载应当成功：${JSON.stringify(removed.error ?? {})}`)
+  const file = await h.readData<Record<string, unknown>>('plugin-settings.json')
   assertEqual(file['settings-demo'], undefined, '卸载后不应还留着设置项')
 })
 

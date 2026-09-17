@@ -82,8 +82,7 @@ test('没改过名的插件历史项不受影响；迁移结果落盘', async ()
     '未改名的插件条目必须原样保留',
   )
 
-  await h.kernel.history.flush()
-  const raw = JSON.parse(await fsp.readFile(path.join(h.dataRoot, 'history.json'), 'utf8')) as HistoryView
+  const raw = await h.readData<HistoryView>('history.json')
   assert(
     !raw.items.some((item) => item.pluginId === 'sofast-hosts' || item.pluginId === 'hosts'),
     '迁移结果应当落盘，不该每次启动重来',

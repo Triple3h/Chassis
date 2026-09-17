@@ -4,30 +4,17 @@
  * 守三件事：
  *  - **清洗**：记忆值是要落盘、下次唤出直接拿来设窗口的 —— 半个尺寸、负数、脏结构
  *    必须在入口被丢掉（留一个脏数字 ⇒ 下次唤出窗口变成一个诡异尺寸，而用户不知道为什么）；
+ *    （纯函数侧由 `apps/kernel/src/config.rs` 的单测覆盖；这里守它经 HTTP 的落盘行为）
  *  - **两模式互不干扰**：`patchConfig` 是浅合并，UI 每次写回都得把整个对象给全；
  *    少给一个键就等于把另一个模式的记忆悄悄抹掉（用户："我插件页的尺寸怎么没了"）；
  *  - **先钳制再转发**：UI 算错时不能把窗口拉成 5 像素高 —— 发给壳的必须是钳制后的值。
  */
-import { assert, assertDeepEqual, assertEqual, run, test } from '../helpers/assert'
+import { assert, assertEqual, run, test } from '../helpers/assert'
 import { createHarness } from '../helpers/harness'
-import { MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, sanitizeWindowSizes } from '../../apps/kernel/src/config'
 
-test('清洗：半个尺寸 / 越界 / 脏结构一律丢掉那一项', () => {
-  assertDeepEqual(sanitizeWindowSizes(undefined), {}, '空输入 → 空记忆')
-  assertDeepEqual(sanitizeWindowSizes('host'), {}, '不是对象 → 空记忆')
-  assertDeepEqual(sanitizeWindowSizes({ host: { width: 900 } }), {}, '只有宽没有高 ⇒ 丢掉这一项')
-  assertDeepEqual(sanitizeWindowSizes({ host: { width: 900, height: -20 } }), {}, '非法数字 ⇒ 丢掉')
-  assertDeepEqual(sanitizeWindowSizes({ plugin: { width: 100, height: 100 } }), {}, '小于最小尺寸 ⇒ 丢掉')
-
-  const clamped = sanitizeWindowSizes({ host: { width: 99999, height: 99999 } }).host
-  assertEqual(clamped?.width, MAX_WINDOW_WIDTH, '过大 ⇒ 钳到上限')
-  assertEqual(clamped?.height, MAX_WINDOW_HEIGHT, '高度同理')
-
-  const kept = sanitizeWindowSizes({ host: { width: 900, height: 700 } })
-  assertEqual(kept.host?.width, 900, '正常值原样留下')
-  assertEqual(kept.host?.height, 700)
-  assertEqual(kept.plugin, undefined, '没提到的模式不会凭空出现')
-})
+/** 与 `apps/kernel/src/config.rs` 的窗口尺寸常量对齐（合同值，改动会被本用例拦下） */
+const MIN_WINDOW_HEIGHT = 240
+const MAX_WINDOW_WIDTH = 2000
 
 const h = await createHarness({ label: 'window-sizes', fakeShell: true })
 const shell = h.shell
@@ -38,7 +25,7 @@ test('落盘：写一个模式不影响另一个（UI 每次写回都是整个�
     method: 'POST',
     body: JSON.stringify({ windowSizes: { host: { width: 900, height: 700 } } }),
   })
-  assertEqual(h.kernel.config.get().windowSizes.host?.width, 900, '宿主那份应当落盘')
+  assertEqual((await h.config()).windowSizes.host?.width, 900, '宿主那份应当落盘')
 
   await h.api('/api/config', {
     method: 'POST',
@@ -46,7 +33,7 @@ test('落盘：写一个模式不影响另一个（UI 每次写回都是整个�
       windowSizes: { host: { width: 900, height: 700 }, plugin: { width: 1000, height: 800 } },
     }),
   })
-  const sizes = h.kernel.config.get().windowSizes
+  const sizes = (await h.config()).windowSizes
   assertEqual(sizes.host?.height, 700, '写插件那份不该把宿主那份弄丢')
   assertEqual(sizes.plugin?.width, 1000, '插件页那份应当落盘')
 })
@@ -56,7 +43,7 @@ test('恢复默认：清掉某个模式的记忆，另一份保留', async () =>
     method: 'POST',
     body: JSON.stringify({ windowSizes: { plugin: { width: 1000, height: 800 } } }),
   })
-  const sizes = h.kernel.config.get().windowSizes
+  const sizes = (await h.config()).windowSizes
   assertEqual(sizes.host, undefined, '「恢复默认」把宿主那份清掉了')
   assertEqual(sizes.plugin?.width, 1000, '插件页那份不受影响')
 })

@@ -4,6 +4,8 @@
  * 全记下来只会挤满环形缓冲与日志文件、把真正需要追溯的第三方插件记录淹掉。
  *
  * 判定只认出厂声明：第三方插件即便自称 essential 也照常记审计。
+ *
+ * 黑盒形态：插件信息读 `/api/plugins`，审计读 `/api/audit`（按 pluginId 客户端筛）。
  */
 import fsp from 'node:fs/promises'
 import os from 'node:os'
@@ -15,7 +17,6 @@ async function writePlugin(dir: string, manifest: Record<string, unknown>): Prom
   await fsp.mkdir(dir, { recursive: true })
   await fsp.writeFile(path.join(dir, 'package.json'), JSON.stringify(manifest, null, 2))
   await fsp.writeFile(path.join(dir, 'index.html'), '<!doctype html><title>demo</title>')
-  await fsp.writeFile(path.join(dir, 'main.mjs'), 'export const ok = true\n')
 }
 
 const base = {
@@ -48,19 +49,20 @@ const h = await createHarness({
 })
 
 test('基础能力插件：调用照常成功，但不落审计', async () => {
-  assertEqual(h.kernel.plugins.isEssential('core-thing'), true)
+  assertEqual((await h.plugin('core-thing'))?.essential, true, '出厂声明应当被识别')
   const { sid, token } = await h.openSession('core-thing', 'main')
   const stored = await h.bridge(sid, token, 'ctx.storage.set', { key: 'k', value: 1 })
   assertEqual(stored.ok, true, `调用应当成功：${JSON.stringify(stored.error ?? {})}`)
-  assertEqual(h.kernel.audit.query({ pluginId: 'core-thing' }).length, 0, '基础能力的调用不该进审计')
+  const rows = (await h.audit()).filter((row) => row.pluginId === 'core-thing')
+  assertEqual(rows.length, 0, '基础能力的调用不该进审计')
 })
 
 test('第三方插件自称 essential 无效：照常记审计', async () => {
-  assertEqual(h.kernel.plugins.isEssential('fake-core'), false)
+  assertEqual((await h.plugin('fake-core'))?.essential, false)
   const { sid, token } = await h.openSession('fake-core', 'main')
   const stored = await h.bridge(sid, token, 'ctx.storage.set', { key: 'k', value: 1 })
   assertEqual(stored.ok, true)
-  const rows = h.kernel.audit.query({ pluginId: 'fake-core' })
+  const rows = (await h.audit()).filter((row) => row.pluginId === 'fake-core')
   assert(rows.length >= 1, '普通插件的调用必须有审计')
   assertEqual(rows[0]?.method, 'ctx.storage.set')
 })

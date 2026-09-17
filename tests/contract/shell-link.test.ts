@@ -15,13 +15,16 @@
  *   ① 回执一直不来（UI 没了 / SSE 断了）—— 必须有兜底（`HIDE_FALLBACK_MS`）把窗口收掉；
  *   ② 动画还没演完用户又按了热键 —— 排队中的那次隐藏必须自己作废（连迟到的回执也不能把窗口偷走）。
  *
- * 为什么不能像以前那样「隔固定时长落地」：那段时长要同时盖住「IPC + SSE + webview 取事件」
- * 的不可控延迟和 140ms 的淡出，一旦被砍在中间，webview 就把半透明的一帧留成"最后一帧"，
- * 下次唤出先亮它 —— 用户看到「闪一下，像打开了两次」。
+ * 装置形态：假壳 = **真壳那条 stdio JSON-RPC**（子进程 stdin/stdout）；可见性广播经 SSE 观察（UI 那条）。
+ * 注意跨进程时序：**事件是异步到达的**，断言前一律 `waitFor`。
  */
 import { assert, assertEqual, run, test } from '../helpers/assert'
 import { createHarness } from '../helpers/harness'
-import { HIDE_FALLBACK_MS, SELECTION_MAX_CHARS, SHOW_ANIMATION_MS } from '../../apps/kernel/src/kernel'
+
+/** 与 `apps/kernel/src/{window_visibility,kernel}.rs` 对齐的合同值 */
+const HIDE_FALLBACK_MS = 500
+const SHOW_ANIMATION_MS = 80
+const SELECTION_MAX_CHARS = 400
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -29,13 +32,14 @@ const h = await createHarness({ label: 'shell-link', fakeShell: true })
 const shell = h.shell
 if (!shell) throw new Error('fakeShell 未启用')
 
-/** 收一份内核广播出来的可见性序列 */
-function recordVisibility(): { seen: Array<boolean | undefined>; stop: () => void } {
+/** 收一份内核广播出来的可见性序列（SSE，UI 走的同一条路） */
+async function recordVisibility(): Promise<{ seen: Array<boolean | undefined>; stop: () => void }> {
   const seen: Array<boolean | undefined> = []
-  const off = h.kernel.bus.on('shell/visibility', (payload) => {
-    seen.push((payload as { visible?: boolean } | undefined)?.visible)
+  const sub = h.subscribe((event) => {
+    if (event.event === 'shell/visibility') seen.push((event.data as { visible?: boolean } | undefined)?.visible)
   })
-  return { seen, stop: off }
+  await sub.ready
+  return { seen, stop: sub.stop }
 }
 
 test('壳通知 window/toggled(visible) 后，内核不得再自行切换显隐', async () => {
@@ -70,7 +74,7 @@ test('失焦仍是内核的职责：壳通知 window/blurred 时按 hideOnBlur �
 })
 
 test('hideOnBlur=false 时，壳通知失焦也不隐藏', async () => {
-  await h.kernel.config.patch({ hideOnBlur: false })
+  await h.patchConfig({ hideOnBlur: false })
   shell.sent.length = 0
   shell.notify('window/blurred', {})
   await sleep(150)
@@ -80,7 +84,7 @@ test('hideOnBlur=false 时，壳通知失焦也不隐藏', async () => {
 // ── 离场动画：隐藏要「先广播、演完再走」────────────────────────
 
 test('失焦隐藏先广播、等回执；回执之前绝不落地', async () => {
-  await h.kernel.config.patch({ hideOnBlur: true })
+  await h.patchConfig({ hideOnBlur: true })
   shell.sent.length = 0
   shell.notify('window/blurred', {})
   await sleep(150)
@@ -122,15 +126,17 @@ test('回执一直不来时，兜底时长到点也要落地（且只落地一�
 })
 
 test('hide 与 show 都广播可见性（UI 的弹窗动效靠它触发）', async () => {
-  const shown = recordVisibility()
+  const shown = await recordVisibility()
   await h.api('/api/window/show', { method: 'POST' })
+  await h.waitFor(() => shown.seen.length >= 1, 2000, '显示广播')
   shown.stop()
   assertEqual(shown.seen.length, 1, `内核自己唤出窗口也要广播，实际广播了 ${shown.seen.length} 次`)
   assertEqual(shown.seen[0], true, '内核唤出时必须广播 visible=true，否则 UI 会停在透明态')
 
   shell.sent.length = 0
-  const hidden = recordVisibility()
+  const hidden = await recordVisibility()
   await h.api('/api/window/hide', { method: 'POST' })
+  await h.waitFor(() => hidden.seen.length >= 1, 2000, '隐藏广播')
   hidden.stop()
   assertEqual(hidden.seen.length, 1, `隐藏前必须先广播一次，实际 ${hidden.seen.length} 次`)
   assertEqual(hidden.seen[0], false, '隐藏时必须广播 visible=false')
@@ -144,17 +150,17 @@ test('hide 与 show 都广播可见性（UI 的弹窗动效靠它触发）', asy
  * 这条守的是「晚一点广播」，不是具体数值 —— 数值由 SHOW_ANIMATION_MS 决定。
  */
 test('显示广播要等窗口上屏：晚一点才发 visible=true', async () => {
-  const seen = recordVisibility()
+  const { seen, stop } = await recordVisibility()
   shell.notify('window/toggled', { visible: true })
   await sleep(Math.floor(SHOW_ANIMATION_MS / 2))
   assertEqual(
-    seen.seen.length,
+    seen.length,
     0,
-    `窗口还没上屏就不该广播可见（否则入场动画会被吞掉），实际广播了 ${seen.seen.length} 次`,
+    `窗口还没上屏就不该广播可见（否则入场动画会被吞掉），实际广播了 ${seen.length} 次`,
   )
-  await sleep(Math.floor(SHOW_ANIMATION_MS / 2) + 60)
-  seen.stop()
-  assertEqual(seen.seen[seen.seen.length - 1], true, '晚一点必须补上 visible=true')
+  await h.waitFor(() => seen.length >= 1, 1000, '延迟的显示广播')
+  stop()
+  assertEqual(seen[seen.length - 1], true, '晚一点必须补上 visible=true')
 })
 
 test('/api/window/visible 如实回答窗口当前是否可见', async () => {
@@ -194,11 +200,13 @@ test('敲壳唤出失败（壳没连上）时，仍必须广播 visible=true', a
   const bare = await createHarness({ label: 'no-shell-show' })
   try {
     const seen: Array<boolean | undefined> = []
-    const off = bare.kernel.bus.on('shell/visibility', (payload) => {
-      seen.push((payload as { visible?: boolean } | undefined)?.visible)
+    const sub = bare.subscribe((event) => {
+      if (event.event === 'shell/visibility') seen.push((event.data as { visible?: boolean } | undefined)?.visible)
     })
-    await bare.kernel.showWindowAnimated(true).catch(() => undefined)
-    off()
+    await sub.ready
+    await bare.api('/api/window/show', { method: 'POST' }).catch(() => undefined)
+    await bare.waitFor(() => seen.length >= 1, 2000, '敲壳失败后的显示广播')
+    sub.stop()
     assertEqual(seen.length, 1, `敲壳失败也要广播一次，实际广播了 ${seen.length} 次`)
     assertEqual(seen[0], true, '广播必须是 visible=true，否则 UI 会停在透明态')
   } finally {
@@ -220,42 +228,49 @@ test('敲壳唤出失败（壳没连上）时，仍必须广播 visible=true', a
  */
 test('唤出时把选中文本带进搜索框（壳读、内核决定填不填）', async () => {
   const seen: string[] = []
-  const off = h.kernel.bus.on('ui/searchContent', (payload) => {
-    seen.push(String((payload as { value?: string } | undefined)?.value ?? ''))
+  const sub = h.subscribe((event) => {
+    if (event.event === 'ui/searchContent') seen.push(String((event.data as { value?: string } | undefined)?.value ?? ''))
   })
+  await sub.ready
+
+  const clearContent = () => h.api('/api/search', { method: 'POST', body: JSON.stringify({ query: '' }) })
+  const waitForEvent = (count: number) => h.waitFor(() => seen.length >= count, 2000, '搜索框内容广播')
 
   // 热键路径：壳在 window/toggled 里把"上屏之前"读到的选区一起带回来
-  h.kernel.hostUi.state.searchContent = ''
+  await clearContent()
   shell.notify('window/toggled', { visible: true, selection: 'createLogger' })
-  await sleep(SHOW_ANIMATION_MS + 120)
+  await waitForEvent(1)
   assertEqual(seen.length, 1, `应当广播一次搜索框内容，实际 ${seen.length} 次`)
   assertEqual(seen[0], 'createLogger', '选中文本应当被填进搜索框')
 
   // 内核自己唤出的路径（托盘 / `/api/window/show`）：选区来自 window.show 的返回值
   shell.showSelection = 'from-show-result'
-  h.kernel.hostUi.state.searchContent = ''
+  await clearContent()
   seen.length = 0
   await h.api('/api/window/show', { method: 'POST' })
+  await waitForEvent(1)
   assertEqual(seen.length, 1, `window.show 路径也应当带上，实际 ${seen.length} 次`)
   assertEqual(seen[0], 'from-show-result', 'window.show 返回值里的选区同样要带上')
 
   // 搜索框非空 ⇒ 不覆盖（用户已经开始打字）
   shell.showSelection = 'should-not-replace'
-  h.kernel.hostUi.state.searchContent = '用户打了一半'
+  await h.api('/api/search', { method: 'POST', body: JSON.stringify({ query: '用户打了一半' }) })
   seen.length = 0
   await h.api('/api/window/show', { method: 'POST' })
+  await sleep(200)
   assertEqual(seen.length, 0, '搜索框非空时不得覆盖用户输入')
 
   // 超长（选了一整篇文档）⇒ 不带：那只会变成一次必然搜不到的查询
   shell.showSelection = 'x'.repeat(SELECTION_MAX_CHARS + 1)
-  h.kernel.hostUi.state.searchContent = ''
+  await clearContent()
   seen.length = 0
   await h.api('/api/window/show', { method: 'POST' })
+  await sleep(200)
   assertEqual(seen.length, 0, `超过 ${SELECTION_MAX_CHARS} 字的选中文本不带`)
 
-  off()
+  sub.stop()
   shell.showSelection = null
-  h.kernel.hostUi.state.searchContent = ''
+  await clearContent()
 })
 
 /**

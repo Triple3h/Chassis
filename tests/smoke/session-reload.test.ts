@@ -7,23 +7,29 @@
  * 而当时的 UI 只把会话关闭当成一个无语义事件，插件页自己又拿着旧 sid 继续问。
  *
  * 这里锁住内核侧的契约：关闭必须带原因，重载结束必须广播重开信号。
+ * 广播经 SSE 观察（插件页 SDK 拿到的就是这条）。
  */
 import { assert, assertDeepEqual, assertEqual, run, test } from '../helpers/assert'
 import { createHarness } from '../helpers/harness'
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const h = await createHarness({ fixtures: ['echo-plugin'], label: 'session-reload' })
 
 const closed: Array<Record<string, unknown>> = []
 const reloaded: Array<Record<string, unknown>> = []
-h.kernel.bus.on('session/closed', (payload) => closed.push(payload as Record<string, unknown>))
-h.kernel.bus.on('plugin/reloaded', (payload) => reloaded.push(payload as Record<string, unknown>))
+const sub = h.subscribe((event) => {
+  if (event.event === 'session/closed') closed.push(event.data as Record<string, unknown>)
+  if (event.event === 'plugin/reloaded') reloaded.push(event.data as Record<string, unknown>)
+})
+await sub.ready
 
 test('重载插件：旧会话带 reason=reload 关闭，加载完成后广播 plugin/reloaded', async () => {
   const session = await h.openSession('echo-plugin', 'echo')
 
-  await h.kernel.plugins.reload('echo-plugin')
-
-  assertEqual(h.kernel.sessions.get(session.sid), undefined, '重载必须回收旧会话')
+  const action = await h.pluginAction('reload', { id: 'echo-plugin' })
+  assertEqual(action.ok, true, `重载应当成功：${JSON.stringify(action.error ?? {})}`)
+  await h.waitFor(() => reloaded.some((item) => item.pluginId === 'echo-plugin'), 5000, 'plugin/reloaded 广播')
 
   const close = closed.find((item) => item.sid === session.sid)
   assert(close, `应当广播 session/closed：${JSON.stringify(closed)}`)
@@ -52,28 +58,32 @@ test('停用插件：会话带 reason=disable 关闭，且不广播重开信号'
   const session = await h.openSession('echo-plugin', 'echo')
   const before = reloaded.length
 
-  await h.kernel.plugins.setDisabled('echo-plugin', true)
+  await h.pluginAction('disable', { id: 'echo-plugin' })
+  await h.waitFor(() => closed.some((item) => item.sid === session.sid), 5000, 'session/closed 广播')
+  await sleep(150)
 
-  assertEqual(h.kernel.sessions.get(session.sid), undefined, '停用应当回收会话')
   assertEqual(closed.find((item) => item.sid === session.sid)?.reason, 'disable')
   assertEqual(reloaded.length, before, '停用不是重载，不该广播 plugin/reloaded')
 
-  await h.kernel.plugins.setDisabled('echo-plugin', false)
+  await h.pluginAction('enable', { id: 'echo-plugin' })
 })
 
 test('UI 主动关闭会话：reason=ui（不要被当成插件不可用）', async () => {
   const session = await h.openSession('echo-plugin', 'echo')
   await h.api('/api/session/close', { method: 'POST', body: JSON.stringify({ sid: session.sid }) })
+  await h.waitFor(() => closed.some((item) => item.sid === session.sid), 5000, 'session/closed 广播')
   assertEqual(closed.find((item) => item.sid === session.sid)?.reason, 'ui')
 })
 
 test('卸载插件：会话带 reason=uninstall 关闭', async () => {
   const session = await h.openSession('echo-plugin', 'echo')
-  await h.kernel.plugins.uninstall('echo-plugin')
-  assertEqual(h.kernel.sessions.get(session.sid), undefined, '卸载应当回收会话')
+  const action = await h.pluginAction('uninstall', { id: 'echo-plugin' })
+  assertEqual(action.ok, true, `卸载应当成功：${JSON.stringify(action.error ?? {})}`)
+  await h.waitFor(() => closed.some((item) => item.sid === session.sid), 5000, 'session/closed 广播')
   assertEqual(closed.find((item) => item.sid === session.sid)?.reason, 'uninstall')
 })
 
 const failed = await run('插件热重载 × 会话')
+sub.stop()
 await h.stop()
 if (failed > 0) process.exit(1)
