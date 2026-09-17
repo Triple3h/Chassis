@@ -1,0 +1,50 @@
+[package]
+name = "launcher-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Chassis 内核（Rust）：协议层 / 插件运行时 / 搜索调度（M5 阶段 A1，见 docs/m5-rust-and-windows.md）"
+license = "MIT"
+publish = false
+
+[lib]
+name = "launcher_kernel"
+path = "src/lib.rs"
+
+[[bin]]
+name = "launcher-kernel"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 审计文件名 / 滚动保留要按本地日期（与 v1 的 Date 行为对齐）
+chrono = "0.4"
+# 历史 / 固定的稳定 key = sha1 前缀（必须与 v1 的 itemKey 一致，否则旧历史 key 全对不上）
+sha1 = "0.10"
+# `--launcher-context` 的 base64url 编码（与插件 SDK 的解码实现互为镜像）
+base64 = "0.22"
+# 拼音索引（替代 v1 的 pinyin-pro；M5 计划 §A1.2 的**唯一行为对齐点**，见 pinyin.rs）
+pinyin = "0.10"
+# 会话 sid / token（v1 用 node:crypto 的 randomUUID）
+uuid = { version = "1", features = ["v4"] }
+# 仅 worker_threads(2)：内核是 IO 密集 + 少量 CPU（搜索打分），不需要按核数开线程
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "io-util",
+    "io-std",
+    "sync",
+    "time",
+    "signal",
+    "process",
+    "fs",
+    "net",
+] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system", "disk"] }
+# UI 服务（ADR-0001：内核托管 UI 静态资源，UI 走 HTTP + SSE 与内核通信）
+axum = "0.8"
+# SSE 扇出：broadcast → BroadcastStream（axum 的 Sse 需要）
+tokio-stream = { version = "0.1", features = ["sync"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# A1 后续模块加入（见 m5 计划 §A1.2）：
+#   notify（插件热重载）、zip（zip 安装）、plist（app-launcher）

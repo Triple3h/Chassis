@@ -31,14 +31,13 @@ impl Sidecar {
 
     pub fn start(&self, app: &AppHandle) -> Result<(), String> {
         let entry = kernel_entry(app)?;
-        let node = node_binary();
         let data_root = data_root(app);
         let builtin = builtin_plugins_dir(app);
         let ui_dist = ui_dist_dir(app);
 
-        let mut command = Command::new(&node);
+        // v2：内核本身就是可执行文件（Rust）—— 不再需要找用户的 Node、也不再拼解释器参数
+        let mut command = Command::new(&entry);
         command
-            .arg(&entry)
             .arg("--data-root")
             .arg(&data_root)
             .arg("--builtin-plugins")
@@ -51,7 +50,7 @@ impl Sidecar {
 
         let mut child = command
             .spawn()
-            .map_err(|err| format!("无法启动内核（{}）：{err}", node.display()))?;
+            .map_err(|err| format!("无法启动内核（{}）：{err}", entry.display()))?;
 
         let stdin = child.stdin.take().ok_or("无法获取内核 stdin")?;
         let stdout = child.stdout.take().ok_or("无法获取内核 stdout")?;
@@ -71,7 +70,7 @@ impl Sidecar {
         if let Ok(mut slot) = self.child.lock() {
             *slot = Some(child);
         }
-        crate::logging::log(&format!("[shell] 内核已启动：{}（node {}）", entry.display(), node.display()));
+        crate::logging::log(&format!("[shell] 内核已启动：{}", entry.display()));
         Ok(())
     }
 
@@ -175,26 +174,30 @@ fn kernel_entry(app: &AppHandle) -> Result<PathBuf, String> {
         return Err(format!("LAUNCHER_KERNEL_ENTRY 指向的文件不存在：{}", path.display()));
     }
 
-    // 打包后：<resource_dir>/kernel/kernel.mjs
+    let exe_name = if cfg!(target_os = "windows") { "launcher-kernel.exe" } else { "launcher-kernel" };
+
+    // 打包后：<resource_dir>/kernel/launcher-kernel
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("kernel").join("kernel.mjs");
-        if bundled.exists() {
-            return Ok(bundled);
-        }
-        let bundled_alt = resource_dir.join("resources").join("kernel").join("kernel.mjs");
-        if bundled_alt.exists() {
-            return Ok(bundled_alt);
+        for candidate in [
+            resource_dir.join("kernel").join(exe_name),
+            resource_dir.join("resources").join("kernel").join(exe_name),
+        ] {
+            if candidate.exists() {
+                return Ok(candidate);
+            }
         }
     }
 
-    // 开发态：从可执行文件往上找 apps/kernel/dist/kernel.mjs
+    // 开发态：从可执行文件往上找 target/{release,debug}/launcher-kernel
     if let Ok(exe) = std::env::current_exe() {
         let mut cursor: Option<&Path> = exe.parent();
         let mut hops = 0;
         while let Some(dir) = cursor {
-            let candidate = dir.join("apps").join("kernel").join("dist").join("kernel.mjs");
-            if candidate.exists() {
-                return Ok(candidate);
+            for profile in ["release", "debug"] {
+                let candidate = dir.join("target").join(profile).join(exe_name);
+                if candidate.exists() {
+                    return Ok(candidate);
+                }
             }
             cursor = dir.parent();
             hops += 1;
@@ -204,82 +207,7 @@ fn kernel_entry(app: &AppHandle) -> Result<PathBuf, String> {
         }
     }
 
-    // 再兜底：当前工作目录
-    let cwd_candidate = PathBuf::from("apps/kernel/dist/kernel.mjs");
-    if cwd_candidate.exists() {
-        return Ok(cwd_candidate);
-    }
-
-    Err("找不到内核入口（先执行 npm run build:kernel，或设置 LAUNCHER_KERNEL_ENTRY）".to_string())
-}
-
-/// 找 Node：GUI 启动时 PATH 只有 /usr/bin:/bin:/usr/sbin:/sbin，
-/// 所以必须显式搜索 homebrew / nvm / fnm / volta / asdf 等常见位置。
-fn node_binary() -> PathBuf {
-    if let Ok(path) = std::env::var("LAUNCHER_NODE") {
-        let explicit = PathBuf::from(&path);
-        if explicit.exists() {
-            return explicit;
-        }
-    }
-
-    for candidate in [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/node",
-        "/opt/local/bin/node",
-    ] {
-        let path = PathBuf::from(candidate);
-        if path.exists() {
-            return path;
-        }
-    }
-
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-
-    // nvm / fnm：按版本号排序取最新
-    if let Some(home) = home.as_ref() {
-        for (dir, suffix) in [
-            (home.join(".nvm/versions/node"), "bin/node"),
-            (home.join(".local/share/fnm/node-versions"), "installation/bin/node"),
-        ] {
-            if let Some(path) = newest_node_under(&dir, suffix) {
-                return path;
-            }
-        }
-        for candidate in [
-            home.join(".volta/bin/node"),
-            home.join(".asdf/shims/node"),
-            home.join(".local/bin/node"),
-        ] {
-            if candidate.exists() {
-                return candidate;
-            }
-        }
-    }
-
-    PathBuf::from("node")
-}
-
-/// 在形如 `~/.nvm/versions/node/v22.1.0/bin/node` 的目录里取版本号最大的那个
-fn newest_node_under(dir: &Path, suffix: &str) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut versions: Vec<(Vec<u64>, PathBuf)> = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        let candidate = entry.path().join(suffix);
-        if !candidate.exists() {
-            continue;
-        }
-        let numbers: Vec<u64> = name
-            .trim_start_matches('v')
-            .split('.')
-            .map(|part| part.parse::<u64>().unwrap_or(0))
-            .collect();
-        versions.push((numbers, candidate));
-    }
-    versions.sort_by(|a, b| a.0.cmp(&b.0));
-    versions.pop().map(|(_, path)| path)
+    Err("找不到内核（先执行 pnpm build:kernel，或设置 LAUNCHER_KERNEL_ENTRY）".to_string())
 }
 
 /// 数据目录名 = 应用名（2026-09-16 起从 `Launcher` 改成 `Chassis`）
