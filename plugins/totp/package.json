@@ -6,7 +6,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "apiVersion": "1",
+  "apiVersion": "2",
   "icon": "shield-check",
   "categories": [
     "security",
@@ -46,17 +46,17 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit -p tsconfig.json && vite build && vite build --config vite.worker.config.ts",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build && npm run build:scripts",
     "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
-    "build:scripts": "vite build --config vite.worker.config.ts",
+    "build:scripts": "cargo build --release -p launcher-plugin-totp && node ../../scripts/build-plugin.mjs totp --copy-scripts --keep-dist",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "node ../../scripts/run-ts.mjs test/core.test.ts && node ../../scripts/run-ts.mjs test/script.test.ts",
-    "preview": "vite preview"
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts",
+    "preview": "vite preview",
+    "test:scripts": "cargo test -p launcher-plugin-totp"
   },
   "dependencies": {
     "@launcher/ui": "workspace:*",
     "@launcher/api": "workspace:*",
-    "@launcher/api-node": "workspace:*",
     "vue": "^3.5.42",
     "zxing-wasm": "^3.1.4"
   },
