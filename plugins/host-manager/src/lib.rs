@@ -319,10 +319,11 @@ fn mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-fn is_writable(path: &Path) -> bool {
+/// 当前进程对目标文件可不可写（access(2)，按真实用户判断，不看权限位）。
+pub fn is_writable(path: &Path) -> bool {
     use std::ffi::CString;
     let Ok(raw) = CString::new(path.as_os_str().as_encoded_bytes()) else { return false };
-    // access(2)：与 v1 的 accessSync(target, W_OK) 等价（按真实用户判断，不看权限位）
+    // access(2)：与 v1 的 accessSync(target, W_OK) 等价
     unsafe { libc::access(raw.as_ptr(), libc::W_OK) == 0 }
 }
 
@@ -478,13 +479,13 @@ fn utf16le_bytes(text: &str) -> Vec<u8> {
 }
 
 /// 跑一个子进程（阻塞），超时/失败都回 stderr 文本（v1 的 `stderrOf`）。
-fn run_blocking(mut command: std::process::Command, timeout: Duration) -> Result<(), String> {
+fn run_blocking(command: std::process::Command, timeout: Duration) -> Result<(), String> {
     let label = command.get_program().to_string_lossy().to_string();
     let args: Vec<String> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
     // 用 tokio 的 timeout + kill_on_drop 收尾：超时不会留下孤儿进程
     let runtime = crate::runtime();
     runtime.block_on(async move {
-        let mut child = match tokio::process::Command::new(&label).args(&args).kill_on_drop(true).spawn() {
+        let child = match tokio::process::Command::new(&label).args(&args).kill_on_drop(true).spawn() {
             Ok(child) => child,
             Err(err) => return Err(err.to_string()),
         };
@@ -512,6 +513,123 @@ pub fn runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("创建插件 runtime 失败")
     })
+}
+
+// ── 写入权限：免授权（ACL）──────────────────────────────────────
+//
+// 背景：macOS 的 /etc/hosts 属 root:wheel 644，写一次弹一次系统授权框。
+// uTools / SwitchHosts 那类工具之所以「不弹窗」，不是绕过了权限系统，而是**一次性**
+// 把文件的写权限授给当前账户（Windows = 文件属性里勾「写入」；macOS = POSIX ACL
+// `chmod +a`），之后以普通用户身份直写。这里走同一条路：
+// 授权一次 → 之后保存不再弹窗；随时可撤销，恢复系统默认。
+//
+// 安全边界：ACL 一开，任何以该用户身份运行的程序都能改 hosts（DNS 劫持的常见落脚点）。
+// 所以要是个**显式开关**（UI 里写清楚、能一键撤回），不是悄悄做的默认行为。
+
+/// `chmod +a` 用的 ACL 文本（macOS 实测接受 `user:<name> allow write` 这种写法）。
+pub fn write_acl_entry(username: &str) -> String {
+    format!("user:{username} allow write")
+}
+
+/// 当前登录用户名：取进程 euid 对应的账户名，取不到再回落到环境变量。
+///
+/// **必须在插件进程（普通用户身份）里解析**：提权后的 shell 里 `$(whoami)` 是 root，
+/// 拼进 ACL 就成了「给 root 加权限」——等于白做。
+pub fn current_username() -> Option<String> {
+    #[cfg(unix)]
+    if let Some(name) = unix_username() {
+        return Some(name);
+    }
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(unix)]
+fn unix_username() -> Option<String> {
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut found: *mut libc::passwd = std::ptr::null_mut();
+    let mut scratch = vec![0u8; 1024];
+    let status = unsafe {
+        libc::getpwuid_r(
+            libc::geteuid(),
+            &mut entry,
+            scratch.as_mut_ptr() as *mut libc::c_char,
+            scratch.len(),
+            &mut found,
+        )
+    };
+    if status != 0 || found.is_null() || entry.pw_name.is_null() {
+        return None;
+    }
+    let text = unsafe { std::ffi::CStr::from_ptr(entry.pw_name) }.to_str().ok()?;
+    let name = text.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// 目标文件的 ACL 里有没有本插件加的那条（`/bin/ls -le` 只读检测，不需要提权）。
+pub fn has_write_acl(target: &Path, username: &str) -> bool {
+    if cfg!(target_os = "windows") {
+        return false;
+    }
+    let Ok(output) = std::process::Command::new("/bin/ls").arg("-le").arg(target).output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let needle = write_acl_entry(username);
+    String::from_utf8_lossy(&output.stdout).lines().any(|line| line.contains(&needle))
+}
+
+/// 提权加 / 撤 ACL（macOS 走 osascript 系统授权框，Linux 走 pkexec）。
+///
+/// 幂等：目标状态已经达成（grant 时已有 / revoke 时本来就没有）时不弹框、直接成功 ——
+/// `chmod -a` 删不存在的条目会以 "No ACL present" 退出，靠这层判断绕开。
+///
+/// 返回「是否真的执行了提权命令」（false = 已经是目标状态）。
+pub fn apply_write_acl(target: &Path, grant: bool) -> Result<bool, String> {
+    let username = current_username().ok_or_else(|| "取不到当前用户名，无法设置写入权限".to_string())?;
+    if has_write_acl(target, &username) == grant {
+        return Ok(false);
+    }
+    if cfg!(target_os = "windows") {
+        return Err("Windows 上暂不支持「免授权写入」（M6 平台化时用 icacls 补上）".to_string());
+    }
+    let flag = if grant { "+a" } else { "-a" };
+    let entry = write_acl_entry(&username);
+    let target_text = target.to_string_lossy().to_string();
+
+    if cfg!(target_os = "macos") {
+        let shell = format!("/bin/chmod {flag} {} {}", shq(&entry), shq(&target_text));
+        // `serde_json` 的字符串字面量恰好是合法的 AppleScript 字符串（与 elevate 同款技巧）
+        let script = format!("do shell script {} with administrator privileges", serde_json::to_string(&shell).unwrap_or_default());
+        let mut process = std::process::Command::new("/usr/bin/osascript");
+        process.arg("-e").arg(script);
+        run_blocking(process, Duration::from_millis(ELEVATE_TIMEOUT_MS))?;
+        return Ok(true);
+    }
+    let mut process = std::process::Command::new("/usr/bin/pkexec");
+    process.args(["/bin/chmod", flag, &entry, &target_text]);
+    run_blocking(process, Duration::from_millis(ELEVATE_TIMEOUT_MS))?;
+    Ok(true)
+}
+
+/// 展示用的等价命令（面板里写「自己动手也可以这么做」）。
+pub fn permission_command(target: &Path, grant: bool, username: &str) -> String {
+    let entry = write_acl_entry(username);
+    let target_text = target.to_string_lossy();
+    if cfg!(target_os = "windows") {
+        let verb = if grant { "/grant" } else { "/remove" };
+        return format!("icacls {} {verb} \"%USERNAME%:(W)\"", psq(&target_text));
+    }
+    let flag = if grant { "+a" } else { "-a" };
+    format!("/bin/chmod {flag} {} {}", shq(&entry), shq(&target_text))
 }
 
 // ── 写 ──────────────────────────────────────────────────────────
@@ -843,6 +961,72 @@ mod tests {
         let (name, _) = backup_hosts(&dir, &target).unwrap().unwrap();
         assert!(name.starts_with("hosts-"));
         assert_eq!(list_backups(&dir).len(), KEEP_BACKUPS, "超过 30 份要清理最旧的");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn acl_entry_and_permission_command_shape() {
+        assert_eq!(write_acl_entry("alice"), "user:alice allow write");
+        let grant = permission_command(Path::new("/etc/hosts"), true, "alice");
+        assert!(grant.contains("chmod +a"), "{grant}");
+        assert!(grant.contains("'user:alice allow write'"), "ACL 文本要带引号：{grant}");
+        assert!(grant.contains("'/etc/hosts'"), "{grant}");
+        let revoke = permission_command(Path::new("/etc/hosts"), false, "alice");
+        assert!(revoke.contains("chmod -a"), "{revoke}");
+    }
+
+    #[test]
+    fn current_username_resolves_to_something() {
+        let name = current_username().expect("取不到当前用户名");
+        assert!(!name.is_empty() && !name.contains(char::is_whitespace), "用户名异常：{name:?}");
+    }
+
+    /// 自己拥有的文件上验证 ACL 的加 → 检测 → 撤（**不碰系统文件、也不触发提权**；
+    /// `apply_write_acl` 会走 osascript 弹授权框，单测里绝不能调它）。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn acl_round_trip_on_owned_file() {
+        let dir = tmp("acl");
+        let file = dir.join("hosts");
+        std::fs::write(&file, "x\n").unwrap();
+        let user = current_username().unwrap();
+        assert!(!has_write_acl(&file, &user), "新文件不该有我们的 ACL");
+
+        let add = std::process::Command::new("/bin/chmod")
+            .arg("+a")
+            .arg(write_acl_entry(&user))
+            .arg(&file)
+            .status()
+            .unwrap();
+        assert!(add.success());
+        assert!(has_write_acl(&file, &user), "加完 ACL 后应能检测到");
+
+        let remove = std::process::Command::new("/bin/chmod")
+            .arg("-a")
+            .arg(write_acl_entry(&user))
+            .arg(&file)
+            .status()
+            .unwrap();
+        assert!(remove.success());
+        assert!(!has_write_acl(&file, &user), "撤掉后应检测不到");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn is_writable_tracks_mode_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root 下 access(W_OK) 恒真，测不出东西
+        }
+        let dir = tmp("writable");
+        let file = dir.join("hosts");
+        std::fs::write(&file, "x\n").unwrap();
+        assert!(is_writable(&file));
+        let mut perms = std::fs::metadata(&file).unwrap().permissions();
+        perms.set_mode(0o444);
+        std::fs::set_permissions(&file, perms).unwrap();
+        assert!(!is_writable(&file), "只读文件应判为不可写");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

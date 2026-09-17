@@ -26,12 +26,20 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'confirm'): void
+  (e: 'confirm', payload: { remember: boolean }): void
 }>()
 
 const diff = shallowRef<DiffResult | null>(null)
 const scroller = ref<HTMLElement | null>(null)
 const toast = useToast()
+
+/**
+ * 「以后不再询问」：这次授权的同时把 hosts 的写权限授给当前账户（ACL），
+ * 之后保存直接写入、不再弹授权框。仅在当前不可写时才有意义，默认勾上 ——
+ * 用户来做这一步就是嫌每次弹窗（要的就是「一次授权、长期免授权」）；
+ * 不想开就取消勾选，行为与以前完全一致。
+ */
+const remember = ref(true)
 
 const rows = computed(() => diff.value?.rows ?? [])
 const count = computed(() => rows.value.length)
@@ -142,10 +150,24 @@ async function copyCommand() {
         <span>正在写入…… 如果系统弹出授权窗口，请先完成验证。</span>
       </div>
 
-      <div v-if="!writable && phase === 'preview'" class="rounded-lg border border-line bg-panel2 p-2.5 text-[11.5px] text-muted">
-        当前进程没有 {{ path }} 的写权限，
-        {{ platform === 'darwin' ? 'macOS 会弹出系统授权窗口' : platform === 'win32' ? 'Windows 会弹出 UAC 确认' : '会尝试用 pkexec 提权' }}，
-        写入前会自动备份现有内容。
+      <div v-if="!writable && phase === 'preview'" class="flex flex-col gap-2 rounded-lg border border-line bg-panel2 p-2.5 text-[11.5px] text-muted">
+        <div>
+          当前进程没有 {{ path }} 的写权限，
+          {{ platform === 'darwin' ? 'macOS 会弹出系统授权窗口' : platform === 'win32' ? 'Windows 会弹出 UAC 确认' : '会尝试用 pkexec 提权' }}，
+          写入前会自动备份现有内容。
+        </div>
+        <label
+          v-if="platform === 'darwin' || platform === 'linux'"
+          class="flex items-start gap-2 leading-relaxed"
+          title="一次授权后不再弹出授权窗口；随时可在顶栏的权限面板里撤销"
+        >
+          <input v-model="remember" type="checkbox" class="mt-0.5 shrink-0" />
+          <span>
+            开启<span class="text-fg">免授权写入</span>：这次授权的同时，把
+            <span class="launcher-mono">{{ path }}</span> 的写权限授给当前账户，
+            <span class="text-fg">以后保存不再弹窗</span>（随时可撤销）。
+          </span>
+        </label>
       </div>
     </div>
 
@@ -158,8 +180,13 @@ async function copyCommand() {
       </button>
       <div class="flex-1" />
       <button class="launcher-btn" @click="emit('close')">{{ phase === 'manual' ? '关闭' : '取消' }}</button>
-      <button v-if="phase !== 'manual'" class="launcher-btn primary" :disabled="phase === 'writing'" @click="emit('confirm')">
-        {{ phase === 'writing' ? '写入中…' : writable ? '确认写入' : '授权并写入' }}
+      <button
+        v-if="phase !== 'manual'"
+        class="launcher-btn primary"
+        :disabled="phase === 'writing'"
+        @click="emit('confirm', { remember })"
+      >
+        {{ phase === 'writing' ? '写入中…' : writable ? '确认写入' : remember ? '授权并写入（以后不再询问）' : '授权并写入' }}
       </button>
     </template>
   </UiDialog>

@@ -1,4 +1,4 @@
-import { parseBlocksDoc, type BlocksDoc } from './blocks'
+import { parseBlocks, parseBlocksDoc, type Block, type BlocksDoc } from './blocks'
 import { diffLines, type DiffResult } from './hosts'
 import type { HostsReply, HostsRequest } from './worker'
 
@@ -74,6 +74,11 @@ export function runParseBlocks(text: string): Promise<BlocksDoc> {
 
 export function runDiffLines(prev: string, next: string): Promise<DiffResult> {
   return call({ op: 'diff', prev, next }, () => diffLines(prev, next))
+}
+
+/** 托管区文本 → 块列表（批量编辑器边打边解析用；粘贴几千行也走 Worker） */
+export function runParseRegion(text: string, eol: '\n' | '\r\n', sep: string): Promise<Block[]> {
+  return call({ op: 'blocks', text, eol, sep }, () => parseBlocks(text, eol, sep))
 }
 
 /** 丢弃在途请求的挂起点（卸载时调用，避免回调打到已销毁的组件上） */

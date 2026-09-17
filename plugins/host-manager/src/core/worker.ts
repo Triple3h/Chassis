@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { parseBlocksDoc, type BlocksDoc } from './blocks'
+import { parseBlocks, parseBlocksDoc, type Block, type BlocksDoc } from './blocks'
 import { diffLines, type DiffResult } from './hosts'
 
 /**
@@ -9,10 +9,12 @@ import { diffLines, type DiffResult } from './hosts'
 export type HostsRequest =
   | { id: number; op: 'parse'; text: string }
   | { id: number; op: 'diff'; prev: string; next: string }
+  | { id: number; op: 'blocks'; text: string; eol: '\n' | '\r\n'; sep: string }
 
 export type HostsReply =
   | { id: number; op: 'parse'; ok: true; result: BlocksDoc }
   | { id: number; op: 'diff'; ok: true; result: DiffResult }
+  | { id: number; op: 'blocks'; ok: true; result: Block[] }
   | { id: number; op: string; ok: false; error: string }
 
 interface Scope {
@@ -27,6 +29,8 @@ scope.onmessage = (e: MessageEvent) => {
   try {
     if (req.op === 'parse') {
       scope.postMessage({ id: req.id, op: req.op, ok: true, result: parseBlocksDoc(req.text) })
+    } else if (req.op === 'blocks') {
+      scope.postMessage({ id: req.id, op: req.op, ok: true, result: parseBlocks(req.text, req.eol, req.sep) })
     } else {
       scope.postMessage({ id: req.id, op: req.op, ok: true, result: diffLines(req.prev, req.next) })
     }

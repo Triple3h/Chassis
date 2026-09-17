@@ -59,24 +59,60 @@ export interface HostsWriteArgs {
 }
 
 export interface HostsWriteResult {
+    ok: boolean
+    /**
+     * direct      —— 进程本身有写权限，直接写成功
+     * privileged  —— 走了系统提权（macOS 弹管理员授权）
+     * manual      —— 提权不可用，已把待写入内容落盘，需要用户手工执行命令
+     * none        —— 什么都没做（没有改动，或校验不通过）
+     */
+    method: 'direct' | 'privileged' | 'manual' | 'none'
+    path: string
+    /** 文件内容是否真的变了；false 表示托管区与磁盘上的一致，没写也没备份 */
+    changed?: boolean
+    /** 备份文件名与完整路径 */
+    backup?: string
+    backupPath?: string
+    /** manual 时的待生效文件路径与建议命令 */
+    pendingPath?: string
+    command?: string
+    /** 写完回读是否与目标内容逐字节一致 */
+    verified?: boolean
+    error?: string
+}
+
+/**
+ * `hosts-permission`（script）：免授权写入的开关。
+ *
+ * 系统 hosts 属 root，默认每写一次弹一次授权框。这里做的是「一次性授权」：
+ * 把文件的写权限授给当前账户（macOS/Linux = POSIX ACL `chmod +a`），
+ * 之后保存就直接写、不再弹窗；随时可撤销。uTools / SwitchHosts 引导用户
+ * 手动做的也是这件事（Windows 上是文件属性里勾「写入」）。
+ */
+export type PermissionAction = 'status' | 'grant' | 'revoke'
+
+export interface HostsPermissionArgs {
+  /** 缺省 = status（只查询，不动权限） */
+  action?: PermissionAction
+}
+
+export interface HostsPermissionResult {
   ok: boolean
-  /**
-   * direct      —— 进程本身有写权限，直接写成功
-   * privileged  —— 走了系统提权（macOS 弹管理员授权）
-   * manual      —— 提权不可用，已把待写入内容落盘，需要用户手工执行命令
-   * none        —— 什么都没做（没有改动，或校验不通过）
-   */
-  method: 'direct' | 'privileged' | 'manual' | 'none'
+  action: PermissionAction
+  /** ACL 里有没有本插件加的那条（可能为 true 而 writable 仍为 false，反之亦然） */
+  granted: boolean
+  /** 当前进程能不能直接写目标文件（access W_OK） */
+  writable: boolean
   path: string
-  /** 文件内容是否真的变了；false 表示托管区与磁盘上的一致，没写也没备份 */
-  changed?: boolean
-  /** 备份文件名与完整路径 */
-  backup?: string
-  backupPath?: string
-  /** manual 时的待生效文件路径与建议命令 */
-  pendingPath?: string
+  platform: string
+  username?: string
+  /**
+   * none       —— 只查询，没动权限
+   * direct     —— 目标状态已经达成，没有提权（不弹框）
+   * privileged —— 真的走了系统授权框
+   */
+  method: 'none' | 'direct' | 'privileged'
+  /** 展示用的等价命令（想手工做的话就是这条） */
   command?: string
-  /** 写完回读是否与目标内容逐字节一致 */
-  verified?: boolean
   error?: string
 }

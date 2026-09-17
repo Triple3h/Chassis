@@ -11,6 +11,8 @@ import EntryDialog from './components/EntryDialog.vue'
 import FilePane from './components/FilePane.vue'
 import OutsideCard from './components/OutsideCard.vue'
 import PasteDialog from './components/PasteDialog.vue'
+import PermissionDialog from './components/PermissionDialog.vue'
+import RegionEditorDialog from './components/RegionEditorDialog.vue'
 import SaveDialog from './components/SaveDialog.vue'
 import SnapshotDialog from './components/SnapshotDialog.vue'
 import {
@@ -50,7 +52,12 @@ import {
 } from './core/blocks'
 import { isProtectedEntry, parseImportText, type EntryFields, type EntryLine } from './core/hosts'
 import { runDiffLines, runParseBlocks } from './core/runner'
-import type { HostsReadResult, HostsWriteResult } from './core/script-types'
+import type {
+  HostsPermissionResult,
+  HostsReadResult,
+  HostsWriteResult,
+  PermissionAction,
+} from './core/script-types'
 import { loadSnapshots, persistSnapshots, pushSnapshot, removeSnapshot, type Snapshot } from './core/snapshots'
 
 /**
@@ -120,6 +127,8 @@ const outsideRemovals = ref<string[]>([])
 type UndoItem =
   | { kind: 'entry'; data: RemovedBlockEntry }
   | { kind: 'block'; data: { block: Block; index: number } }
+  /** 批量编辑：整段托管区被换掉，撤销 = 换回原来那批块 */
+  | { kind: 'region'; data: { blocks: Block[] } }
 const undoStack = shallowRef<UndoItem[]>([])
 
 const editing = shallowRef<{
@@ -135,10 +144,17 @@ const editing = shallowRef<{
 const showPaste = ref(false)
 const showSnapshots = ref(false)
 const showSave = ref(false)
+const showRegionEditor = ref(false)
+const showPermission = ref(false)
+/** 批量编辑器的初始内容：打开那一刻的托管区文本（编辑器里怎么改都不会回流） */
+const regionText = ref('')
 const savePhase = ref<'preview' | 'writing' | 'manual' | 'done'>('preview')
 const writeResult = shallowRef<HostsWriteResult | null>(null)
 const nextText = ref('')
 const snapshots = ref<Snapshot[]>([])
+/** 免授权写入的状态（打开权限面板 / 开启 / 撤销后刷新） */
+const permission = shallowRef<HostsPermissionResult | null>(null)
+const permissionBusy = ref(false)
 
 const searchRef = ref<HTMLInputElement | null>(null)
 const paneRef = ref<InstanceType<typeof FilePane> | null>(null)
@@ -161,6 +177,11 @@ const placeholder = computed(() =>
 )
 /** 区外条目里能收进托管区的（系统回环行不动） */
 const adoptableOutside = computed(() => outside.value.filter((line) => !isProtectedEntry(line)))
+/** 批量编辑器用的换行符与分隔符（跟当前文件一致） */
+const editorEol = computed(() => doc.value?.eol ?? '\n')
+const editorSep = computed(() => doc.value?.sep ?? '\t')
+/** 当前是不是「本插件开的免授权」（ACL 在不在） */
+const aclGranted = computed(() => !!permission.value?.granted)
 
 /* -------------------------------------------------------------- 生命周期 */
 
@@ -479,10 +500,40 @@ function undo() {
   const item = undoStack.value[undoStack.value.length - 1]
   if (!d || !item) return
   if (item.kind === 'entry') restoreBlockEntry(d, item.data)
-  else restoreBlock(d, item.data)
+  else if (item.kind === 'block') restoreBlock(d, item.data)
+  else {
+    d.blocks = item.data.blocks
+    const first = item.data.blocks[0]
+    expanded.value = first ? { [first.id]: true } : {}
+    activeBlockId.value = first?.id ?? null
+  }
   undoStack.value = undoStack.value.slice(0, -1)
   touch()
   toast.info('已撤销')
+}
+
+/* ---------------------------------------------------------- 批量编辑托管区 */
+
+/** 把整个托管区丢进文本框改（多块重排 / 整段粘贴比逐块点更快） */
+function openRegionEditor() {
+  const d = doc.value
+  if (!d) return
+  regionText.value = renderRegion(d)
+  showRegionEditor.value = true
+}
+
+function submitRegionEditor(payload: { blocks: Block[] }) {
+  const d = doc.value
+  if (!d) return
+  showRegionEditor.value = false
+  // 整批换掉，压一份撤销（⇧⌘Z 能整个换回来）
+  undoStack.value = [...undoStack.value, { kind: 'region', data: { blocks: d.blocks } }]
+  d.blocks = payload.blocks
+  const first = payload.blocks[0]
+  expanded.value = first ? { [first.id]: true } : {}
+  activeBlockId.value = first?.id ?? null
+  touch()
+  toast.ok(`托管区已替换为 ${payload.blocks.length} 个块，别忘了保存`)
 }
 
 async function submitEntry(payload: { fields: EntryFields; target: AdoptTarget }) {
@@ -576,6 +627,61 @@ async function submitPaste(payload: { entries: EntryFields[]; target: AdoptTarge
   toast.ok(`已导入 ${payload.entries.length} 条，别忘了点保存`)
 }
 
+/* ------------------------------------------------------------ 写入权限 */
+
+/**
+ * 免授权写入（ACL）的状态查询与开关。
+ *
+ * 系统 hosts 属 root，默认每写一次弹一次授权框。一次性把文件的写权限
+ * 授给当前账户之后就是直写（原理见 lib.rs 的同名小节）。
+ * grant / revoke 会走系统授权框，超时给足；成功后同步 `fileInfo.writable`，
+ * 顶栏 chip 与保存流程立刻看到新状态。
+ */
+async function runPermission(action: PermissionAction): Promise<HostsPermissionResult | null> {
+  if (demoMode.value) {
+    toast.info('演示模式：不会改动系统权限')
+    return null
+  }
+  if (action !== 'status') permissionBusy.value = true
+  const res = (await exec
+    .run({ command: 'hosts-permission', args: { action }, timeoutMs: WRITE_TIMEOUT })
+    .catch(() => null)) as HostsPermissionResult | null
+  if (action !== 'status') permissionBusy.value = false
+
+  if (!res) {
+    toast.err('权限命令没有响应（宿主里可能还是旧版本的插件）')
+    return null
+  }
+  permission.value = res
+  if (fileInfo.value && fileInfo.value.writable !== res.writable) {
+    fileInfo.value = { ...fileInfo.value, writable: res.writable }
+  }
+  if (!res.ok) {
+    toast.err(res.error ?? '权限操作失败')
+    return res
+  }
+  return res
+}
+
+async function openPermission() {
+  showPermission.value = true
+  await runPermission('status')
+}
+
+async function onGrantPermission() {
+  const res = await runPermission('grant')
+  if (!res?.ok) return
+  toast.ok('已开启免授权写入，以后保存不再弹授权窗口')
+  showPermission.value = false
+}
+
+async function onRevokePermission() {
+  const res = await runPermission('revoke')
+  if (!res?.ok) return
+  toast.ok('已恢复系统默认权限')
+  if (res.writable) toast.info('文件仍可写：这份权限来自系统设置，不是本插件开的')
+}
+
 /* ------------------------------------------------------------------ 保存 */
 
 async function openSave() {
@@ -601,12 +707,22 @@ async function addAutoSnapshot(region: string, entryCount: number) {
   await persistSnapshots(snapshots.value)
 }
 
-async function confirmWrite() {
+async function confirmWrite(payload: { remember?: boolean } = {}) {
   const d = doc.value
   if (!d) return
   const beforeRegion = splitRegion(diskText.value).region
   const entryCount = stats.value.entries
   savePhase.value = 'writing'
+
+  // 「以后不再询问」：先用一次系统授权把写权限授给当前账户（ACL），
+  // 这次写入就已经是直写，之后保存也不再弹窗。用户在授权框里取消 → 停在预览。
+  if (payload.remember && !demoMode.value && !fileInfo.value?.writable) {
+    const granted = await runPermission('grant')
+    if (!granted?.ok) {
+      savePhase.value = 'preview'
+      return
+    }
+  }
 
   const res = (await exec
     .run({
@@ -710,13 +826,20 @@ async function copyFinal() {
       <span v-if="demoMode" class="launcher-chip text-warn" title="没检测到启动台宿主，改动不会写进系统文件">
         <UiIcon name="alert" :size="11" /> 演示模式
       </span>
-      <span
-        v-else-if="fileInfo && !fileInfo.writable"
-        class="launcher-chip text-warn"
-        title="当前进程没有写权限，保存时会请求管理员授权"
+      <button
+        v-else-if="fileInfo"
+        class="launcher-chip"
+        :class="fileInfo.writable ? '' : 'text-warn'"
+        :title="
+          fileInfo.writable
+            ? '保存时直接写入、不再弹授权窗口；点开可管理权限'
+            : '保存时需要管理员授权；点开可开启免授权写入'
+        "
+        @click="openPermission"
       >
-        <UiIcon name="lock" :size="11" /> 需授权
-      </span>
+        <UiIcon :name="fileInfo.writable ? 'unlock' : 'lock'" :size="11" />
+        {{ fileInfo.writable ? '免授权' : '需授权' }}
+      </button>
 
       <div class="relative min-w-0 flex-1">
         <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint">
@@ -727,6 +850,9 @@ async function copyFinal() {
 
       <button class="launcher-btn" title="新建块（⇧⌘N）" @click="onCreateBlock">
         <UiIcon name="plus" :size="12" /> 新建块
+      </button>
+      <button class="launcher-btn" title="批量编辑托管区（文本，支持整段粘贴）" @click="openRegionEditor">
+        <UiIcon name="pencil" :size="12" /> 批量编辑
       </button>
       <button class="launcher-btn" title="存档与回滚" @click="showSnapshots = true">
         <UiIcon name="history" :size="13" />
@@ -878,6 +1004,30 @@ async function copyFinal() {
       :default-target="defaultTarget"
       @close="showPaste = false"
       @submit="submitPaste"
+    />
+
+    <RegionEditorDialog
+      v-if="showRegionEditor"
+      :region="regionText"
+      :eol="editorEol"
+      :sep="editorSep"
+      @close="showRegionEditor = false"
+      @submit="submitRegionEditor"
+    />
+
+    <PermissionDialog
+      v-if="showPermission"
+      :platform="platform"
+      :path="path"
+      :writable="!!fileInfo?.writable"
+      :granted="aclGranted"
+      :username="permission?.username"
+      :command="permission?.command"
+      :busy="permissionBusy"
+      :error="permission && !permission.ok ? permission.error ?? null : null"
+      @close="showPermission = false"
+      @grant="onGrantPermission"
+      @revoke="onRevokePermission"
     />
 
     <SnapshotDialog

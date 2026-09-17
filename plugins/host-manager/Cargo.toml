@@ -19,6 +19,10 @@ path = "src/bin/hosts_read.rs"
 name = "hosts-write"
 path = "src/bin/hosts_write.rs"
 
+[[bin]]
+name = "hosts-permission"
+path = "src/bin/hosts_permission.rs"
+
 [dependencies]
 launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
 serde = { version = "1", features = ["derive"] }

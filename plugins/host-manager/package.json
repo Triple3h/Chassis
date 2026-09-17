@@ -2,8 +2,8 @@
   "name": "host-manager",
   "title": "Hosts 管家",
   "author": "triple3h",
-  "description": "按块管理 hosts：一个项目一个块、块级开关、外部条目单独成块；只替换自己的托管区，别的程序写的行一律不碰，写入前备份",
-  "version": "0.2.0",
+  "description": "按块管理 hosts：一个项目一个块、块级开关、外部条目单独成块；只替换自己的托管区，别的程序写的行一律不碰，写入前备份；可一次性授权免去每次弹出的管理员授权",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "apiVersion": "2",
@@ -36,6 +36,12 @@
       "title": "写入 Hosts 文件（脚本）",
       "mode": "script",
       "icon": "save"
+    },
+    {
+      "name": "hosts-permission",
+      "title": "写入权限（脚本）",
+      "mode": "script",
+      "icon": "key"
     }
   ],
   "scripts": {
