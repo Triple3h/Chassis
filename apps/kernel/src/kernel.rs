@@ -138,6 +138,11 @@ impl SettingsHost for KernelSettingsHost {
         Box::pin(async move { kernel.plugin_action(&action, &payload).await })
     }
 
+    fn export_logs(&self, scope: String) -> BoxFuture<Result<Value>> {
+        let kernel = self.kernel.clone();
+        Box::pin(async move { kernel.export_logs(&scope).await })
+    }
+
     fn query_audit(&self, limit: usize) -> Vec<Value> {
         self.kernel
             .audit
@@ -471,6 +476,181 @@ impl Kernel {
             Arc::new(KernelSettingsHost { kernel: self.clone() }) as Arc<dyn SettingsHost>,
             plugin_id,
         ))
+    }
+
+    // ── 诊断日志导出（设置页「导出日志」）────────────────────────────
+
+    /// 把内核日志 + 插件状态 + 审计摘要汇总成一个文本文件（用户可发给开发者 / AI 助手排查）。
+    ///
+    /// - `scope = "session"`：本次内核运行期（内存环形缓冲，最近 `RING_SIZE` 条）；
+    /// - `scope = "all"`：`<dataRoot>/logs/kernel.log`（跨运行，含轮转的上一代）+ `audit-*.jsonl`。
+    ///
+    /// 文件落 `<dataRoot>/logs/exports/`（只保留最近 10 份），并尽量在访达 / 资源管理器中显示；
+    /// `revealed = false` 只表示「没能帮你打开文件管理器」（壳未连接等），文件本身已经写好。
+    pub async fn export_logs(self: &Arc<Self>, scope: &str) -> Result<Value> {
+        let scope = if scope == "all" { "all" } else { "session" };
+        let now = crate::util::now_ms();
+
+        let (log_body, log_count, log_truncated) = self.collect_kernel_log(scope);
+        let (audit_lines, audit_truncated) = self.collect_audit(scope);
+
+        let plugins = self.plugins.info();
+        let mut active = 0usize;
+        let mut disabled = 0usize;
+        let mut broken = 0usize;
+        let mut plugin_lines: Vec<String> = Vec::with_capacity(plugins.len());
+        for plugin in &plugins {
+            let id = plugin.get("id").and_then(Value::as_str).unwrap_or("?");
+            let version = plugin.get("version").and_then(Value::as_str).unwrap_or("?");
+            let state = plugin.get("state").and_then(Value::as_str).unwrap_or("?");
+            match state {
+                "active" | "degraded" => active += 1,
+                "disabled" => disabled += 1,
+                _ => broken += 1,
+            }
+            let mut line = format!("{id} v{version} [{state}]");
+            if let Some(error) = plugin.get("error").and_then(Value::as_str) {
+                line.push_str(&format!(" —— {error}"));
+            }
+            plugin_lines.push(line);
+        }
+
+        let mut text = String::new();
+        text.push_str("Chassis 内核诊断日志\n");
+        text.push_str("====================\n");
+        text.push_str(&format!("导出时间：{}\n", crate::logging::format_local(now)));
+        text.push_str(&format!(
+            "导出范围：{}\n",
+            if scope == "all" {
+                "全部日志（跨运行；单次导出最多取日志 2MB / 审计 3000 条）"
+            } else {
+                "最近一次会话（本次内核运行）"
+            }
+        ));
+        text.push_str(&format!("内核版本：{}（热更新机制 {}）\n", self.version(), crate::hot::HOT_UPDATE_VERSION));
+        text.push_str(&format!("平台：{} / {} · 内核 pid {}\n", platform_string(), std::env::consts::ARCH, std::process::id()));
+        text.push_str(&format!("数据目录：{}\n", self.data_root()));
+        text.push_str(&format!("本次会话开始：{}\n", crate::logging::format_local(crate::logging::session_start_ms())));
+        if let Some(path) = crate::logging::log_path() {
+            text.push_str(&format!("内核日志文件：{}\n", path.display()));
+        }
+        text.push_str(&format!("插件：{} 个（{active} 激活 / {disabled} 禁用 / {broken} 异常）\n", plugins.len()));
+        text.push_str("说明：本文件由「设置 → 关于 → 导出日志」生成，含内核日志、插件状态与审计摘要；壳日志在同目录的 shell.log。\n");
+        text.push_str("注意：内容可能包含本机路径与插件日志，请只发送给可信对象。\n");
+
+        text.push_str("\n── 插件状态 ─────────────────────────────\n");
+        text.push_str(&plugin_lines.join("\n"));
+        text.push('\n');
+
+        text.push_str(&format!(
+            "\n── 内核日志（{log_count} 条{}）──────────────────\n",
+            if log_truncated { "，已截断至最近一段" } else { "" }
+        ));
+        text.push_str(&log_body);
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+
+        text.push_str(&format!(
+            "\n── 审计日志（{} 条{}）──────────────────\n",
+            audit_lines.len(),
+            if scope == "all" { "，来自 audit-*.jsonl" } else { "，来自本次运行的内存缓冲" }
+        ));
+        if audit_truncated {
+            text.push_str("（仅保留最近 3000 条）\n");
+        }
+        text.push_str(&audit_lines.join("\n"));
+        text.push('\n');
+
+        let filename = format!("chassis-logs-{scope}-{}.txt", crate::logging::format_stamp(now));
+        let path = crate::logging::write_export_file(&filename, &text)
+            .map_err(|err| KernelError::new("INTERNAL", format!("写入导出文件失败：{err}")))?;
+        let revealed = self.primitives.shell_reveal("kernel", &path.to_string_lossy()).await.is_ok();
+
+        Ok(json!({
+            "ok": true,
+            "scope": scope,
+            "filename": filename,
+            "path": path.to_string_lossy(),
+            "bytes": text.len(),
+            "entries": log_count,
+            "auditEntries": audit_lines.len(),
+            "truncated": log_truncated || audit_truncated,
+            "revealed": revealed,
+        }))
+    }
+
+    /// 内核日志正文：session = 内存环形缓冲；all = kernel.log（含轮转的 kernel.log.1）。
+    fn collect_kernel_log(&self, scope: &str) -> (String, usize, bool) {
+        if scope == "all" {
+            let (content, truncated) = crate::logging::read_log_file(crate::logging::EXPORT_READ_MAX_BYTES);
+            if !content.trim().is_empty() {
+                let count = content.lines().count();
+                return (content, count, truncated);
+            }
+            // 文件不可用（未 init / 权限问题）时回落到本次会话，别导出空内容
+        }
+        let (lines, truncated) = crate::logging::session_lines();
+        let count = lines.len();
+        (lines.join("\n"), count, truncated)
+    }
+
+    /// 审计摘要：session = 内存环形缓冲；all = `audit-*.jsonl`（滚动 7 天，按日期升序拼接）。
+    fn collect_audit(&self, scope: &str) -> (Vec<String>, bool) {
+        if scope != "all" {
+            let records = self.audit.query(None, None, None, crate::audit::RING_SIZE);
+            return (records.iter().map(Self::audit_line).collect(), false);
+        }
+        const MAX_LINES: usize = 3000;
+        let Ok(entries) = std::fs::read_dir(self.data_root_path().join("logs")) else {
+            return (Vec::new(), false);
+        };
+        let mut files: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                let name = path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
+                name.starts_with("audit-") && name.ends_with(".jsonl")
+            })
+            .collect();
+        files.sort();
+        let mut lines: Vec<String> = Vec::new();
+        for path in files {
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            for raw in text.lines() {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<crate::contract::AuditRecord>(trimmed) {
+                    Ok(record) => lines.push(Self::audit_line(&record)),
+                    Err(_) => lines.push(format!("（无法解析的审计行）{}", trimmed.chars().take(200).collect::<String>())),
+                }
+            }
+        }
+        let truncated = lines.len() > MAX_LINES;
+        if truncated {
+            lines.drain(0..lines.len() - MAX_LINES);
+        }
+        (lines, truncated)
+    }
+
+    fn audit_line(record: &crate::contract::AuditRecord) -> String {
+        let mut line = format!(
+            "{} [{}] {} · {}ms · {}",
+            crate::logging::format_local(record.ts),
+            record.plugin_id,
+            record.method,
+            record.ms,
+            if record.ok { "ok" } else { "err" }
+        );
+        if !record.capability.is_empty() {
+            line.push_str(&format!(" · 需要能力 {}", record.capability));
+        }
+        if let Some(error) = &record.error {
+            line.push_str(&format!(" —— {}：{}", error.code, error.message));
+        }
+        line
     }
 
     // ── 生命周期 ────────────────────────────────────────────────

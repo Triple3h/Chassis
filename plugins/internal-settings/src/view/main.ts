@@ -3,6 +3,7 @@
  * 用原生 DOM 渲染（体积小、无需框架），所有数据来自 `ctx.settings`（仅 internal 插件可用）。
  */
 import { host, settings } from '@launcher/api'
+import type { LogExportResult } from '@launcher/api'
 import { iconSvg } from '@launcher/ui/icons'
 
 interface ConfigLike {
@@ -778,6 +779,9 @@ function renderAuditRow(record: AuditLike): string {
 
 function renderAbout(): string {
   const info = aboutInfo
+  const exported = lastExport
+    ? `<div class="hint" style="margin-top:8px">上次导出：${escapeHtml(lastExport.summary)}<br><span class="path">${escapeHtml(lastExport.path)}</span></div>`
+    : ''
   return `
     <h2>关于</h2>
     <div class="row"><div class="label">版本</div><span class="muted">${escapeHtml(info.version)}</span></div>
@@ -790,10 +794,65 @@ function renderAbout(): string {
       <div class="hint">能力即权限：未在清单声明的能力在装配期就不挂载，插件侧表现为「方法不存在」，且有审计记录。</div>
       <div class="hint">许可证：本项目为 MIT；第三方组件与许可证清单见 docs/THIRD-PARTY.md。</div>
     </div>
+
+    <h2 style="margin-top:20px">诊断日志</h2>
+    <div class="row">
+      <div class="label">
+        导出诊断日志
+        <div class="hint">
+          排查插件或内核问题时使用：导出一份日志文件（插件加载与状态 / 内核运行日志 / 错误 / 审计摘要），
+          发送给开发者或 AI 助手即可定位问题；导出后会在访达中显示该文件。
+        </div>
+      </div>
+      <div class="dactions" style="margin-top:0">
+        <button class="btn" id="export-logs-session" title="本次内核运行期（内存缓冲，最多 2000 条）">最近一次会话</button>
+        <button class="btn primary" id="export-logs-all" title="kernel.log 全量（跨运行）+ 审计文件（滚动 7 天）">全部日志</button>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:6px">文件可能包含本机路径与插件日志，请只发送给可信对象。</div>
+    ${exported}
   `
 }
 
 let aboutInfo = { version: '', platform: '', node: '', dataRoot: '' }
+/** 上次导出的日志（路径 + 摘要）：留在「关于」页，方便用户回头再找到那个文件 */
+let lastExport: { path: string; summary: string } | null = null
+
+// ── 诊断日志导出 ───────────────────────────────────────────────
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes >= 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${bytes} B`
+}
+
+/**
+ * 导出诊断日志：内核侧汇总（插件状态 + 内核日志 + 审计摘要）→ 写入 `<dataRoot>/logs/exports/`
+ * → 在访达 / 资源管理器中显示。两个范围：
+ * - `session`：本次内核运行期（内存缓冲）；`all`：跨运行（kernel.log + audit-*.jsonl）。
+ */
+async function exportLogs(scope: 'session' | 'all'): Promise<void> {
+  const buttons = ['export-logs-session', 'export-logs-all']
+    .map((id) => document.getElementById(id))
+    .filter((el): el is HTMLButtonElement => el instanceof HTMLButtonElement)
+  for (const button of buttons) button.disabled = true
+  toast('正在导出日志…')
+  try {
+    const result: LogExportResult = await settings.exportLogs(scope)
+    lastExport = {
+      path: result.path,
+      summary: `${result.filename} · ${formatBytes(result.bytes)} · 内核日志 ${result.entries} 条 · 审计 ${result.auditEntries} 条${
+        result.truncated ? '（有截断）' : ''
+      }`,
+    }
+    toast(result.revealed ? '已导出，并已在访达中显示' : `已导出：${result.filename}`)
+    render()
+  } catch (err) {
+    toast(err instanceof Error ? err.message : '导出失败')
+  } finally {
+    // render() 会把面板整个换掉：只在按钮还活着（失败路径）时恢复可用
+    for (const button of buttons) if (button.isConnected) button.disabled = false
+  }
+}
 
 function render(): void {
   tabsEl.innerHTML = TABS.map(
@@ -882,6 +941,10 @@ function bind(): void {
     render()
   })
   on('open-data', 'click', () => void guard(() => settings.openDataDir(), undefined))
+
+  // 诊断日志导出（「关于」页）：会话 / 全部两个范围
+  on('export-logs-session', 'click', () => void exportLogs('session'))
+  on('export-logs-all', 'click', () => void exportLogs('all'))
 
   // 插件页的交互全部走 panelEl 上的事件委托（渲染会重建 DOM，逐个绑定会失效），
   // 见文件末尾的 onPanelClick / onPanelKeydown / onPanelInput / onPanelFocusOut。

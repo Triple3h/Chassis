@@ -339,6 +339,24 @@ export const quicklink = {
     post('ctx.quicklink.remove', { id }, options) as Promise<void>,
 }
 
+/** 导出日志的范围：`session` = 最近一次会话（本次内核运行）｜`all` = 全部日志（跨运行） */
+export type LogExportScope = 'session' | 'all'
+
+/**
+ * `settings.exportLogs()` 的结果：内核已经写好文本文件，并尽量在访达 / 资源管理器中显示。
+ * `revealed = false` 只表示「没能帮你打开文件管理器」，文件本身已经落盘（`path`）。
+ */
+export interface LogExportResult {
+  scope: LogExportScope
+  filename: string
+  path: string
+  bytes: number
+  entries: number
+  auditEntries: number
+  truncated: boolean
+  revealed: boolean
+}
+
 /**
  * 管理面特权（只有 `internal-*` 插件在装配期拿得到该服务，P2「仅管理面除外」）。
  * 第三方插件调用会得到 FORBIDDEN。
@@ -350,6 +368,7 @@ export interface SettingsApi {
   setHistoryLimit(limit: number): Promise<void>
   plugins(): Promise<unknown[]>
   pluginAction(action: string, payload?: Record<string, unknown>): Promise<unknown>
+  exportLogs(scope?: LogExportScope, options?: CallOptions): Promise<LogExportResult>
   audit(limit?: number): Promise<unknown[]>
   clearAudit(): Promise<void>
   clearHistory(): Promise<void>
@@ -368,6 +387,9 @@ export const settings: SettingsApi = {
   plugins: (options?: CallOptions) => post('ctx.settings.plugins', undefined, options) as Promise<never>,
   pluginAction: (action, payload, options?: CallOptions) =>
     post('ctx.settings.pluginAction', { action, payload }, options) as Promise<unknown>,
+  // 导出要读日志文件 + 写导出文件 + 唤起访达：默认 1200ms 不够，单独放宽
+  exportLogs: (scope = 'session', options?: CallOptions) =>
+    post('ctx.settings.exportLogs', { scope }, { timeoutMs: options?.timeoutMs ?? 8000 }) as Promise<never>,
   audit: (limit = 100, options?: CallOptions) => post('ctx.settings.audit', { limit }, options) as Promise<never>,
   clearAudit: (options?: CallOptions) => post('ctx.settings.clearAudit', undefined, options) as Promise<void>,
   clearHistory: (options?: CallOptions) => post('ctx.settings.clearHistory', undefined, options) as Promise<void>,

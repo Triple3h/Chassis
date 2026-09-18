@@ -148,7 +148,9 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run）
 | 数据位置 | 说明 |
 |---|---|
 | `~/Library/Application Support/Chassis/`（macOS）／`%APPDATA%\Chassis\`（Windows） | 数据目录（`LAUNCHER_DATA_ROOT` 可覆盖；macOS 上会从旧目录 `Launcher/` 自动接手一次） |
-| `.../logs/shell.log` | 壳与内核日志（内核日志走 stderr，由壳转发落盘），排障先看这里 |
+| `.../logs/shell.log` | 壳日志（含内核 stderr 的转发副本），排障先看这里 |
+| `.../logs/kernel.log` | 内核自身日志（跨运行追加；超 2MB 启动时轮转成 `kernel.log.1`） |
+| `.../logs/exports/` | 设置 → 关于「导出日志」生成的诊断文件（内核日志 + 插件状态 + 审计摘要，保留最近 10 份） |
 | `.../extensions/<id>/` | 已安装的插件 |
 | `.../plugins/<id>/` | 插件数据目录（插件的唯一可写处；`file-search` 的文件索引也在这里） |
 | `.../logs/audit-*.jsonl` | 插件调用审计日志（滚动 7 天） |

@@ -20,6 +20,8 @@ pub trait SettingsHost: Send + Sync {
     fn set_history_limit(&self, limit: i64) -> BoxFuture<Result<()>>;
     fn list_plugins(&self) -> BoxFuture<Result<Vec<Value>>>;
     fn plugin_action(&self, action: String, payload: Value) -> BoxFuture<Result<Value>>;
+    /// 导出诊断日志（内核日志 + 插件状态 + 审计摘要）：`scope` = `session`（本次运行）| `all`（跨运行）。
+    fn export_logs(&self, scope: String) -> BoxFuture<Result<Value>>;
     fn query_audit(&self, limit: usize) -> Vec<Value>;
     fn clear_audit(&self);
     fn clear_history(&self);
@@ -80,6 +82,12 @@ impl SettingsService {
             return Err(KernelError::bad_args("action 必填"));
         }
         self.host.plugin_action(action.to_string(), payload).await
+    }
+
+    /// 导出诊断日志（设置页「关于 → 导出日志」）：宿主写文件并返回落点，不在响应里回传全文。
+    pub async fn export_logs(&self, scope: Option<String>) -> Result<Value> {
+        self.guard("exportLogs")?;
+        self.host.export_logs(scope.unwrap_or_else(|| "session".to_string())).await
     }
 
     pub async fn audit(&self, limit: Option<i64>) -> Result<Vec<Value>> {
@@ -143,6 +151,10 @@ impl SettingsService {
                 let payload = params.get("payload").cloned().unwrap_or_else(|| json!({}));
                 self.plugin_action(&action, payload).await
             }
+            "exportLogs" => {
+                let scope = params.get("scope").and_then(Value::as_str).map(str::to_string);
+                self.export_logs(scope).await
+            }
             "audit" => Ok(Value::Array(self.audit(params.get("limit").and_then(Value::as_i64)).await?)),
             "clearAudit" => self.clear_audit().await.map(|_| Value::Null),
             "clearHistory" => self.clear_history().await.map(|_| Value::Null),
@@ -194,6 +206,9 @@ mod tests {
         fn plugin_action(&self, action: String, _payload: Value) -> BoxFuture<Result<Value>> {
             Box::pin(async move { Ok(json!({ "action": action })) })
         }
+        fn export_logs(&self, scope: String) -> BoxFuture<Result<Value>> {
+            Box::pin(async move { Ok(json!({ "scope": scope })) })
+        }
         fn query_audit(&self, limit: usize) -> Vec<Value> {
             vec![json!({ "limit": limit })]
         }
@@ -233,6 +248,8 @@ mod tests {
         assert_eq!(service.call("get", &json!({})).await.unwrap()["hotkey"], "Alt+Space");
         assert_eq!(service.call("plugins", &json!({})).await.unwrap()[0]["id"], "demo");
         assert_eq!(service.call("pluginAction", &json!({ "action": "reload" })).await.unwrap()["action"], "reload");
+        assert_eq!(service.call("exportLogs", &json!({ "scope": "all" })).await.unwrap()["scope"], "all");
+        assert_eq!(service.call("exportLogs", &json!({})).await.unwrap()["scope"], "session", "缺省范围 = 最近一次会话");
         service.call("clearHistory", &json!({})).await.unwrap();
         assert_eq!(host.history_cleared.load(Ordering::SeqCst), 1);
         service.call("revealPlugin", &json!({ "id": "demo" })).await.unwrap();
