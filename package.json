@@ -26,6 +26,7 @@
     "smoke:first-batch": "node scripts/smoke-first-batch.mjs",
     "icon": "node scripts/make-icon.mjs",
     "app:local": "node scripts/pack-local-app.mjs",
+    "app:win": "node scripts/pack-win.mjs",
     "shell:dev": "cargo run --manifest-path apps/shell/Cargo.toml"
   },
   "devDependencies": {

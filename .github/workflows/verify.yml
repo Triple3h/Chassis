@@ -38,3 +38,31 @@ jobs:
 
       - name: cargo test --workspace
         run: cargo test --workspace
+
+  # Windows 侧同样要守：平台分支（UIA / icacls / App Paths / Everything IPC / 索引）
+  # 只有真 Windows 能验证 —— 每次 PR 都过一遍编译 + 测试，避免"只在打 tag 时才发现编不过"。
+  verify-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck（TS / Vue）
+        run: pnpm typecheck
+
+      - name: cargo check --workspace
+        run: cargo check --workspace
+
+      - name: cargo test（内核 / SDK / 各插件）
+        run: cargo test --workspace

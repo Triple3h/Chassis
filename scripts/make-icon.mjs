@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 生成应用图标（矢量源 → 多尺寸 PNG → .icns）。
+ * 生成应用图标（矢量源 → 多尺寸 PNG → .icns / .ico）。
  *
  * 为什么要脚本而不是塞一张位图：图标要出现在 16px（Finder 列表）到 1024px（预览）之间，
  * 手工放一张位图在高分屏 / 小尺寸下都会糊。这里用 SVG 作为唯一源，任何尺寸都是重绘。
@@ -11,7 +11,11 @@
  *
  * 依赖：rsvg-convert（brew install librsvg）、iconutil（macOS 自带）
  * 用法：npm run icon
- * 产物：apps/shell/icons/{icon.svg, icon.png, icon.icns, tray.svg, tray.png}
+ * 产物：apps/shell/icons/{icon.svg, icon.png, icon.icns, icon.ico, tray.svg, tray.png}
+ *
+ * `.ico`：手写封装（PNG-in-ICO，Vista+ 原生支持），不引第三方库 ——
+ * 图标链路已经有一个 brew 依赖（rsvg-convert），再加一个 npm 依赖不划算。
+ * **产物必须入库**：CI 上跑不了本脚本（macOS runner 没有 rsvg-convert / iconutil）。
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -248,4 +252,47 @@ line('✓ icon.icns')
 raster(iconSvgPath, path.join(iconsDir, 'icon.png'), 512)
 raster(traySvgPath, path.join(iconsDir, 'tray.png'), tray.width, tray.height)
 line(`✓ icon.png (512) / tray.png (${tray.width}×${tray.height})`)
+
+// 4) .ico（Windows：窗口图标 / 资源管理器 / NSIS 安装器）
+const icoPath = path.join(iconsDir, 'icon.ico')
+const icoSizes = [16, 32, 48, 64, 128, 256]
+const icoBuffer = packIco(
+  icoSizes.map((size) => {
+    const file = path.join(iconsDir, `.ico-${size}.png`)
+    raster(iconSvgPath, file, size)
+    const bytes = fs.readFileSync(file)
+    fs.rmSync(file, { force: true })
+    return { size, bytes }
+  }),
+)
+fs.writeFileSync(icoPath, icoBuffer)
+line(`✓ icon.ico (${icoSizes.join('/')}，PNG-in-ICO)`)
 line('\n完成。重新打包：npm run app:local')
+
+/**
+ * PNG-in-ICO 封装（ICONDIR + ICONDIRENTRY + 各尺寸 PNG 数据）。
+ * 宽/高字段 0 表示 256（1 字节装不下）。
+ */
+function packIco(images) {
+  const header = Buffer.alloc(6)
+  header.writeUInt16LE(0, 0) // reserved
+  header.writeUInt16LE(1, 2) // type = icon
+  header.writeUInt16LE(images.length, 4)
+
+  const entries = []
+  let offset = 6 + images.length * 16
+  for (const { size, bytes } of images) {
+    const entry = Buffer.alloc(16)
+    entry[0] = size >= 256 ? 0 : size
+    entry[1] = size >= 256 ? 0 : size
+    entry[2] = 0 // 调色板数（真彩为 0）
+    entry[3] = 0 // reserved
+    entry.writeUInt16LE(1, 4) // planes
+    entry.writeUInt16LE(32, 6) // bit count
+    entry.writeUInt32LE(bytes.length, 8)
+    entry.writeUInt32LE(offset, 12)
+    entries.push(entry)
+    offset += bytes.length
+  }
+  return Buffer.concat([header, ...entries, ...images.map((image) => image.bytes)])
+}

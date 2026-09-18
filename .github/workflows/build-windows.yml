@@ -1,0 +1,55 @@
+# Windows 构建与打包（M6 阶段 B：docs/m5-rust-and-windows.md §B3.7）。
+#
+# 为什么只有 macOS job 在本地跑、Windows 交给 CI：交叉编译链不完整（tauri-build 需要
+# llvm-rc / Windows SDK），真机 runner 是唯一可靠的验证点 —— 仓库公开 ⇒ Actions 免费。
+#
+# 产物：dist-app/Chassis-<version>-win-<arch>.zip（绿色版）。
+# 分发注意：工作流 artifact 下载需要登录 ⇒ 对外分发走 GitHub Releases（打 tag 时上传）。
+name: build-windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck（TS / Vue）
+        run: pnpm typecheck
+
+      # 内核 / SDK / 各插件 crate 的测试在 Windows 上跑一遍：
+      # 这是平台分支（UIA / icacls / App Paths / 索引后端）的第一道真机验证。
+      - name: cargo test（内核 / SDK / 各插件）
+        run: cargo test --workspace
+
+      - name: build（kernel / ui / plugins）
+        run: node scripts/build-all.mjs
+
+      # 壳单编 + 组装绿色版 + 压 zip（资源布局与壳的查找顺序对齐，见脚本头部注释）
+      - name: package（绿色版 zip）
+        run: node scripts/pack-win.mjs --skip-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Chassis-win
+          path: dist-app/*.zip
+          if-no-files-found: error
+
+      # TODO（M6 收尾）：把 TS 侧测试（pnpm test，harness spawn 真内核二进制）也搬到 Windows 上；
+      # 现在它只在 Linux verify 里跑 —— Windows 的进程 / 路径差异还没验证过。
