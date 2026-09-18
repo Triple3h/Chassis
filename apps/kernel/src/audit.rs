@@ -19,7 +19,8 @@ use crate::contract::{AuditRecord, ErrorShape};
 use crate::util::now_ms;
 use crate::util::text::truncate_for_audit;
 
-const RING_SIZE: usize = 500;
+/// 内存环形缓冲容量（设置页「最近审计」与「导出日志」的会话范围都取它）
+pub const RING_SIZE: usize = 500;
 const KEEP_DAYS: i64 = 7;
 
 #[derive(Debug, Clone)]

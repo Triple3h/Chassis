@@ -399,10 +399,8 @@ impl PluginManager {
                 });
                 continue;
             }
-            if let Err(err) = self.load(&record.id).await {
-                let message = err.message.clone();
-                self.log("error", &format!("插件加载失败：{}（{message}）", record.id));
-            }
+            // 加载失败的原因由 `load()` 自己记（reload / 安装路径也同样受益）
+            let _ = self.load(&record.id).await;
         }
         let active = self.list().iter().filter(|record| matches!(record.state, PluginState::Active | PluginState::Degraded)).count();
         let total = self.records().len();
@@ -594,6 +592,11 @@ impl PluginManager {
             let _ = self.disable(&id, SessionCloseReason::Disable).await;
             self.records().remove(&id);
         }
+        let builtin_count = found.values().filter(|(_, builtin)| *builtin).count();
+        self.log(
+            "info",
+            &format!("插件扫描：发现 {} 个（出厂 {builtin_count} / 扩展 {}）", found.len(), found.len() - builtin_count),
+        );
     }
 
     /// 出厂身份表：`id → essential`，只从出厂 bundle 的清单读（`builtin_roots`，靠后覆盖靠前）。
@@ -653,6 +656,7 @@ impl PluginManager {
                     entry.state = PluginState::Error;
                     entry.error = Some(issue.message.clone());
                 });
+                self.log("error", &format!("插件加载失败：{id}（{}：{}）", issue.code, issue.message));
                 self.emit_changed();
                 return Err(KernelError::new(issue.code, issue.message));
             }
@@ -684,6 +688,11 @@ impl PluginManager {
                 args: None,
             });
         }
+        if !denied.is_empty() {
+            let mut list: Vec<&str> = denied.iter().map(String::as_str).collect();
+            list.sort();
+            self.log("warn", &format!("插件 {id} 有 {} 项能力被用户拒绝：{}", denied.len(), list.join(", ")));
+        }
 
         self.validate_entries(id, &manifest).await;
         self.adopt_legacy_data_dir(id).await;
@@ -708,6 +717,7 @@ impl PluginManager {
                         entry.state = PluginState::Error;
                         entry.error = Some(format!("插件页服务启动失败：{}", err.message));
                     });
+                    self.log("error", &format!("插件加载失败：{id}（插件页服务启动失败：{}）", err.message));
                     self.emit_changed();
                     return self.get(id).ok_or_else(|| KernelError::not_found(format!("插件不存在：{id}")));
                 }
@@ -737,7 +747,15 @@ impl PluginManager {
         self.loaded.lock().unwrap_or_else(|err| err.into_inner()).insert(id.to_string(), LoadedPlugin { disposers });
 
         self.set_state(id, |entry| entry.state = PluginState::Active);
-        self.log("info", &format!("插件已激活：{id}（{} 条命令）", manifest.commands.len()));
+        self.log(
+            "info",
+            &format!(
+                "插件已激活：{id} v{}（{}，{} 条命令）",
+                manifest.version,
+                if record.builtin { "出厂" } else { "扩展" },
+                manifest.commands.len()
+            ),
+        );
         self.emit_changed();
         self.prewarm_search_sources(id, &manifest);
         self.get(id).ok_or_else(|| KernelError::not_found(format!("插件不存在：{id}")))
@@ -784,6 +802,7 @@ impl PluginManager {
             entry.listener_port = None;
             entry.dev_url = None;
         });
+        self.log("info", &format!("插件已停用：{id}（{}）", reason.as_str()));
         self.emit_changed();
     }
 
@@ -1009,10 +1028,16 @@ impl PluginManager {
             ));
         }
 
-        if outcome.is_ok() && !was_disabled {
-            self.deps
-                .bus
-                .emit(names::PLUGIN_RELOADED, &json!({ "pluginId": id, "commands": views, "ok": self.is_active(&id) }));
+        if outcome.is_ok() {
+            self.log(
+                "info",
+                &format!("插件安装完成：{id} v{}（{}）", manifest.version, if existed { "覆盖更新" } else { "新增" }),
+            );
+            if !was_disabled {
+                self.deps
+                    .bus
+                    .emit(names::PLUGIN_RELOADED, &json!({ "pluginId": id, "commands": views, "ok": self.is_active(&id) }));
+            }
         }
         outcome
     }
@@ -1167,6 +1192,7 @@ impl PluginManager {
         let _ = self.deps.overrides.clear(id);
         let _ = self.deps.plugin_settings.clear(id);
         self.records().remove(id);
+        self.log("info", &format!("插件已卸载：{id}"));
         self.emit_changed();
         Ok(())
     }
@@ -1188,6 +1214,7 @@ impl PluginManager {
         let _ = std::fs::remove_dir_all(&record.dir);
         // 备份一起清：否则下一次安装的备份里还躺着那个坏版本
         let _ = std::fs::remove_dir_all(self.deps.data_root.join("extensions").join(".backup").join(id));
+        self.log("info", &format!("已恢复出厂版本：{id}（删除 extensions 下的覆盖）"));
         self.scan().await;
         // reload 的语义正是我们需要的：停用旧进程 → 读盘 → 加载 → 广播 plugin/reloaded（UI 重开页面）
         self.reload(id).await?;

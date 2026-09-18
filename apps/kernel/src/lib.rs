@@ -49,6 +49,9 @@ pub async fn run() -> i32 {
         crate::log_error!("无法创建数据目录 {}：{err}", options.data_root.display());
         return 1;
     }
+    // 日志落盘（<dataRoot>/logs/kernel.log）：设置页「导出日志」的数据源；
+    // 必须在装配之前 —— 插件加载日志正是排障时最要看的那段。
+    crate::logging::init(&options.data_root);
     crate::log_info!("数据目录：{}", options.data_root.display());
     let roots = options.builtin_roots.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(", ");
     crate::log_info!("出厂插件根：{roots}");
