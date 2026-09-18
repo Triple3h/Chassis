@@ -741,6 +741,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "launcher-plugin-clipboard-history"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "image",
+ "launcher-plugin-sdk",
+ "serde",
+ "serde_json",
+ "sha1",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "launcher-plugin-file-search"
 version = "0.1.0"
 dependencies = [

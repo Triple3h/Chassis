@@ -1,0 +1,48 @@
+[package]
+name = "launcher-plugin-clipboard-history"
+version = "0.1.0"
+edition = "2021"
+description = "剪贴板历史（clipboard-history）逻辑层：入库 / 检索 / 回写剪贴板（Windows 专属）"
+license = "MIT"
+publish = false
+
+[lib]
+name = "launcher_plugin_clipboard_history"
+path = "src/lib.rs"
+
+# bin 名 = commands[].name（plugin-spec §2.2 的 N1 铁律）
+[[bin]]
+name = "record"
+path = "src/bin/record.rs"
+
+[[bin]]
+name = "clip-io"
+path = "src/bin/clip_io.rs"
+
+[[bin]]
+name = "search"
+path = "src/bin/search.rs"
+
+[dependencies]
+launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 去重键与图片 blob 的文件名（与 app-launcher 同款）
+sha1 = "0.10"
+# blob → base64（view 侧要显示缩略图，iframe 里读不到本地路径）
+base64 = "0.22"
+
+# Windows 后端：剪贴板读写（CF_UNICODETEXT / CF_DIBV5 / CF_HDROP）+ DIB ↔ PNG。
+# 只在 Windows 目标上编 —— 插件整包声明 `platforms: ["windows"]`，但**纯逻辑**（入库、
+# 去重、过滤、打分）是跨平台的，在 macOS 上也要能跑单测。
+# 版本与 tauri 依赖树里的 windows 对齐（0.61），避免同一 crate 编译两份。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_UI_Shell",
+] }
+# DIB（BITMAPINFOHEADER + 像素）拼一个文件头就能交给它解码；PNG 编码用于存缩略图
+image = { version = "0.25", default-features = false, features = ["png", "bmp"] }

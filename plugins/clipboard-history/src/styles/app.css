@@ -1,0 +1,6 @@
+@import "tailwindcss";
+@import "../../../../packages/ui/styles/theme.css";
+
+/* Tailwind v4 不会自动跨目录扫描，必须显式声明 */
+@source "../";
+@source "../../../../packages/ui";

@@ -13,6 +13,7 @@ members = [
     # 逻辑层插件（有 no-view / script 命令的）：逐个列出（glob `plugins/*` 会匹配到没有清单的纯 view 插件目录）
     "plugins/app-launcher",
     "plugins/calc-pad",
+    "plugins/clipboard-history",
     "plugins/file-search",
     "plugins/host-manager",
     "plugins/screen-recorder",

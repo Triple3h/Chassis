@@ -1,0 +1,122 @@
+{
+  "name": "clipboard-history",
+  "title": "剪贴板历史",
+  "author": "triple3h",
+  "description": "自动记录复制过的文本 / 图片 / 文件，随时搜回来再贴一次（Windows 专属）",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "2",
+  "icon": "clipboard",
+  "categories": [
+    "tool"
+  ],
+  "platforms": [
+    "windows"
+  ],
+  "history": false,
+  "capabilities": [
+    "clipboard.watch",
+    "clipboard.write",
+    "exec.spawn",
+    "hostUi",
+    "shell.open"
+  ],
+  "commands": [
+    {
+      "name": "history",
+      "title": "剪贴板历史",
+      "subtitle": "搜回复制过的文本 / 图片 / 文件",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "搜索剪贴板历史，回车贴回",
+      "keywords": [
+        "剪贴板",
+        "复制",
+        "粘贴",
+        "历史",
+        "clipboard",
+        "paste",
+        "jianqieban",
+        "fuzhi"
+      ],
+      "icon": "clipboard"
+    },
+    {
+      "name": "search",
+      "title": "剪贴板历史",
+      "mode": "script",
+      "contributes": true,
+      "keywords": [
+        "剪贴板",
+        "复制历史",
+        "clipboard"
+      ],
+      "icon": "clipboard"
+    },
+    {
+      "name": "record",
+      "title": "记录一次剪贴板（脚本）",
+      "mode": "script",
+      "icon": "clipboard"
+    },
+    {
+      "name": "clip-io",
+      "title": "剪贴板历史读写（脚本）",
+      "mode": "script",
+      "icon": "clipboard"
+    }
+  ],
+  "settings": [
+    {
+      "key": "max-entries",
+      "type": "select",
+      "title": "历史条数上限",
+      "description": "超过后从最旧的一条开始丢弃（固定项不丢）",
+      "default": "500",
+      "options": [
+        { "value": "200", "label": "200 条" },
+        { "value": "500", "label": "500 条" },
+        { "value": "1000", "label": "1000 条" }
+      ]
+    },
+    {
+      "key": "ignore-sensitive",
+      "type": "switch",
+      "title": "跳过疑似密码 / 卡号",
+      "description": "高熵串、通过 Luhn 校验的卡号、含 token / secret / BEGIN PRIVATE KEY 的文本不入库",
+      "default": true
+    },
+    {
+      "key": "capture-images",
+      "type": "switch",
+      "title": "记录图片",
+      "description": "复制图片时存一张缩略图（长边 1024）到插件数据目录",
+      "default": true
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run build:view && npm run build:scripts",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:scripts": "cargo build --release -p launcher-plugin-clipboard-history && node ../../scripts/build-plugin.mjs clipboard-history --copy-scripts --keep-dist",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts",
+    "test:scripts": "cargo test -p launcher-plugin-clipboard-history",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@launcher/ui": "workspace:*",
+    "@launcher/api": "workspace:*",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}
