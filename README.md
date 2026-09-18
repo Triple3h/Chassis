@@ -33,7 +33,7 @@ Chassis 的选择是把边界一条条钉死：
 - **唤出** —— 默认热键 `⌥Space`（被占用自动回退并提示实际生效的键）；托盘左键唤出 / 隐藏；单实例；失焦或 `Esc` 隐藏；唤出时自动带入前台选中的文本。
 - **搜索** —— 拼音（全拼 / 首字母 / 多音字变体）、前缀与模糊匹配；多插件结果合并后按「匹配 + 最近使用 + 频率」打分；已固定与最近使用参与搜索；输入算式（如 `10+22`）会直接给出结果，回车打开计算稿纸接着算。
 - **图标网格** —— 分区（已固定 / 最近使用 / 最佳匹配）可折叠，列数按窗口宽度计算；键盘全网格导航、动作菜单、二级面板、固定项拖拽重排；超过 200 条自动虚拟滚动。
-- **开箱可用** —— 14 个出厂插件：应用启动、文件搜索、网址直达、聚合翻译、TOTP 验证码、Hosts 块管家、文本比对、JSON 工具箱、备忘快贴、计算稿纸、Markdown 笔记、ToDo 待办、录屏助手、设置与插件管理。
+- **开箱可用** —— 15 个出厂插件：应用启动、文件搜索、网址直达、聚合翻译、TOTP 验证码、Hosts 块管家、文本比对、JSON 工具箱、备忘快贴、计算稿纸、Markdown 笔记、ToDo 待办、录屏助手（macOS 专属）、剪贴板历史（Windows 专属）、设置与插件管理。
 - **可扩展** —— 插件 = 一个目录：`package.json` 清单 + 可选 iframe 页面（`view`）+ 可选逻辑层可执行产物（`no-view` / `script`）；支持目录 / zip 安装（zip 也可直接拖进窗口），用到的能力必须在清单里声明。
 - **可审计** —— 未声明的 capability 在装配期就不挂载；插件 → 宿主的每次调用都过统一入口并落本地审计日志。
 - **轻量且离线** —— Rust 内核实测常驻约 14 MB；运行时不需要本机装 Node 或 Rust；数据全部保存在本机（底座自身不联网）。
@@ -81,7 +81,7 @@ Chassis 的选择是把边界一条条钉死：
 
 ```bash
 pnpm install
-pnpm build        # 内核 + 启动台 UI + 14 个出厂插件
+pnpm build        # 内核 + 启动台 UI + 15 个出厂插件
 pnpm app:local    # macOS：release 编译 + 组装 + 代码签名 → dist-app/Chassis.app
 pnpm app:win      # Windows：release 编译 + 组装绿色版 → dist-app/Chassis-<version>-win-x64.zip
 ```
@@ -228,7 +228,7 @@ packages/
   plugin-sdk-rs/    launcher-plugin-sdk —— 逻辑层 Rust SDK（ctx / done / fail / log / progress / on_query）
   ui/               @launcher/ui —— 插件 UI 套件（设计令牌 + AppShell / UiIcon / UiDialog
                     + virtual / clipboard / keys / theme / toast），构建期打进插件产物
-plugins/            14 个出厂插件（见下表；view 是 Vite + Vue，逻辑层是 Rust 可执行产物）
+plugins/            15 个出厂插件（见下表；view 是 Vite + Vue，逻辑层是 Rust 可执行产物）
 tests/
   fixtures/echo-plugin/  契约测试插件（逻辑层 = SDK 的 echo 示例二进制）
   unit/ contract/ smoke/ 单元 / 契约 / 验收（harness 直接拉起真内核二进制）
@@ -254,6 +254,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | `markdown-notes` | `notes`（view） | Vite + Vue / — |
 | `todo` | `todo`（view） | Vite + Vue / — |
 | `screen-recorder`（macOS 专属，清单声明 `platforms`） | `recorder`（view）+ `rec-start` / `rec-stop` / `rec-status` / `rec-shot` / `rec-permission` / `rec-list`（script） | Vite + Vue / Rust |
+| `clipboard-history`（Windows 专属，清单声明 `platforms`） | `history`（view）+ `search`（script，贡献型）+ `record` / `clip-io`（script） | Vite + Vue / Rust |
 
 ## 文档
 
@@ -288,7 +289,7 @@ pnpm typecheck           # 全部工作区包（Vue 工程走各自的 vue-tsc�
 pnpm test                # 单元 / 契约 / 验收 + 各插件的 core 用例
 pnpm build               # kernel + ui + 全部出厂插件
 pnpm spec-check          # 出厂插件规范自检（清单 / 能力 / 产物 / 远程资源）
-pnpm smoke:real          # 真内核 + 14 个出厂插件冒烟
+pnpm smoke:real          # 真内核 + 15 个出厂插件冒烟
 ```
 
 ## 路线图与已知问题

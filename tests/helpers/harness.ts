@@ -254,7 +254,10 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
               ? { selection: showSelection }
               : message.method === 'app.usage'
                 ? { ok: true, rss: usage.rss, cpuMs: usage.cpuMs }
-                : null
+                // 剪贴板监听：假壳按「支持」应答（真壳在 Windows 上开线程监听，其余平台返回 unsupported）
+                : message.method === 'clipboard.watch'
+                  ? { ok: true }
+                  : null
         const reply = JSON.stringify({ jsonrpc: '2.0', id: message.id, result })
         debugLink('→', reply)
         stdin.write(`${reply}\n`)

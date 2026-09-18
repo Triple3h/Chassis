@@ -466,7 +466,7 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 | B2.3 `host-manager`（UAC + `icacls` 免授权写入） | ✅ 代码就位 | `plugins/host-manager/src/lib.rs` |
 | B2.4 `totp`（扫描目录 + 路径分隔符） | ✅ | `plugins/totp/src/lib.rs` |
 | B2.7 预览 | 🚧 **第一步（文本 / 元数据）已做**；富预览未做 | `plugins/file-search/src/preview.rs` |
-| B2.9 `clipboard-history` | ⏳ 未做 | — |
+| B2.9 `clipboard-history` | ✅ 代码就位（**待 Windows 实机**） | 壳 `primitives/clipboard.rs`、内核 `api.rs` / `kernel.rs` / `manifest.rs`、`plugins/clipboard-history/` |
 | B3 打包（`.ico` / 彩色托盘 / `pack-win.mjs` / `nsis` / 便携 zip） | ✅ 代码就位（NSIS 待实机） | `scripts/{make-icon,pack-win}.mjs`、`apps/shell/tauri.conf.json` |
 | B3.7 CI | 🚧 新增 `build-windows.yml`（构建 + `cargo test` + 打包 + artifact）；`release.yml` 待发布流程定 | `.github/workflows/` |
 | B4 字体栈 | ✅ | `apps/launcher-ui/src/styles/app.css`、`packages/ui/styles/theme.css` |
@@ -638,6 +638,20 @@ cd apps/shell && RC=... cargo check --target x86_64-pc-windows-msvc
 | 插件 MVP（仅文本） | 2–3 |
 | 图片 / 文件 + 预览页 | 2–3 |
 
+**落点（2026-09-18，代码就位；待 Windows 实机验收）**：
+
+| 层 | 文件 | 做了什么 |
+|---|---|---|
+| 壳 | `apps/shell/src/primitives/clipboard.rs` | `clipboard.watch { enabled }`：message-only 窗口 + `AddClipboardFormatListener` → `WM_CLIPBOARDUPDATE`；变化时经 `Link::notify` 发 `clipboard/changed { changeCount, kinds }`（**不带内容**）。非 Windows 返回 `{ ok:false, reason:'unsupported' }` |
+| 内核 | `manifest.rs` / `services/primitives.rs` / `api.rs` / `kernel.rs` / `plugin/manager.rs` | 新 capability `clipboard.watch`（高风险、可拒绝）；`link.handle("clipboard/changed")` → 找出订阅插件 → `exec.run(id, "record", 5s)`（每个插件一个 spawn、互不等待）；插件装配完成与每次 `pluginAction` 后 `sync_clipboard_watch()` 幂等开/关 |
+| 契约 | `plugin-spec` §8 + §8.1、`requirements` §6.1（原语行 + 壳通知表）、`packages/plugin-manifest/src/capabilities.ts`、`scripts/spec-check.mjs` | 四处能力清单同步；§8.1 写清「事件 → `record` 命令」的契约（命令名固定、不带内容、`changeCount` 去重、自写回环由插件侧挡） |
+| 插件 | `plugins/clipboard-history/` | `platforms: ["windows"]`；`history`（view）+ `search`（贡献型）+ `record` / `clip-io`（script）；文本 / 图片 / 文件路径三类；JSONL 追加写 + `blobs/<sha1>.png` LRU；去重合并、疑似密码与卡号过滤、暂停 / 固定 / 删除 / 清空 |
+
+**与计划的偏差（有意为之）**：计划里「壳补 `clipboard.readText/readImage/readFiles`」没做 —— **内容一律由插件的 `record` 命令自己读**（plugin-spec §8.1）。
+理由：图片经「壳 → 内核 → 插件」三跳传 base64 是纯浪费；读取本来就该是这个插件的能力，壳只负责「变了」这件事。
+
+**未做**：来源 App 黑名单（复制瞬间的前台窗口）；README 隐私段与「会弹哪些权限」对照表待补。
+
 ### B3 打包与分发
 
 1. **构建通道（已定，2026-09-17）**：**GitHub Actions**，`macos-latest` + `windows-latest` 双 job；仓库后续**公开**（MIT），公开仓库的 Actions **免费且无额度限制**（私有仓库下 macOS runner 按 10× 计费，公开后这一项消失）。两端的产物都在 CI 上原生编译，不做交叉编译。
@@ -783,7 +797,7 @@ cd apps/shell && RC=... cargo check --target x86_64-pc-windows-msvc
 | 搜索打分 | `apps/kernel/src/search.ts` + `pinyin.ts` | `apps/kernel/src/search/*.rs` |
 | 数据兼容 | `config.ts` / `history.ts` / `legacy.ts` / `overrides.ts` / `pluginSettings.ts` | 同名 `.rs` |
 | 壳原语 | `apps/shell/src/primitives/*.rs` | 增加 Windows 分支（B1） |
-| 剪贴板原语 | `apps/shell/src/primitives/clipboard.rs`（**只有纯文本**；`arboard` 为 `default-features = false`） | 加 `watch` / 读图 / 读文件（Windows：`AddClipboardFormatListener`，§B2.9） |
+| 剪贴板原语 | `apps/shell/src/primitives/clipboard.rs`（**只有纯文本**；`arboard` 为 `default-features = false`） | ✅ 加 `clipboard.watch`（Windows：`AddClipboardFormatListener`）；读图 / 读文件**由插件自己做**（§B2.9，见该节的「与计划的偏差」） |
 | 插件平台维度 | 无（白名单 `scripts/lib/manifest-keys.mjs`） | 清单 `platforms` + `plugin/manager.rs` 装配期跳过（§B2.8） |
 | 插件逻辑层 | `plugins/*/src/no-view/*.ts`（10 文件 / ≈1700 行） | `plugins/*/src/*.rs`（crate 根 = 插件目录） |
 | 构建 | `scripts/{build-all,pack-local-app,spec-check}.mjs` | 增加 Rust 构建与 `scripts/pack-win.mjs` |
