@@ -61,7 +61,7 @@ export const useDataStore = defineStore('data', () => {
     }, 80)
   }
 
-  async function runSearch(query: string): Promise<void> {
+  async function runSearch(query: string, attempt = 0): Promise<void> {
     const seq = ++searchSeq
     searching.value = true
     try {
@@ -69,7 +69,14 @@ export const useDataStore = defineStore('data', () => {
       if (seq !== searchSeq) return // 丢弃过期响应
       response.value = data
     } catch {
-      /* 内核未就绪时保持旧结果（不闪空白） */
+      // 内核未就绪 / 请求被打断时保持旧结果（不闪空白），但**必须重试一次**：
+      // 一次性失败留在界面上的就是「query 与 response 不匹配」（空输入却显示上次查询的结果，
+      // 表现为空态），而它不会自愈 —— 用户只能自己敲一下输入框。
+      if (attempt < 1 && seq === searchSeq) {
+        window.setTimeout(() => {
+          if (seq === searchSeq) void runSearch(query, attempt + 1)
+        }, 200)
+      }
     } finally {
       if (seq === searchSeq) searching.value = false
     }

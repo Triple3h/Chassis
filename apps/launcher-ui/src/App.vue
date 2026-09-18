@@ -463,7 +463,13 @@ function handleKernelEvent(event: string, payload: unknown): void {
   }
   if (event === 'shell/visibility') {
     sawVisibilityEvent = true
-    setWindowVisible((payload as { visible?: boolean })?.visible !== false)
+    const visible = (payload as { visible?: boolean })?.visible !== false
+    setWindowVisible(visible)
+    // 每次唤出都让首页（空查询）重查一次。
+    // 否则会卡在「query 已清空、response 还是上一次带查询的结果」这种不一致里：
+    // 带查询的响应没有 `groups.plugins`（内核只在空输入给「已安装插件」分组），
+    // 渲染出来就是空态「还没有安装任何插件」，而且没有任何事件会把它救回来。
+    if (visible && !ui.query) void data.runSearch('').catch(() => undefined)
     return
   }
   if (event === 'ui/hide') {
