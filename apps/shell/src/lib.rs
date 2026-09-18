@@ -76,6 +76,10 @@ pub fn run() {
                 logging::log(&format!("[shell] 托盘初始化失败：{err}"));
             }
 
+            // ③b 选中文本预热：前台 App 一换就替它把无障碍开关打开
+            //（Chromium 系默认不建 AX 树，详见 primitives/selection.rs）
+            primitives::selection::start_prewarm();
+
             // ④ 内核请求 → 壳原语
             link_setup.set_handler(primitives::dispatch);
 

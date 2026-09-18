@@ -350,6 +350,9 @@ launcher/
 - 多屏：唤出时读鼠标坐标 → 选最近屏 → 该屏工作区居中（y 取 1/4 高度处更符合习惯）
 - **选中文本**（`selection.read`）：macOS 走 Accessibility API（`AXFocusedUIElement` → `AXSelectedText`），
   需要"辅助功能"权限；未授权时**首次**带 `prompt` 调用一次系统引导，之后静默返回 `reason: 'denied'`。
+  读不到时壳会先替前台 App 打开 `AXEnhancedUserInterface` / `AXManualAccessibility`（Chromium 系默认不建
+  无障碍树 —— Chrome、Electron 的 VS Code / ZCode 都在此列）再短重试（预算约 90ms），并有后台线程按
+  前台 App 预热，使常规唤出不吃这次等待；原生 App（企微、备忘录等）本就直接可读，不受影响。
   Windows 走 UI Automation（`GetFocusedElement` → `TextPattern.GetSelection`），**不需要任何授权**；
   只支持实现了 TextPattern 的控件（原生编辑框 / 浏览器内容 / Office），其余静默返回 `reason: 'unsupported'`。
   读取必须发生在 `window.show` **之前**（窗口一显示，前台 App 就变成了自己，选区也随之消失）
