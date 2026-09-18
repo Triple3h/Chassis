@@ -38,12 +38,10 @@ jobs:
       - name: cargo test（内核 / SDK / 各插件）
         run: cargo test --workspace
 
-      - name: build（kernel / ui / plugins）
-        run: node scripts/build-all.mjs
-
-      # 壳单编 + 组装绿色版 + 压 zip（资源布局与壳的查找顺序对齐，见脚本头部注释）
-      - name: package（绿色版 zip）
-        run: node scripts/pack-win.mjs --skip-build
+      # 构建 + 组装绿色版 + 压 zip 全在 pack-win 里（build-all → 资源就位 → cargo build 壳 → 打包）。
+      # 之前分两步且给 --skip-build，壳从未被编过 ⇒ 「找不到壳产物」失败（首次 CI 抓到）。
+      - name: package（构建 + 绿色版 zip）
+        run: node scripts/pack-win.mjs
 
       - uses: actions/upload-artifact@v4
         with:

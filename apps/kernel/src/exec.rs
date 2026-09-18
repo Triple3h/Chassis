@@ -589,7 +589,10 @@ impl SearchWorker {
     }
 }
 
-#[cfg(test)]
+// 夹具是 POSIX shell 假插件（write_script 写 `#!/bin/sh` 脚本）：Windows 上 CreateProcess
+// 需要真正的 PE，直接 spawn 会得到 os error 193（不是合法的 Win32 应用）⇒ 本模块暂为 Unix-only。
+// 产品路径不受影响（Windows 上插件产物本来就是 .exe）；Windows 夹具（小 demo.exe）列入 M6 收尾。
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;

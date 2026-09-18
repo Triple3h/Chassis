@@ -57,8 +57,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/build-all.mjs
-      - run: node scripts/pack-win.mjs --skip-build
+      # 不带 --skip-build：pack-win 内部按序做 build-all（内核/UI/插件）→ 资源就位 →
+      # cargo build 壳 → 组装 + 压 zip。之前拆成两步且给 --skip-build，壳从未被编过，
+      # pack-win 以「找不到壳产物」失败（首次 CI 抓到）。
+      - run: node scripts/pack-win.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: Chassis-win-x64
