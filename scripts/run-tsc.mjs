@@ -61,9 +61,12 @@ for (const dir of dirs.sort()) {
   const useOwnScript = Boolean(pkg?.scripts?.typecheck) && hasVueSource(dir)
 
   process.stdout.write(`\n▶ ${useOwnScript ? 'vue-tsc' : 'tsc'} ${rel}\n`)
+  // Windows 上 pnpm / tsc 都是 .cmd：Node 18.20.2+/20.12.2+（含 22）禁止直接 spawn
+  // .cmd/.bat（EINVAL）—— 必须经 shell，否则 18 个包会「零输出瞬间全失败」。
+  const shell = process.platform === 'win32'
   const result = useOwnScript
-    ? spawnSync('pnpm', ['--filter', pkg.name, 'run', 'typecheck'], { stdio: 'inherit', cwd: repoRoot })
-    : spawnSync(tscBin, ['-p', dir], { stdio: 'inherit', cwd: repoRoot })
+    ? spawnSync('pnpm', ['--filter', pkg.name, 'run', 'typecheck'], { stdio: 'inherit', cwd: repoRoot, shell })
+    : spawnSync(tscBin, ['-p', dir], { stdio: 'inherit', cwd: repoRoot, shell })
   if (result.status !== 0) failed += 1
 }
 

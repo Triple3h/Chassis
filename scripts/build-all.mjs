@@ -19,7 +19,14 @@ const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const pnpmCmd = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 
 function run(cmd, args, cwd) {
-  const result = spawnSync(cmd, args, { stdio: 'inherit', cwd, env: { ...process.env } })
+  // Windows 上 pnpm.cmd / npm.cmd 必须经 shell 启动：Node 18.20.2+/20.12.2+（含 22）
+  // 出于安全变更禁止直接 spawn .cmd/.bat（抛 EINVAL，CI 上表现为「命令失败」而看不到原因）。
+  const result = spawnSync(cmd, args, {
+    stdio: 'inherit',
+    cwd,
+    env: { ...process.env },
+    shell: process.platform === 'win32',
+  })
   if (result.status !== 0) {
     console.error(`✗ 命令失败：${cmd} ${args.join(' ')}`)
     process.exit(result.status ?? 1)
