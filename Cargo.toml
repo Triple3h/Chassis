@@ -16,6 +16,7 @@ members = [
     "plugins/clipboard-history",
     "plugins/file-search",
     "plugins/host-manager",
+    "plugins/internal-store",
     "plugins/screen-recorder",
     "plugins/totp",
     "plugins/translate",

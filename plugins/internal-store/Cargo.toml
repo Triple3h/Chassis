@@ -1,0 +1,27 @@
+[package]
+name = "launcher-plugin-internal-store"
+version = "0.1.0"
+edition = "2021"
+description = "插件更新（internal-store）逻辑层：拉更新索引 / 下载并校验（联网在插件，安装在内核）"
+license = "MIT"
+publish = false
+
+[lib]
+name = "launcher_plugin_internal_store"
+path = "src/lib.rs"
+
+# bin 名 = commands[].name（plugin-spec §2.2 的 N1 铁律）
+[[bin]]
+name = "update"
+path = "src/bin/update.rs"
+
+[dependencies]
+launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 索引里版本号的比较（semver 严格比较：非 semver ⇒ 不提示更新）
+semver = "1"
+# 下载后逐字节校验（v1 的信任模型：固定仓库 + HTTPS + sha256）
+sha2 = "0.10"
+# HTTP：同步客户端（与 translate 同款：关默认特性，只留 rustls 后端）
+ureq = { version = "2", default-features = false, features = ["tls"] }

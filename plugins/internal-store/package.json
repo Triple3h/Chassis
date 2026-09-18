@@ -1,0 +1,54 @@
+{
+  "name": "internal-store",
+  "title": "插件更新",
+  "author": "launcher",
+  "description": "检查并更新出厂插件（更新源固定，下载后校验 sha256，安装不重启生效）",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "2",
+  "icon": "refresh",
+  "keywords": ["update", "更新", "插件更新", "upgrade", "新版本", "store"],
+  "history": false,
+  "capabilities": ["hostUi", "exec.spawn"],
+  "commands": [
+    {
+      "name": "updates",
+      "title": "插件更新",
+      "subtitle": "检查出厂插件的新版本",
+      "mode": "view",
+      "searchable": true,
+      "keywords": ["更新", "插件更新", "升级", "update", "upgrade", "新版本", "gengxin"],
+      "icon": "refresh"
+    },
+    {
+      "name": "update",
+      "title": "更新命令（脚本）",
+      "mode": "script",
+      "icon": "refresh"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run build:view && npm run build:scripts",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:scripts": "cargo build --release -p launcher-plugin-internal-store && node ../../scripts/build-plugin.mjs internal-store --copy-scripts --keep-dist",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test:scripts": "cargo test -p launcher-plugin-internal-store",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@launcher/ui": "workspace:*",
+    "@launcher/api": "workspace:*",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}

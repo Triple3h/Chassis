@@ -177,6 +177,40 @@ importers:
         specifier: workspace:*
         version: link:../../packages/ui
 
+  plugins/internal-store:
+    dependencies:
+      '@launcher/api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@launcher/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      vue:
+        specifier: ^3.5.42
+        version: 3.5.42(typescript@5.9.3)
+    devDependencies:
+      '@tailwindcss/vite':
+        specifier: ^4.3.3
+        version: 4.3.3(vite@7.3.6(@types/node@22.20.2)(jiti@2.7.0)(lightningcss@1.33.0))
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.2
+      '@vitejs/plugin-vue':
+        specifier: ^6.0.8
+        version: 6.0.8(vite@7.3.6(@types/node@22.20.2)(jiti@2.7.0)(lightningcss@1.33.0))(vue@3.5.42(typescript@5.9.3))
+      tailwindcss:
+        specifier: ^4.3.3
+        version: 4.3.3
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vite:
+        specifier: ^7.3.6
+        version: 7.3.6(@types/node@22.20.2)(jiti@2.7.0)(lightningcss@1.33.0)
+      vue-tsc:
+        specifier: ^3.3.11
+        version: 3.3.11(typescript@5.9.3)
+
   plugins/json-tools:
     dependencies:
       '@launcher/api':
