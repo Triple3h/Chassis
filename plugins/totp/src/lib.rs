@@ -293,7 +293,12 @@ mod tests {
         let home = home_dir();
         assert_eq!(normalize_path_input("  /tmp/a.png  "), PathBuf::from("/tmp/a.png"));
         assert_eq!(normalize_path_input("\"/tmp/a b.png\""), PathBuf::from("/tmp/a b.png"));
+        // `\ ` 是 Unix shell 的转义写法；Windows 上反斜杠是路径分隔符，**不做**反转义
+        // （实现里由 `if !cfg!(target_os = "windows")` 分流 —— 断言必须跟着平台走）。
+        #[cfg(not(windows))]
         assert_eq!(normalize_path_input("/tmp/a\\ b.png"), PathBuf::from("/tmp/a b.png"));
+        #[cfg(windows)]
+        assert_eq!(normalize_path_input("C:\\a\\b.png"), PathBuf::from("C:\\a\\b.png"));
         assert_eq!(normalize_path_input("~/Desktop/s.png"), home.join("Desktop/s.png"));
         assert_eq!(normalize_path_input("~"), home);
     }
