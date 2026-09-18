@@ -123,15 +123,17 @@ mod tests {
 
     #[test]
     fn resolve_within_root_blocks_traversal() {
-        let root = Path::new("/tmp/ui-dist");
-        assert_eq!(resolve_within_root(root, "index.html").unwrap(), Path::new("/tmp/ui-dist/index.html"));
-        assert_eq!(resolve_within_root(root, "/assets/a.js").unwrap(), Path::new("/tmp/ui-dist/assets/a.js"));
-        assert_eq!(resolve_within_root(root, "a/../b.js").unwrap(), Path::new("/tmp/ui-dist/b.js"));
-        assert!(resolve_within_root(root, "../etc/passwd").is_none());
-        assert!(resolve_within_root(root, "assets/../../etc/passwd").is_none());
-        assert!(resolve_within_root(root, "").is_none());
+        // 用真实临时目录（平台无关）：路径比较在 Windows 上对 `/tmp/...` 这种字面量不成立
+        let base = std::env::temp_dir();
+        let root = base.join("ui-dist");
+        assert_eq!(resolve_within_root(&root, "index.html").unwrap(), root.join("index.html"));
+        assert_eq!(resolve_within_root(&root, "/assets/a.js").unwrap(), root.join("assets").join("a.js"));
+        assert_eq!(resolve_within_root(&root, "a/../b.js").unwrap(), root.join("b.js"));
+        assert!(resolve_within_root(&root, "../etc/passwd").is_none());
+        assert!(resolve_within_root(&root, "assets/../../etc/passwd").is_none());
+        assert!(resolve_within_root(&root, "").is_none());
         // 组件级比较：兄弟目录不能冒充
-        assert!(resolve_within_root(Path::new("/tmp/ui"), "../ui-dist/x").is_none());
+        assert!(resolve_within_root(&base.join("ui"), "../ui-dist/x").is_none());
     }
 
     #[test]

@@ -118,17 +118,36 @@ impl Primitives {
     }
 
     /// 区域截图 → 系统剪贴板（requirements §8.6：只返回是否成功触发）。
+    ///
+    /// 平台实现（**都要落到系统剪贴板**，调用方不需要自己取图）：
+    ///  - macOS：`screencapture -i -c`（系统自带的交互式区域截图）；
+    ///  - Windows：唤起系统截图（`ms-screenclip:`，即 Win+Shift+S 那条），截完进剪贴板；
+    ///  - 其余平台：返回 false（降级，UI 侧提示不可用）。
     pub async fn screenshot_start(&self, plugin_id: &str) -> Result<bool> {
         audited(&self.audit, plugin_id, "ui", "ctx.screenshot.start", "screenshot", None, async {
-            if !cfg!(target_os = "macos") {
-                return Ok(false);
+            #[cfg(target_os = "macos")]
+            {
+                let status = tokio::process::Command::new("screencapture")
+                    .args(["-i", "-c"])
+                    .status()
+                    .await
+                    .map_err(|err| KernelError::new("INTERNAL", format!("screencapture 启动失败：{err}")))?;
+                return Ok(status.success());
             }
-            let status = tokio::process::Command::new("screencapture")
-                .args(["-i", "-c"])
-                .status()
-                .await
-                .map_err(|err| KernelError::new("INTERNAL", format!("screencapture 启动失败：{err}")))?;
-            Ok(status.success())
+            #[cfg(windows)]
+            {
+                // explorer 处理 `ms-screenclip:` 协议：直接拉出截图覆盖层，不经过 cmd 窗口
+                let status = tokio::process::Command::new("explorer")
+                    .arg("ms-screenclip:")
+                    .status()
+                    .await
+                    .map_err(|err| KernelError::new("INTERNAL", format!("explorer 启动失败：{err}")))?;
+                return Ok(status.success());
+            }
+            #[cfg(not(any(target_os = "macos", windows)))]
+            {
+                Ok(false)
+            }
         })
         .await
     }

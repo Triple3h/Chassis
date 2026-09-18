@@ -29,9 +29,20 @@ pub struct HotkeyConfig {
     pub accelerator: String,
 }
 
+/// 默认热键（分平台；必须与壳 `primitives/hotkey.rs::DEFAULT_ACCELERATOR` 一致）：
+///  - macOS：`Alt+Space`（Spotlight / Raycast 一族的肌肉记忆）；
+///  - Windows：`Alt+Space` 是**系统窗口菜单键**（永远抢不到），改用 `Ctrl+Shift+Space`。
+pub fn default_accelerator() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "Ctrl+Shift+Space"
+    } else {
+        "Alt+Space"
+    }
+}
+
 impl Default for HotkeyConfig {
     fn default() -> Self {
-        Self { accelerator: "Alt+Space".to_string() }
+        Self { accelerator: default_accelerator().to_string() }
     }
 }
 
@@ -303,7 +314,7 @@ mod tests {
     fn default_matches_v1() {
         let config = Config::default();
         assert_eq!(config.version, 1);
-        assert_eq!(config.hotkey.accelerator, "Alt+Space");
+        assert_eq!(config.hotkey.accelerator, default_accelerator(), "默认热键分平台（与壳一致）");
         assert!(!config.autostart);
         assert!(config.hide_on_blur);
         assert!(!config.keep_query);
@@ -335,7 +346,7 @@ mod tests {
         assert_eq!(config.density, "comfortable");
         assert_eq!(config.history_limit, 2000);
         assert!(!config.history_in_search);
-        assert_eq!(config.hotkey.accelerator, "Alt+Space");
+        assert_eq!(config.hotkey.accelerator, default_accelerator(), "空热键回落默认值");
         assert_eq!(config.disabled, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(config.denied.get("p").unwrap(), &vec!["clipboard.read".to_string()]);
         assert_eq!(config.dev_plugins.get("p").unwrap(), "http://127.0.0.1:5173");

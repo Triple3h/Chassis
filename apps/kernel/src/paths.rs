@@ -76,8 +76,10 @@ mod tests {
 
     #[test]
     fn absolute_keeps_absolute_paths() {
-        let path = Path::new("/tmp/x");
-        assert_eq!(absolute(path), path);
+        // 平台无关：当前工作目录在 macOS / Windows 上都是绝对路径。
+        // （写死 `/tmp/x` 的话，Windows 上它被判成「根相对」路径，会被拼上 cwd）
+        let path = std::env::current_dir().expect("取不到当前目录");
+        assert_eq!(absolute(&path), path);
     }
 
     #[test]

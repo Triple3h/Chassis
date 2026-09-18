@@ -98,7 +98,10 @@ mod tests {
     #[test]
     fn parses_key_value_and_flags() {
         let options = parse(&["--data-root", "/tmp/data", "--standalone", "--no-ui"]);
-        assert_eq!(options.data_root, PathBuf::from("/tmp/data"));
+        // 解析会做绝对化（Windows 上 `/tmp/data` 是「根相对」路径，会被拼上盘符），
+        // 所以断言「是绝对路径 + 尾部组件一致」，不写死字符串
+        assert!(options.data_root.is_absolute(), "data-root 必须绝对化：{:?}", options.data_root);
+        assert!(options.data_root.ends_with(Path::new("tmp").join("data")));
         assert!(options.standalone);
         assert!(options.ui_dist.is_none());
     }
@@ -107,13 +110,16 @@ mod tests {
     fn parses_inline_equals_form() {
         let options = parse(&["--ui-dev=http://127.0.0.1:5173", "--ui-dist=/tmp/ui"]);
         assert_eq!(options.ui_dev_url.as_deref(), Some("http://127.0.0.1:5173"));
-        assert_eq!(options.ui_dist, Some(PathBuf::from("/tmp/ui")));
+        let ui_dist = options.ui_dist.expect("ui-dist 应当有值");
+        assert!(ui_dist.is_absolute() && ui_dist.ends_with("ui"), "ui-dist = {}", ui_dist.display());
     }
 
     #[test]
     fn builtin_plugins_accepts_comma_separated_roots() {
         let options = parse(&["--builtin-plugins", "/a/plugins, /b/preinstalled"]);
-        assert_eq!(options.builtin_roots, vec![PathBuf::from("/a/plugins"), PathBuf::from("/b/preinstalled")]);
+        assert_eq!(options.builtin_roots.len(), 2);
+        assert!(options.builtin_roots[0].ends_with(Path::new("a").join("plugins")));
+        assert!(options.builtin_roots[1].ends_with(Path::new("b").join("preinstalled")));
     }
 
     #[test]
