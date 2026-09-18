@@ -156,6 +156,23 @@ impl PluginManager {
         self.records().get(id).map(|record| record.capabilities.clone()).unwrap_or_default()
     }
 
+    /// 声明了某能力、当前处于 active、且没被用户拒绝的插件。
+    ///
+    /// `clipboard.watch` 这类「事件 → 拉起插件」的能力用它找订阅者：
+    /// 已禁用 / 能力被用户拒绝的插件**不能**被拉起（拒绝就是拒绝，§8 规则 3）。
+    pub fn plugins_with_capability(&self, capability: &str) -> Vec<String> {
+        let records = self.records();
+        let mut ids: Vec<String> = records
+            .iter()
+            .filter(|(_, record)| {
+                matches!(record.state, PluginState::Active | PluginState::Degraded) && record.capabilities.contains(capability)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
     pub fn is_active(&self, id: &str) -> bool {
         matches!(
             self.records().get(id).map(|record| record.state),

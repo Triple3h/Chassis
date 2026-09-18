@@ -8,6 +8,7 @@ export const CAPABILITIES = [
   'storage',
   'clipboard.read',
   'clipboard.write',
+  'clipboard.watch',
   'shell.open',
   'exec.spawn',
   'notify.show',
@@ -27,6 +28,7 @@ export function isKnownCapability(name: string): name is Capability {
 export const HIGH_RISK_CAPABILITIES: ReadonlySet<string> = new Set([
   'exec.spawn',
   'clipboard.read',
+  'clipboard.watch',
   'shell.open',
   'screenshot',
 ])

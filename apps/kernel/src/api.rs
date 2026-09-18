@@ -566,6 +566,18 @@ pub fn register_link_handlers(kernel: &Arc<Kernel>) {
         });
     }
     {
+        // 剪贴板变化（plugin-spec §8.1）：壳只通报「变了」，内容由插件的 record 命令自己读。
+        // 这里刻意**不等** record 的结果 —— 通知不该被插件的耗时拖住，慢插件自己超时。
+        let kernel = kernel.clone();
+        link.handle("clipboard/changed", move |params| {
+            let kernel = kernel.clone();
+            Box::pin(async move {
+                kernel.on_clipboard_changed(&params).await;
+                Ok(json!({ "ok": true }))
+            })
+        });
+    }
+    {
         let kernel = kernel.clone();
         link.handle("app/shutdown", move |_| {
             let kernel = kernel.clone();

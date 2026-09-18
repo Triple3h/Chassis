@@ -10,11 +10,21 @@ use serde_json::Value;
 pub const API_VERSIONS_SUPPORTED: [&str; 2] = ["1", "2"];
 
 /// 能力清单（唯一真源；新增能力是 minor 变更，三处一起改）
-pub const CAPABILITIES: [&str; 9] =
-    ["hostUi", "storage", "clipboard.read", "clipboard.write", "shell.open", "exec.spawn", "notify.show", "screenshot", "quicklink"];
+pub const CAPABILITIES: [&str; 10] = [
+    "hostUi",
+    "storage",
+    "clipboard.read",
+    "clipboard.write",
+    "clipboard.watch",
+    "shell.open",
+    "exec.spawn",
+    "notify.show",
+    "screenshot",
+    "quicklink",
+];
 
 /// 安装时需要向用户展示并可由用户拒绝的高风险能力（plugin-spec §8 规则 3）
-pub const HIGH_RISK_CAPABILITIES: [&str; 4] = ["exec.spawn", "clipboard.read", "shell.open", "screenshot"];
+pub const HIGH_RISK_CAPABILITIES: [&str; 5] = ["exec.spawn", "clipboard.read", "clipboard.watch", "shell.open", "screenshot"];
 
 /// 服务名 → 所需能力（装配期裁剪用，也用于审计里的 capability 字段）
 pub fn service_capability(service: &str) -> Option<&'static str> {

@@ -41,6 +41,7 @@ const CAPABILITIES = [
   'storage',
   'clipboard.read',
   'clipboard.write',
+  'clipboard.watch',
   'shell.open',
   'exec.spawn',
   'notify.show',

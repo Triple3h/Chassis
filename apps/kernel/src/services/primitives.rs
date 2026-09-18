@@ -239,6 +239,17 @@ impl Primitives {
         Ok(())
     }
 
+    /// 订阅 / 取消订阅系统剪贴板变化（plugin-spec §8.1）。
+    ///
+    /// 壳不支持（非 Windows）时返回 `false` —— 这是**预期内的降级**，不是错误：
+    /// 内核据此不订阅，插件则必须能在「从未收到事件」时仍然可用。
+    pub async fn clipboard_watch(&self, enabled: bool) -> bool {
+        match self.link.request("clipboard.watch", Some(json!({ "enabled": enabled }))).await {
+            Ok(res) => res.get("ok").and_then(Value::as_bool).unwrap_or(false),
+            Err(_) => false,
+        }
+    }
+
     pub async fn set_tray_menu(&self, items: Value) -> Result<()> {
         self.link.request("tray.setMenu", Some(json!({ "items": items }))).await?;
         Ok(())

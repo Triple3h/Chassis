@@ -817,8 +817,8 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 
 **进度（2026-09-18）**：上述交付物**代码已全部落地**（逐项状态见 `docs/m5-rust-and-windows.md` §B0），
 内核 / SDK / 各插件与壳均已通过 Windows 目标的交叉检查（`cargo check --target x86_64-pc-windows-msvc`）；
-`build-windows.yml` 负责真机编译 / 测试 / 打包。**尚未做的**：UWP 应用扫描、文件预览增量、
-`clipboard-history` 插件、`release.yml`。
+`build-windows.yml` 负责真机编译 / 测试 / 打包。**尚未做的**：UWP 应用扫描、文件预览增量、`release.yml`；
+`clipboard-history` 已落地（含壳 `clipboard.watch` 与内核新 capability），**待 Windows 实机验收**。
 文件搜索在 Windows 上**优先复用用户已装的 Everything**（按官方 IPC 协议实现，不随包分发任何第三方二进制；
 探不到则回退自建索引，带目录变化增量）。
 当前平台差异（对外可见的部分）：热键默认 `Ctrl+Shift+Space`（`Alt+Space` 是系统窗口菜单键）；

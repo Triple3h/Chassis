@@ -45,6 +45,11 @@ use crate::window_visibility::{VisibilityPrimitives, WindowVisibility};
 /// 还得手动删掉 —— 所以宁可当作「没有选中文本」。
 pub const SELECTION_MAX_CHARS: usize = 400;
 
+/// plugin-spec §8.1：剪贴板变化驱动的固定命令名（宿主 `exec.run(pluginId, 'record')`）。
+pub const RECORD_COMMAND: &str = "record";
+/// `record` 的超时：读一次剪贴板 + 落盘，5s 足够（默认 10s 会让异常插件多占一个进程槽）
+const RECORD_TIMEOUT_MS: u64 = 5_000;
+
 pub struct KernelOptions {
     pub data_root: PathBuf,
     /// 出厂插件根目录（可多个；开发态默认就是仓库根的 `plugins/`）
@@ -88,6 +93,8 @@ pub struct Kernel {
     ready: AtomicBool,
     quitting: AtomicBool,
     started: AtomicBool,
+    /// 剪贴板监听的**当前实际状态**（plugin-spec §8.1）：幂等地开/关，避免每次插件变动都打扰壳
+    clipboard_watch: AtomicBool,
 }
 
 /// 管理面特权服务的宿主实现（v1 `services/settingsHost.ts`）。
@@ -425,6 +432,7 @@ impl Kernel {
                 ready: AtomicBool::new(false),
                 quitting: AtomicBool::new(false),
                 started: AtomicBool::new(false),
+                clipboard_watch: AtomicBool::new(false),
             }
         })
     }
@@ -502,6 +510,8 @@ impl Kernel {
         self.start_ui_server().await?;
         self.plugins.init().await;
         self.plugins.start_watcher();
+        // 插件已装配完：现在才知道有没有人订阅剪贴板（plugin-spec §8.1）
+        self.sync_clipboard_watch().await;
 
         // 清单声明 `history: false` 的插件（底座自身入口）：光「以后不写」不够 ——
         // 界面上那条旧记录会一直留着，看起来就是「改了没生效」
@@ -942,7 +952,57 @@ impl Kernel {
 
     /// 插件管理动作（托盘、设置面板、HTTP API 共用同一条路径）。
     pub async fn plugin_action(&self, action: &str, payload: &Value) -> Result<Value> {
-        self.admin.run(action, payload).await
+        let result = self.admin.run(action, payload).await;
+        // 启用 / 禁用 / 安装 / 卸载都会改变「谁在订阅剪贴板」
+        self.sync_clipboard_watch().await;
+        result
+    }
+
+    // ── 剪贴板监听（plugin-spec §8.1）───────────────────────────
+
+    /// 有插件订阅才向壳开监听，一个都不剩就关掉。
+    ///
+    /// 幂等：状态没变就不打扰壳（插件启停很频繁，而壳侧开/关要动一个线程）。
+    /// 壳不支持（非 Windows）时按「已同步」记账 —— 平台在进程生命周期内不会变，
+    /// 反复重试只会把同一条降级日志刷一遍又一遍。
+    pub async fn sync_clipboard_watch(&self) {
+        let wanted = !self.plugins.plugins_with_capability("clipboard.watch").is_empty();
+        if wanted == self.clipboard_watch.load(Ordering::SeqCst) {
+            return;
+        }
+        let ok = self.primitives.clipboard_watch(wanted).await;
+        self.clipboard_watch.store(wanted, Ordering::SeqCst);
+        if wanted && !ok {
+            self.log(
+                "warn",
+                "剪贴板监听未开启（壳不支持或调用失败）：声明 clipboard.watch 的插件不会收到变化事件",
+            );
+        }
+    }
+
+    /// 壳通报剪贴板变化 → 拉起订阅插件的 `record` 命令（一次性：spawn → done → 回收）。
+    ///
+    /// 每个插件各跑一次、互不等待：读不读、记不记由插件自己决定，失败只记日志 ——
+    /// 「一次复制没记上」不值得打断用户，更不该让一个插件的失败拖住其它订阅者。
+    pub async fn on_clipboard_changed(&self, params: &Value) {
+        let args = json!({
+            "changeCount": params.get("changeCount").and_then(Value::as_u64).unwrap_or(0),
+            "kinds": params.get("kinds").cloned().unwrap_or_else(|| json!([])),
+        });
+        for plugin_id in self.plugins.plugins_with_capability("clipboard.watch") {
+            if self.registry.get(&format!("{plugin_id}:{RECORD_COMMAND}")).is_none() {
+                self.log("warn", &format!("插件 {plugin_id} 声明了 clipboard.watch 却没有 {RECORD_COMMAND} 命令，跳过"));
+                continue;
+            }
+            let exec = self.exec.clone();
+            let id = plugin_id.clone();
+            let args = args.clone();
+            tokio::spawn(async move {
+                if let Err(err) = exec.run(&id, RECORD_COMMAND, Some(args), Some(RECORD_TIMEOUT_MS)).await {
+                    crate::log_warn!("剪贴板记录失败（{id}）：{}", err.message);
+                }
+            });
+        }
     }
 
     /// 注册全局热键。壳在被占用时会自动回退到候选键 —— 这里把**实际生效的键**写回配置，
