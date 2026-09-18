@@ -1,9 +1,13 @@
-# 静态与单元验证（不产包）：push / PR 触发。
-# 设计见 docs/m5-rust-and-windows.md §B3.7。Linux 上只做类型检查 / 测试 / 构建 / 规范自检 + Rust workspace 测试。
+# 静态与单元验证（不产包）：feature 分支 push / PR 触发。
+#
+# **main 推送不触发任何工作流**（含本文件）：main 的后续修改只由 PR 把关；
+# 发布一律走 tag（App = `v*`，内核 = `kernel/*`，插件 = `plugins/*` ——
+# 见 release.yml / kernel-release.yml / plugins-release.yml），避免「合入 main 即构建 / 部署」。
 name: verify
 
 on:
   push:
+    branches-ignore: ['main']
   pull_request:
 
 jobs:
