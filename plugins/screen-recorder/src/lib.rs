@@ -459,7 +459,9 @@ mod tests {
         assert!(!pid_alive(-1));
         assert!(!pid_alive(0));
         assert!(!send_interrupt(-5));
-        // 当前进程一定活着
+        // 当前进程一定活着 —— 仅 Unix 实现成立；非 unix 是显式的「不支持 ⇒ false」桩
+        // （插件只发 macOS 包，Windows 上编过即可，不该按 macOS 语义断言）。
+        #[cfg(unix)]
         assert!(pid_alive(std::process::id() as i32));
     }
 }
