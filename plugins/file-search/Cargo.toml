@@ -24,3 +24,20 @@ launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
 serde_json = "1"
 # SDK 刻意零依赖（纯 std 线程）；需要异步的插件自建 runtime（见 src/lib.rs 的 `runtime()`）
 tokio = { version = "1", features = ["rt", "process", "time", "io-util", "sync"] }
+# 目录变化监听（自建索引的增量：Windows 上即 ReadDirectoryChangesW）；
+# 跨平台包体很小，只在 Windows 后端接（macOS 走 Spotlight，不需要自建索引）
+notify = "8"
+
+# Windows：Everything IPC（WM_COPYDATA 查询 + 隐藏消息窗口收回复，见 src/everything.rs）。
+# 版本与 tauri 依赖树里的 windows 对齐（0.61），避免同一 crate 编译两份。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  # `WNDCLASSW` / `RegisterClassW` 住在 gated 的 Gdi 特性后面（结构里有 HBRUSH 字段）
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_DataExchange",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }

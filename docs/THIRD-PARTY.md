@@ -7,6 +7,17 @@
 
 ---
 
+## Everything（MIT）—— 互操作协议的来源声明
+
+- 项目：<https://www.voidtools.com/>（voidtools）
+- 许可证：MIT License, Copyright © 2018 David Carpenter（`License.txt`；其内置 PCRE 部分为 BSD-3 —— 与本仓库无关，我们不分发 Everything 的任何产物）
+- 用途：`plugins/file-search/src/everything.rs` 是**按 Everything 公开的 IPC 协议独立实现**的客户端（Windows 上复用用户已装的 Everything 做全盘文件名搜索）。**本仓库不分发、不打包 Everything 的任何二进制或代码副本**，只实现与之通信的互操作协议：
+  - 窗口类名 `EVERYTHING_TASKBAR_NOTIFICATION`、消息 `WM_USER` + IPC 命令号、`WM_COPYDATA` 查询/回复语义；
+  - `#pragma pack(1)` 的请求 / 结果结构布局（`EVERYTHING_IPC_QUERYW` / `EVERYTHING_IPC_LISTW`）。
+  以上事实取自官方 SDK 分发包里的头文件（`include/Everything.h`、`ipc/everything_ipc.h`）。若将来需要**随包分发** Everything 或其 SDK DLL，须先按 MIT + BSD-3 的保留声明义务补全本节与发行包内的许可文本。
+
+---
+
 ## ZTools（MIT）
 
 - 仓库：<https://github.com/ZToolsCenter/ZTools>
