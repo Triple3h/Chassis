@@ -179,7 +179,8 @@ fn handle(ctx: &Context, trigger: &str, query: &str) -> Vec<Value> {
     match logic::detect_intent(query, trigger) {
         Intent::Translate(text) => {
             ctx.log(&format!("搜索给出翻译入口（{} 字）", text.chars().count()), None, Level::Debug).ok();
-            vec![logic::open_item(&text)]
+            // 单个英文词略低分：它也可能是应用名 / 命令，明确命中标题的结果仍然排在前面
+            vec![logic::open_item(&text, logic::entry_score(&text))]
         }
         Intent::Skip => Vec::new(),
     }

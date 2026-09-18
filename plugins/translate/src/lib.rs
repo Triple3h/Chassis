@@ -219,23 +219,39 @@ pub fn strip_trigger(text: &str) -> Option<&str> {
     None
 }
 
-/// 自动模式的启发式：只对「像一句话」的输入动手，别把每个搜索词都发去翻译
+/// 自动模式的启发式：拦掉一眼不是「待译文本」的东西（网址 / 路径 / 文件名 / 版本号）。
+///
+/// **单个英文词也给入口**（2026-09-18 放宽）：它最常见的来源是「在别处选中一个英文词再唤出」
+/// —— 那时用户就是要翻译它，而按"像不像句子"一刀切会让这个场景彻底消失（实测：选中
+/// `AXEnhancedUserInterface` 唤出，列表里只剩一条 Bing 搜索）。放宽的代价（搜应用名时
+/// 多一条翻译）由 [`entry_score`] 给"单词"打略低的分来化解（明确命中的命令 / 应用仍然在前），
+/// 嫌吵可以把设置里的触发方式调成 `prefix` / `off`。
 pub fn looks_translatable(text: &str) -> bool {
     let trimmed = text.trim();
     let count = trimmed.chars().count();
     if count < 2 || count > MAX_TEXT_CHARS {
         return false;
     }
-    let has_space = trimmed.chars().any(char::is_whitespace);
-    let has_cjk = trimmed.chars().any(is_cjk);
-    // 单个英文词 / 拼音串更像命令或应用名，要翻就用前缀
-    if !has_space && !has_cjk {
-        return false;
-    }
     if is_noise(trimmed) {
         return false;
     }
     trimmed.chars().any(|ch| ch.is_alphanumeric() || is_cjk(ch))
+}
+
+/// 翻译入口的自评分（plugin-spec §9.3 `score`；内核按 `0.6 × 插件自评 + 0.4 × 内核匹配分` 混合）。
+///
+/// 像句子 / 含 CJK 的输入 = 用户多半真要翻译，给 0.9。
+/// **单个英文 token** 略低一点（0.85）：它也可能是应用名（`safari`）/ 命令名（`todo`），
+/// 而内核分里"明确命中标题"的那些（前缀命中 1.0）会自然压过这里 ——
+/// 实测：搜 `safari` ⇒ Safari 应用 0.94 > 翻译 0.79；搜 `AXEnhancedUserInterface`
+/// ⇒ 翻译 0.79 > web-open 的"用 Bing 搜索" 0.76，正好是"选中英文标识符再唤出"想要的排序。
+pub fn entry_score(text: &str) -> f64 {
+    let trimmed = text.trim();
+    if trimmed.chars().any(char::is_whitespace) || trimmed.chars().any(is_cjk) {
+        0.9
+    } else {
+        0.85
+    }
 }
 
 fn is_cjk(ch: char) -> bool {
@@ -486,7 +502,9 @@ pub fn baidu_error(code: &str) -> String {
 /// 之所以不在列表里直接翻译：
 /// - 搜索条里每次输入都发请求等于烧额度，且用户往往只是路过（想找的是别的结果）；
 /// - 翻一次只有结果项一行，长文本、换引擎、按命名风格复制都在工作台里，不如一步到位。
-pub fn open_item(text: &str) -> Value {
+///
+/// `score` 由 [`entry_score`] 给：单个英文词略低于句子，让"搜应用名"时翻译排在应用之后。
+pub fn open_item(text: &str, score: f64) -> Value {
     let source = one_line(text);
     let title = format!("翻译「{}」", shorten(&source, TITLE_MAX - 4));
     json!({
@@ -494,7 +512,7 @@ pub fn open_item(text: &str) -> Value {
         "title": title,
         "subtitle": "在翻译工作台里翻译 · 可换引擎 / 目标语言 / 按命名风格复制",
         "icon": "languages",
-        "score": 0.9,
+        "score": score,
         "action": { "type": "command", "command": "panel", "args": { "text": text } },
     })
 }
@@ -763,8 +781,14 @@ mod tests {
         assert_eq!(detect_intent("fy", "auto"), Intent::Skip, "只有前缀词、没有正文");
         assert_eq!(detect_intent("hello world", "prefix"), Intent::Skip);
         assert_eq!(detect_intent("hello world", "auto"), Intent::Translate("hello world".into()));
-        assert_eq!(detect_intent("safari", "auto"), Intent::Skip, "单个英文词更像命令名");
         assert_eq!(detect_intent("你好世界", "auto"), Intent::Translate("你好世界".into()));
+        // 单个英文词也给入口（2026-09-18 放宽）：选中英文标识符再唤出是主要场景（实测遗漏）。
+        // 它也可能只是应用名 ⇒ 交给 `entry_score` 降分沉底，而不是在这里一刀切掉
+        assert_eq!(
+            detect_intent("AXEnhancedUserInterface", "auto"),
+            Intent::Translate("AXEnhancedUserInterface".into())
+        );
+        assert_eq!(detect_intent("safari", "auto"), Intent::Translate("safari".into()));
     }
 
     #[test]
@@ -799,11 +823,11 @@ mod tests {
             "2026-09-17",
             "1.2.3",
             "readme.pdf",
-            "safari",
         ] {
             assert!(!looks_translatable(text), "不该翻译：{text}");
         }
-        for text in ["hello world", "你好世界", "读一下这一段"] {
+        // 单个英文词也可译：选中的英文标识符必须先过这一关，否则搜索里什么都不会出现
+        for text in ["hello world", "你好世界", "读一下这一段", "safari", "AXEnhancedUserInterface"] {
             assert!(looks_translatable(text), "应当翻译：{text}");
         }
         let long = "字".repeat(MAX_TEXT_CHARS + 1);
@@ -866,24 +890,40 @@ mod tests {
 
     #[test]
     fn open_item_navigates_instead_of_translating() {
-        let item = open_item("hello world");
+        let item = open_item("hello world", entry_score("hello world"));
         assert_eq!(item["id"], json!(format!("translate:open:{}", short_hash("hello world"))));
         assert_eq!(item["title"], json!("翻译「hello world」"));
         assert_eq!(item["action"]["type"], json!("command"), "搜索条不翻译，只导航");
         assert_eq!(item["action"]["command"], json!("panel"));
         assert_eq!(item["action"]["args"]["text"], json!("hello world"), "原文交给工作台");
         assert_eq!(item["icon"], json!("languages"));
+        assert_eq!(item["score"], json!(0.9), "句子照旧高分");
         assert!(item.get("detail").is_none(), "入口项没有译文可看");
         // 同一段文本 ⇒ 同一 id（历史 / 固定项不会错位）
-        assert_eq!(open_item("hello world")["id"], item["id"]);
-        assert_ne!(open_item("hello worlds")["id"], item["id"]);
+        assert_eq!(open_item("hello world", 0.9)["id"], item["id"]);
+        assert_ne!(open_item("hello worlds", 0.9)["id"], item["id"]);
+    }
+
+    #[test]
+    fn entry_score_keeps_bare_english_tokens_slightly_below_sentences() {
+        // 句子 / 中文 ⇒ 0.9；单个英文 token ⇒ 0.85（略低，给"明确命中的命令 / 应用"留位置）
+        assert_eq!(entry_score("hello world"), 0.9);
+        assert_eq!(entry_score("你好世界"), 0.9);
+        assert_eq!(entry_score("读一下这一段"), 0.9);
+        assert_eq!(entry_score("AXEnhancedUserInterface"), 0.85);
+        assert_eq!(entry_score("safari"), 0.85);
+        assert_eq!(open_item("safari", entry_score("safari"))["score"], json!(0.85));
+        assert!(
+            entry_score("safari") < entry_score("hello world"),
+            "单词必须低于句子：选中一个英文标识符时它才能排到前面的同时不压过明确命中"
+        );
     }
 
     #[test]
     fn open_item_folds_whitespace_and_bounds_title() {
-        let item = open_item("hello   world\nagain");
+        let item = open_item("hello   world\nagain", 0.9);
         assert_eq!(item["title"], json!("翻译「hello world again」"), "多行 / 连续空白折成一行");
-        let long = open_item(&"字".repeat(MAX_TEXT_CHARS));
+        let long = open_item(&"字".repeat(MAX_TEXT_CHARS), 0.9);
         let title = long["title"].as_str().unwrap();
         assert!(title.chars().count() <= TITLE_MAX, "title 不得超过 {TITLE_MAX} 字：{title}");
         assert!(title.starts_with("翻译「") && title.ends_with('」'), "{title}");
