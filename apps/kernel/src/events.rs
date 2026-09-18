@@ -28,6 +28,10 @@ pub mod names {
     pub const UI_HIDE: &str = "ui/hide";
     /// 内核主动让 UI 打开插件页（托盘「设置…」「插件管理…」）；载荷 = `ActionResult`
     pub const UI_OPEN_VIEW: &str = "ui/openView";
+    /// 内核热更新已应用 / 已回滚（载荷：generation / revision / modules）
+    pub const HOT_UPDATED: &str = "hot/updated";
+    /// 内核因热更新即将重启（载荷：reason / version / pid）
+    pub const HOT_RESTARTING: &str = "hot/restarting";
     pub const SHELL_VISIBILITY: &str = "shell/visibility";
     pub const APP_QUIT: &str = "app/quit";
 }

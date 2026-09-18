@@ -27,6 +27,8 @@ export class LauncherError extends Error {
 
 export interface HostInfo {
   version: string
+  /** 内核热更新机制版本（v0.1.0 起；更新器用它判断更新包装不装得上） */
+  hotVersion?: string
   platform: string
   dataRoot: string
   pluginId: string
@@ -374,7 +376,7 @@ export interface SettingsApi {
   clearHistory(): Promise<void>
   openDataDir(): Promise<void>
   revealPlugin(id: string): Promise<void>
-  info(): Promise<{ version: string; platform: string; dataRoot: string; node: string }>
+  info(): Promise<{ version: string; hotVersion?: string; platform: string; dataRoot: string; node: string }>
 }
 
 export const settings: SettingsApi = {

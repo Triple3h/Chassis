@@ -12,6 +12,7 @@ pub mod error;
 pub mod events;
 pub mod exec;
 pub mod history;
+pub mod hot;
 pub mod legacy;
 pub mod link;
 pub mod logging;
@@ -53,6 +54,12 @@ pub async fn run() -> i32 {
     // 必须在装配之前 —— 插件加载日志正是排障时最要看的那段。
     crate::logging::init(&options.data_root);
     crate::log_info!("数据目录：{}", options.data_root.display());
+
+    // 二进制热更新的**启动守卫**：必须早于一切装配 —— 新版本连续两次启动未就绪 ⇒
+    // 在这里（下一个进程最早时刻）把备份换回来，别让坏二进制卡死整个内核。
+    if let Some(detail) = hot::binary::boot_guard(&options.data_root.join("hot")) {
+        crate::log_info!("[hot] {detail}");
+    }
     let roots = options.builtin_roots.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(", ");
     crate::log_info!("出厂插件根：{roots}");
     match (options.ui_dist.as_ref(), options.ui_dev_url.as_ref()) {

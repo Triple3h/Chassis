@@ -4,12 +4,13 @@
 //! 响应形状与 v1 逐字段一致：成功是各 handler 自己构造的 `{ ok: true, ... }`，
 //! 失败由这里统一包成 `{ ok: false, error: { code, message } }`（`BAD_ARGS` → 400，其余 500）。
 
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, MethodRouter};
 use axum::Json;
 use axum::Router;
 use serde_json::{json, Value};
@@ -20,44 +21,87 @@ use crate::contract::{ItemSnapshot, ResultItem};
 use crate::error::KernelError;
 use crate::events::names;
 use crate::history::PinnedEntry;
+use crate::hot::spec::HotSpec;
 use crate::kernel::Kernel;
 use crate::types::SessionCloseReason;
 
+/// 热更新对路由的选择（来自 spec.routes.disabled）。
+#[derive(Debug, Clone, Default)]
+pub struct RoutePolicy {
+    pub disabled: Vec<String>,
+}
+
+impl RoutePolicy {
+    pub fn from_spec(spec: &HotSpec) -> Self {
+        Self { disabled: spec.routes.disabled.clone() }
+    }
+
+    fn allows(&self, path: &str) -> bool {
+        !self.disabled.iter().any(|item| item == path)
+    }
+}
+
+/// 内置路由清单（**唯一源**）：路由装配、热更新的 `disabled` 校验与冲突检查都读它。
+///
+/// 每个新接口都必须登记在这里 —— 否则热更新既停不了它也检查不出路径冲突。
+pub fn builtin_routes() -> Vec<(&'static str, MethodRouter<Arc<Kernel>>)> {
+    vec![
+        ("/api/health", get(health)),
+        ("/api/bootstrap", get(bootstrap)),
+        ("/api/search", post(search)),
+        ("/api/exec", post(exec)),
+        ("/api/invoke", post(invoke)),
+        ("/api/history", get(history)),
+        ("/api/history/remove", post(history_remove)),
+        ("/api/history/clear", post(history_clear)),
+        ("/api/pinned/toggle", post(pinned_toggle)),
+        ("/api/pinned/reorder", post(pinned_reorder)),
+        ("/api/config", get(config_get).post(config_patch)),
+        ("/api/ui/theme", post(ui_theme)),
+        ("/api/plugins", get(plugins_list)),
+        ("/api/plugins/action", post(plugins_action)),
+        ("/api/dev/register", post(dev_register)),
+        ("/api/bridge", post(bridge)),
+        ("/api/session/close", post(session_close)),
+        ("/api/session/crashed", post(session_crashed)),
+        ("/api/window/show", post(window_show)),
+        ("/api/window/hide", post(window_hide)),
+        ("/api/window/hidden", post(window_hidden)),
+        ("/api/window/visible", get(window_visible)),
+        ("/api/window/setHeight", post(window_set_height)),
+        ("/api/window/setSize", post(window_set_size)),
+        ("/api/window/startDrag", post(window_start_drag)),
+        ("/api/window/startResize", post(window_start_resize)),
+        ("/api/system/stats", get(system_stats)),
+        ("/api/app/quit", post(app_quit)),
+        ("/api/app/autostart", post(app_autostart)),
+        ("/api/data/openDir", post(data_open_dir)),
+        ("/api/audit", get(audit_get)),
+        ("/api/audit/clear", post(audit_clear)),
+        // ── 内核热更新（v0.1.0）──────────────────────────────────
+        ("/api/hot/status", get(hot_status)),
+        ("/api/hot/log", get(hot_log)),
+        ("/api/hot/apply", post(hot_apply)),
+        ("/api/hot/stage", post(hot_stage)),
+        ("/api/hot/rollback", post(hot_rollback)),
+        ("/api/hot/binary", post(hot_binary)),
+        ("/api/hot/binary/rollback", post(hot_binary_rollback)),
+        ("/api/hot/restart", post(hot_restart)),
+    ]
+}
+
 /// 业务路由（state 由 `serve(...)` 提供；`infra_router` 负责 SSE / 静态 / 兜底）。
-pub fn router() -> Router<Arc<Kernel>> {
-    Router::new()
-        .route("/api/health", get(health))
-        .route("/api/bootstrap", get(bootstrap))
-        .route("/api/search", post(search))
-        .route("/api/exec", post(exec))
-        .route("/api/invoke", post(invoke))
-        .route("/api/history", get(history))
-        .route("/api/history/remove", post(history_remove))
-        .route("/api/history/clear", post(history_clear))
-        .route("/api/pinned/toggle", post(pinned_toggle))
-        .route("/api/pinned/reorder", post(pinned_reorder))
-        .route("/api/config", get(config_get).post(config_patch))
-        .route("/api/ui/theme", post(ui_theme))
-        .route("/api/plugins", get(plugins_list))
-        .route("/api/plugins/action", post(plugins_action))
-        .route("/api/dev/register", post(dev_register))
-        .route("/api/bridge", post(bridge))
-        .route("/api/session/close", post(session_close))
-        .route("/api/session/crashed", post(session_crashed))
-        .route("/api/window/show", post(window_show))
-        .route("/api/window/hide", post(window_hide))
-        .route("/api/window/hidden", post(window_hidden))
-        .route("/api/window/visible", get(window_visible))
-        .route("/api/window/setHeight", post(window_set_height))
-        .route("/api/window/setSize", post(window_set_size))
-        .route("/api/window/startDrag", post(window_start_drag))
-        .route("/api/window/startResize", post(window_start_resize))
-        .route("/api/system/stats", get(system_stats))
-        .route("/api/app/quit", post(app_quit))
-        .route("/api/app/autostart", post(app_autostart))
-        .route("/api/data/openDir", post(data_open_dir))
-        .route("/api/audit", get(audit_get))
-        .route("/api/audit/clear", post(audit_clear))
+///
+/// 热更新每次应用都会**重建**这棵树（含扩展路由与停用清单），装配到新的 generation。
+pub fn router_with(policy: &RoutePolicy, spec: &HotSpec) -> Router<Arc<Kernel>> {
+    let mut router = crate::hot::spec::extension_router::<Arc<Kernel>>(spec);
+    for (path, method) in builtin_routes() {
+        if !policy.allows(path) {
+            continue;
+        }
+        router = router.route(path, method);
+    }
+    router
 }
 
 fn body_of(body: Option<Json<Value>>) -> Value {
@@ -69,7 +113,11 @@ fn ok_json(payload: Value) -> Response {
 }
 
 fn error_json(err: KernelError) -> Response {
-    let status = if err.code == "BAD_ARGS" { StatusCode::BAD_REQUEST } else { StatusCode::INTERNAL_SERVER_ERROR };
+    let status = match err.code {
+        "BAD_ARGS" | "PROBE_FAILED" => StatusCode::BAD_REQUEST,
+        "NO_PREVIOUS" | "SIGNED_BUNDLE" | "UPDATE_FAILED" | "ROLLED_BACK" => StatusCode::CONFLICT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
     (status, Json(json!({ "ok": false, "error": { "code": err.code, "message": err.message } }))).into_response()
 }
 
@@ -484,6 +532,199 @@ async fn audit_get(State(kernel): State<Arc<Kernel>>, query: axum::extract::Quer
 async fn audit_clear(State(kernel): State<Arc<Kernel>>) -> Response {
     kernel.audit.clear();
     ok_json(json!({ "ok": true }))
+}
+
+// ── 内核热更新（v0.1.0，`GET/POST /api/hot/*`）──────────────────
+//
+// 设计对齐插件热更新的更新语义（plugin-spec §6.4 / ADR-0006）：两阶段 + 原子切换 + 回滚 + 日志。
+// 内核零能力：spec / 二进制都由外部投递到本地路径（或直接放进请求体），内核不联网。
+
+/// 从请求体取 spec：优先 `body.spec`（内联对象），其次 `body.path` / 默认 `candidate.json`。
+fn load_spec(kernel: &Arc<Kernel>, body: &Value) -> Result<(HotSpec, String), KernelError> {
+    if let Some(value) = body.get("spec") {
+        let spec: HotSpec = serde_json::from_value(value.clone())
+            .map_err(|err| KernelError::bad_args(format!("spec 解析失败：{err}")))?;
+        return Ok((spec, "api:inline".to_string()));
+    }
+    let path = body
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| kernel.hot.dir().join(crate::hot::CANDIDATE_FILE).display().to_string());
+    let spec: HotSpec = crate::util::fsx::read_json(Path::new(&path), None)
+        .ok_or_else(|| KernelError::bad_args(format!("spec 文件不存在或不是合法 JSON：{path}")))?;
+    Ok((spec, format!("api:file:{path}")))
+}
+
+async fn hot_status(State(kernel): State<Arc<Kernel>>) -> Response {
+    ok_json(json!({ "ok": true, "hot": kernel.hot.status(&kernel.version()) }))
+}
+
+async fn hot_log(State(kernel): State<Arc<Kernel>>, query: axum::extract::Query<Value>) -> Response {
+    let limit = query
+        .0
+        .get("limit")
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(100)
+        .clamp(1, 1000);
+    ok_json(json!({
+        "ok": true,
+        "entries": kernel.hot.log_tail(limit),
+        "path": kernel.hot.log().path().display().to_string(),
+    }))
+}
+
+/// 两阶段之一：只校验 + 落盘到 `candidate.json`（不生效）。
+async fn hot_stage(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>) -> Response {
+    let body = body_of(body);
+    let (spec, source) = match load_spec(&kernel, &body) {
+        Ok(value) => value,
+        Err(err) => return error_json(err),
+    };
+    match kernel.hot.stage(&spec, &source) {
+        Ok(()) => ok_json(json!({
+            "ok": true,
+            "staged": kernel.hot.dir().join(crate::hot::CANDIDATE_FILE).display().to_string(),
+            "revision": spec.revision,
+        })),
+        Err(err) => error_json(err),
+    }
+}
+
+/// 应用：校验 → 构建 → 自检 → 原子切换 → 复核（失败自动回滚，当前代不受影响）。
+async fn hot_apply(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>) -> Response {
+    let body = body_of(body);
+    let (spec, source) = match load_spec(&kernel, &body) {
+        Ok(value) => value,
+        Err(err) => return error_json(err),
+    };
+    match kernel.hot.apply(spec, &source).await {
+        Ok(outcome) => ok_json(json!({
+            "ok": true,
+            "result": outcome,
+            "hot": kernel.hot.status(&kernel.version()),
+        })),
+        Err(err) => error_json(err),
+    }
+}
+
+async fn hot_rollback(State(kernel): State<Arc<Kernel>>) -> Response {
+    match kernel.hot.rollback("api").await {
+        Ok(outcome) => ok_json(json!({
+            "ok": true,
+            "result": outcome,
+            "hot": kernel.hot.status(&kernel.version()),
+        })),
+        Err(err) => error_json(err),
+    }
+}
+
+/// 内核二进制热替换：`mode=stage`（校验+暂存）或 `mode=apply`（备份+原子替换+待重启）。
+async fn hot_binary(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>) -> Response {
+    let body = body_of(body);
+    let mode = body.get("mode").and_then(Value::as_str).unwrap_or("stage");
+    let Some(source) = body.get("path").and_then(Value::as_str).map(str::to_string) else {
+        return error_json(KernelError::bad_args("path 必填（候选内核二进制的本地路径）"));
+    };
+    let to_version = body.get("version").and_then(Value::as_str).unwrap_or_default().to_string();
+    let dir = kernel.hot.dir().to_path_buf();
+
+    let staged_result = crate::hot::binary::stage(&dir, Path::new(&source), &to_version);
+    let (staged, report) = match staged_result {
+        Ok(value) => value,
+        Err(err) => {
+            kernel.hot.log().append(json!({
+                "type": "binary",
+                "result": "rejected",
+                "stage": "probe",
+                "source": source,
+                "detail": err.message,
+            }));
+            return error_json(err);
+        }
+    };
+
+    if mode == "stage" {
+        kernel.hot.log().append(json!({
+            "type": "binary",
+            "result": "staged",
+            "source": source,
+            "to": report.version,
+            "path": staged.display().to_string(),
+        }));
+        return ok_json(json!({
+            "ok": true,
+            "mode": "stage",
+            "staged": staged.display().to_string(),
+            "probe": report,
+        }));
+    }
+
+    // UI 与内核同包：显式 uiPath 优先；缺省按约定取「候选二进制同目录下的 ui/」
+    // （更新包解压后的结构 = launcher-kernel + ui/，由分发侧保证，见 docs/kernel-hot-update.md）
+    let ui_path = crate::hot::binary::peer_ui(
+        body.get("uiPath").and_then(Value::as_str).map(Path::new),
+        &staged,
+    );
+
+    let current_version = kernel.version();
+    match crate::hot::binary::apply(&dir, &staged, &current_version, &report.version, ui_path.as_deref()) {
+        Ok(pending) => {
+            kernel.hot.log().append(json!({
+                "type": "binary",
+                "result": "applied",
+                "source": source,
+                "from": pending.from_version,
+                "to": pending.to_version,
+                "backup": pending.backup,
+                "pending": true,
+            }));
+            let restart = body.get("restart").and_then(Value::as_bool).unwrap_or(true);
+            if restart {
+                let kernel_for_restart = kernel.clone();
+                tokio::spawn(async move { kernel_for_restart.hot_restart("binary-update").await });
+            }
+            ok_json(json!({
+                "ok": true,
+                "mode": "apply",
+                "pending": pending,
+                "restartScheduled": restart,
+                "note": "内核会优雅重启（等在途请求排空）；新版本若连续两次启动未就绪，下一次启动自动回滚",
+            }))
+        }
+        Err(err) => {
+            kernel.hot.log().append(json!({
+                "type": "binary",
+                "result": "rejected",
+                "stage": "apply",
+                "source": source,
+                "detail": err.message,
+            }));
+            error_json(err)
+        }
+    }
+}
+
+async fn hot_binary_rollback(State(kernel): State<Arc<Kernel>>) -> Response {
+    let dir = kernel.hot.dir().to_path_buf();
+    match crate::hot::binary::rollback(&dir) {
+        Ok(Some(message)) => {
+            kernel.hot.log().append(json!({ "type": "binary", "result": "rolled-back", "detail": message }));
+            ok_json(json!({ "ok": true, "rolledBack": true, "detail": message }))
+        }
+        Ok(None) => ok_json(json!({ "ok": true, "rolledBack": false, "detail": "没有待验证的内核更新" })),
+        Err(err) => error_json(err),
+    }
+}
+
+/// 优雅重启内核（热更新收尾 / 手动）：排空在途请求 → 通知壳 → 退出，壳 `supervise` 拉起新二进制。
+async fn hot_restart(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>) -> Response {
+    let reason = body_of(body).get("reason").and_then(Value::as_str).unwrap_or("manual").to_string();
+    let kernel = kernel.clone();
+    let reason_for_task = reason.clone();
+    tokio::spawn(async move { kernel.hot_restart(&reason_for_task).await });
+    ok_json(json!({ "ok": true, "restarting": true, "reason": reason }))
 }
 
 // ── 壳 → 内核（stdio JSON-RPC 通知 + 请求）──────────────────────

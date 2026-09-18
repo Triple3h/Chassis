@@ -2,7 +2,7 @@
 name = "launcher-kernel"
 version = "0.1.0"
 edition = "2021"
-description = "Chassis 内核（Rust）：协议层 / 插件运行时 / 搜索调度（M5 阶段 A1，见 docs/m5-rust-and-windows.md）"
+description = "Chassis 内核（Rust）：协议层 / 插件运行时 / 搜索调度 / 热更新"
 license = "MIT"
 publish = false
 
@@ -46,9 +46,8 @@ axum = "0.8"
 # SSE 扇出：broadcast → BroadcastStream（axum 的 Sse 需要）
 tokio-stream = { version = "0.1", features = ["sync"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# 热更新：把请求 / 自检请求交给「候选代 / 当前代」的路由树（Router::oneshot）。
+# tower 本就是 axum 的依赖（lock 里已存在），这里只是提升为直接依赖并开 util。
+tower = { version = "0.5", features = ["util"] }
 # A1 后续模块加入（见 m5 计划 §A1.2）：
 #   notify（插件热重载）、zip（zip 安装）、plist（app-launcher）
-
-[dev-dependencies]
-# 单测里把 Router 当 Service 用（oneshot 发请求），验证 CORS 等中间件确实挂上了
-tower = { version = "0.5", features = ["util"] }

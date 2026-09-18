@@ -536,6 +536,27 @@ interface AuditRecord {
   它们等价于底座自身的行为，且调用量最大（设置页轮询、应用扫描、文件搜索），
   全记下来只会挤满环形缓冲与日志文件、把真正需要追溯的第三方插件记录淹掉
 
+### 7.8 内核热更新（2026-09-18 立项，机制版本 0.1.0）
+
+目标：**不重启壳（主程序）**动态加载新版本内核代码 / 配置；热替换不中断在途请求；失败自动回滚；全程留痕。
+
+| 面 | 规格 |
+|---|---|
+| 热替换单元 | **generation（代）**：一次成功应用产出一个不可变快照（路由树 + 中间件配置 + 事件订阅） |
+| 两阶段 | `stage`（只校验 + 落 `candidate.json`）→ `apply`（构建 → 自检 → 原子切换 → 复核） |
+| 切换语义 | listener 只挂**分发层**（`hot::dispatch_router`）；请求进入时取当前代快照、在途请求持旧代跑完 ⇒ 不打断；切换只换指针 |
+| 不中断 | `apply` 零窗口（旧代引用计数自然归零）；二进制更新走「排空在途（≤3s）→ 优雅退出 → 壳拉起新二进制」 |
+| 回滚 | 保留上一稳定代（`previous.json`，只留 1 份）；apply 任一步失败**不动当前代**；`rollback` 与上一代互换（再回滚 = 恢复）；二进制更新由启动守卫（`pending.json` attempts ≥2 ⇒ 自动恢复备份） |
+| 变更面 | `routes`（声明式扩展路由 json/text/redirect + 停用内置路由）/ `middleware`（`requestLog` / `timeoutMs` / `maintenance`）/ `bus`（订阅事件写热更新日志）——**不做任意代码执行** |
+| 版本 | 机制版本 `hotVersion` = **0.1.0**：spec 必须声明同值；`hot/status` 与每条日志都带该版本；spec schema = 1（未知 schema 拒绝） |
+| 日志 | `<dataRoot>/hot/hot-update.log`（JSONL）：每行含时间 / `hotVersion` / 类型 / 变更模块 / 结果（`applied` / `rejected` / `rolled-back`） |
+| HTTP | `GET /api/hot/status`、`GET /api/hot/log`、`POST /api/hot/{stage,apply,rollback,binary,binary/rollback,restart}`；`/api/hot/*` 豁免维护模式、不计入在途 |
+| 二进制热更新 | stage（`--hot-probe` 自检）→ 备份 → 原子替换（rename + copy，失败即回滚）→ `kernel/restarting` 通知壳 → 壳 `supervise` 拉起新二进制；`.app` 内二进制默认拒绝替换（会破坏代码签名，`LAUNCHER_HOT_ALLOW_BUNDLE_SWAP=1` 可强制）；Windows 上运行中的 exe 无法替换（明确报错） |
+| 壳配合 | 收到 `kernel/restarting` = **计划内重启**（不计崩溃重启预算）；重启就绪后重新 `navigate` 窗口到新端口（端口每次启动都变） |
+| 零能力 | 内核不联网：spec / 二进制由外部投递到本地路径（或请求体内联），内核只做校验与应用 |
+| 外置内核（打包版） | 壳把包内内核复制到数据目录（`<dataRoot>/kernel/launcher-kernel`）后启动；热更新只动数据目录，**不触碰 `.app` 签名与系统授权**。台账记「投放时的 App 版本」：版本变化（App 升级）⇒ 重投包内版本（热更新成果作废）。UI 同源外置（`<dataRoot>/kernel/ui/`），与内核一起投放 |
+| 分发与更新 | 内核与插件**各自独立**的 Release 通道：插件 `plugins-latest`、内核 **`kernel-latest`**（`kernel-registry.json` + `launcher-kernel-<版本>-<平台>-<架构>.zip`，**UI 与内核同包**）。检查 / 下载 / 解压由 `internal-store` 逻辑层命令做（`check-kernel` / `download-kernel`）；应用由 view 调 `pluginAction('applyKernelUpdate')` 发起（安装重启内核，命令进程会被收掉） |
+
 ---
 
 ## 8. 插件规范
@@ -845,6 +866,18 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 - 断网 / 坏索引 / sha256 不匹配 / 新版本加载失败各走一遍：旧版本仍在，界面给出明确提示
 - 「恢复出厂版本」能回到 App 自带的那份
 - 真 GitHub Release 走一遍完整链路（M7.2 通道可发）
+
+### M8 — 内核热更新（2026-09-18 立项，机制版本 0.1.0）
+**交付**：内核 `hot` 模块（generation 状态机 + 两阶段 + 回滚 + JSONL 日志）、`/api/hot/*` 八个接口、
+路由 / 中间件 / 事件订阅的热替换（停用内置路由、维护模式、声明式扩展路由）、
+二进制热替换（staging / 备份 / 原子替换 / 启动守卫自动回滚）、壳侧计划内重启配合（`kernel/restarting` + 重启后导航）。
+**验收**：
+- `apply` 后新路由立刻生效、在途请求不中断；`rollback` 回到上一稳定代（再回滚一次 = 恢复）
+- 非法 spec（schema / 版本 / 路由冲突 / 停用不存在的路由）被拒，且当前代不受影响；每次结果都进 `hot-update.log`
+- 二进制更新：替换 → 优雅重启（壳拉起新二进制）→ 就绪即确认（清台账）；连续两次启动未就绪 ⇒ 自动回滚备份
+- 打包版 `.app` 内核默认拒绝替换（签名保护），`hot/status` 给出说明与强制开关
+- 更新页里**内核与插件各自独立**检查 / 更新（内核通道 = 固定 tag `kernel-latest`）：内核包（内核 + UI）下载后 sha256 校验、解压（恢复可执行位 / 防路径穿越 / 结构校验），再交内核原子替换
+- 打包版内核以**数据目录外置副本**运行：更新不触碰 `.app` 签名；App 升级后外置副本被包内版本重投（热更新成果作废）
 
 ---
 

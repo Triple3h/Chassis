@@ -17,6 +17,8 @@ use crate::error::{KernelError, Result};
 use crate::events::{names, EventBus};
 use crate::exec::{BoxFuture, RuntimeOptions, ScriptRuntime};
 use crate::history::{HistoryEntry, HistoryStore};
+use crate::hot::middleware::HotMiddlewareCtx;
+use crate::hot::{spec::HotSpec, HotUpdate};
 use crate::http::plugin_servers::PluginServerPool;
 use crate::http::server::{serve, InfraState, LogFn, ServerOptions, SseHub, UiServer};
 use crate::legacy::legacy_id_to_current;
@@ -86,6 +88,8 @@ pub struct Kernel {
     pub visibility: Arc<WindowVisibility>,
     pub stats: Arc<SystemStatsSampler>,
     pub admin: Arc<PluginAdmin>,
+    /// 内核热更新（v0.1.0）：路由 / 中间件 / 事件订阅的 generation 切换 + 二进制热替换。
+    pub hot: Arc<HotUpdate>,
     pub sse: SseHub,
     log: LogFn,
     ui: Mutex<Option<UiServer>>,
@@ -175,6 +179,8 @@ impl SettingsHost for KernelSettingsHost {
     fn host_info(&self) -> Value {
         json!({
             "version": self.kernel.version(),
+            // 内核热更新机制版本（v0.1.0）：插件侧用它判断「这个更新包我装不装得了」
+            "hotVersion": crate::hot::HOT_UPDATE_VERSION,
             "platform": platform_string(),
             "dataRoot": self.kernel.data_root(),
             // v2 没有 Node 运行时：字段保留（UI「关于」面板在显示它），值给「—」
@@ -405,6 +411,18 @@ impl Kernel {
                 primitives: primitives.clone(),
             }));
 
+            // 热更新管理器：builder 走 Weak<Kernel>（装配期不能拿强引用 —— 会形成 Arc 环）
+            let hot = {
+                let weak = weak.clone();
+                let dir = data_root.join("hot");
+                let log = crate::hot::HotLog::new(&dir);
+                let builder: crate::hot::TreeBuilder = Arc::new(move |spec: &HotSpec| {
+                    let kernel = weak.upgrade().ok_or_else(|| KernelError::internal("内核已释放"))?;
+                    kernel.build_hot_tree(spec)
+                });
+                Arc::new(HotUpdate::new(dir, log, bus.clone(), builder))
+            };
+
             Kernel {
                 opts,
                 bus,
@@ -430,6 +448,7 @@ impl Kernel {
                 visibility,
                 stats,
                 admin,
+                hot,
                 sse,
                 log,
                 ui: Mutex::new(None),
@@ -464,6 +483,10 @@ impl Kernel {
 
     pub fn mark_ready(&self) {
         self.ready.store(true, Ordering::SeqCst);
+        // 走到「就绪」= 本次启动成功：确认二进制热更新（清 pending 台账）
+        if let Some(detail) = self.hot.mark_boot_success() {
+            self.log("info", &detail);
+        }
     }
 
     pub fn is_ready(&self) -> bool {
@@ -687,6 +710,8 @@ impl Kernel {
         }
         tokio::spawn(self.storage.clone().flush_loop());
 
+        // 热更新：先加载持久化的 spec（current.json）建成第 1 代，UI 服务才有路由树可挂
+        self.hot.boot().map_err(|err| KernelError::new("INTERNAL", format!("热更新初始化失败：{}", err.message)))?;
         self.start_ui_server().await?;
         self.plugins.init().await;
         self.plugins.start_watcher();
@@ -733,19 +758,38 @@ impl Kernel {
         Ok(())
     }
 
-    async fn start_ui_server(self: &Arc<Self>) -> Result<u16> {
-        let options = ServerOptions {
+    fn server_options(&self) -> ServerOptions {
+        ServerOptions {
             ui_dist_dir: self.opts.ui_dist_dir.clone(),
             ui_dev_url: self.opts.ui_dev_url.clone(),
-            allowed_origins: self
-                .opts
-                .ui_dev_url
-                .as_deref()
-                .and_then(origin_of)
-                .into_iter()
-                .collect(),
+            allowed_origins: self.opts.ui_dev_url.as_deref().and_then(origin_of).into_iter().collect(),
             port: 0,
+        }
+    }
+
+    /// 构建一整棵热更新路由树（业务路由 + 扩展路由 + infra 静态 + CORS + 热中间件）。
+    ///
+    /// 由 `HotUpdate` 的 builder 回调调用：**每次 apply 都重新构建**（含新的中间件配置），
+    /// 构建 / 自检失败都不会动当前代。
+    pub fn build_hot_tree(self: &Arc<Self>, spec: &HotSpec) -> Result<axum::Router> {
+        let options = self.server_options();
+        let infra = InfraState::new(self.sse.clone(), &options);
+        let policy = crate::api::RoutePolicy::from_spec(spec);
+        // CORS 必须挂在整个 merge 完的树上（业务路由在 api::router_with 里，挂 infra_router 上覆盖不到）
+        let router = crate::api::router_with(&policy, spec)
+            .merge(crate::http::server::infra_router::<Arc<Kernel>>(infra.clone()));
+        let router = crate::http::server::with_cors(router, infra);
+        let ctx = HotMiddlewareCtx {
+            inflight: self.hot.inflight_counter(),
+            log: self.hot.log().clone(),
+            config: spec.middleware.clone(),
         };
+        let router = router.layer(axum::middleware::from_fn_with_state(ctx, crate::hot::middleware::hot_middleware));
+        Ok(router.with_state(self.clone()))
+    }
+
+    async fn start_ui_server(self: &Arc<Self>) -> Result<u16> {
+        let options = self.server_options();
 
         // bus → SSE（UI 与插件页的事件都从这里扇出）
         {
@@ -753,13 +797,10 @@ impl Kernel {
             self.bus.set_sink(Arc::new(move |event, payload| sse.broadcast(event, payload)));
         }
 
-        let infra = InfraState::new(self.sse.clone(), &options);
-        // CORS 必须挂在整个 merge 完的树上（业务路由在 api::router 里，挂 infra_router 上覆盖不到）
-        let router = crate::http::server::with_cors(
-            crate::api::router().merge(crate::http::server::infra_router::<Arc<Kernel>>(infra.clone())),
-            infra,
-        );
-        let server = serve(router, self.clone(), self.sse.clone(), options, self.log.clone()).await?;
+        // listener 上挂**分发层**（不是某一棵具体的树）：热更新换代时 listener 不用动，
+        // 每个请求由分发层现取当前代 —— 这才让路由 / 中间件的热替换真正生效。
+        let router = crate::hot::dispatch_router(self.hot.clone());
+        let server = serve(router, self.sse.clone(), options, self.log.clone()).await?;
         self.ui_port.store(server.port, Ordering::SeqCst);
         *self.ui.lock().unwrap_or_else(|err| err.into_inner()) = Some(server);
         Ok(self.ui_port())
@@ -798,6 +839,36 @@ impl Kernel {
             tokio::time::sleep(std::time::Duration::from_millis(120)).await;
             std::process::exit(0);
         });
+    }
+
+    /// 热更新收尾：排空在途请求 → 通知壳 → 优雅退出（壳 `supervise` 会拉起新二进制）。
+    ///
+    /// 「不中断正在处理的请求」在这里落地：先 `drain`（等在途请求跑完，最长 3s），
+    /// 再停服务退出 —— SSE 长连接不计入在途（否则永远等不到 0）。
+    pub async fn hot_restart(self: &Arc<Self>, reason: &str) {
+        if self.quitting.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let payload = json!({
+            "reason": reason,
+            "version": self.version(),
+            "pid": std::process::id(),
+            "hotVersion": crate::hot::HOT_UPDATE_VERSION,
+        });
+        self.bus.emit(names::HOT_RESTARTING, &payload);
+        self.link.notify("kernel/restarting", Some(payload.clone()));
+        self.log("info", &format!("内核热更新重启：{reason}（等待在途请求排空…）"));
+
+        let drained = self.hot.drain(std::time::Duration::from_secs(3)).await;
+        if !drained {
+            self.log("warn", &format!("在途请求未能排空（剩余 {}），继续重启", self.hot.inflight()));
+        }
+        // 兜底：stop() 可能被未断开的 SSE 长连接拖住；数据已在 stop() 里 flush 过
+        tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            std::process::exit(0);
+        });
+        self.stop().await;
     }
 
     // ── 窗口显隐（状态机在 `WindowVisibility`，这里是薄转发）────────
@@ -1131,11 +1202,71 @@ impl Kernel {
     }
 
     /// 插件管理动作（托盘、设置面板、HTTP API 共用同一条路径）。
-    pub async fn plugin_action(&self, action: &str, payload: &Value) -> Result<Value> {
+    pub async fn plugin_action(self: &Arc<Self>, action: &str, payload: &Value) -> Result<Value> {
+        // 内核自身的热更新动作：只对 `internal-` 插件开放（`ctx.settings` 的注入闸门见 ADR-0003）
+        if action == "applyKernelUpdate" {
+            return self.apply_kernel_update(payload).await;
+        }
         let result = self.admin.run(action, payload).await;
         // 启用 / 禁用 / 安装 / 卸载都会改变「谁在订阅剪贴板」
         self.sync_clipboard_watch().await;
         result
+    }
+
+    /// 应用内核热更新（`internal-store` 的「内核更新」发起）：stage 自检 → 备份 → 原子替换（含 UI）→ 优雅重启。
+    ///
+    /// 与 `POST /api/hot/binary` 同一条底层路径；**必须由 view 发起**（重启会杀掉正在执行命令的子进程，
+    /// 与插件更新的分工完全一致：下载在逻辑层、安装由 view 调 `ctx.settings.pluginAction` 发起）。
+    async fn apply_kernel_update(self: &Arc<Self>, payload: &Value) -> Result<Value> {
+        let path = payload
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::bad_args("path 必填（候选内核二进制的本地路径）"))?
+            .to_string();
+        let version = payload.get("version").and_then(Value::as_str).unwrap_or_default().to_string();
+        let ui = payload.get("uiPath").and_then(Value::as_str).map(std::path::PathBuf::from);
+        let restart = payload.get("restart").and_then(Value::as_bool).unwrap_or(true);
+        let dir = self.hot.dir().to_path_buf();
+
+        let (staged, report) = match crate::hot::binary::stage(&dir, std::path::Path::new(&path), &version) {
+            Ok(value) => value,
+            Err(err) => {
+                self.hot.log().append(json!({
+                    "type": "binary", "result": "rejected", "stage": "probe",
+                    "source": format!("pluginAction:{path}"), "detail": err.message,
+                }));
+                return Err(err);
+            }
+        };
+        let ui_path = crate::hot::binary::peer_ui(ui.as_deref(), &staged);
+        let pending = match crate::hot::binary::apply(&dir, &staged, &self.version(), &report.version, ui_path.as_deref()) {
+            Ok(pending) => pending,
+            Err(err) => {
+                self.hot.log().append(json!({
+                    "type": "binary", "result": "rejected", "stage": "apply",
+                    "source": format!("pluginAction:{path}"), "detail": err.message,
+                }));
+                return Err(err);
+            }
+        };
+        self.hot.log().append(json!({
+            "type": "binary",
+            "result": "applied",
+            "source": format!("pluginAction:{path}"),
+            "from": pending.from_version,
+            "to": pending.to_version,
+            "ui": pending.ui_target.is_some(),
+        }));
+        if restart {
+            let kernel = self.clone();
+            tokio::spawn(async move { kernel.hot_restart("kernel-update").await });
+        }
+        Ok(json!({
+            "ok": true,
+            "pending": pending,
+            "restartScheduled": restart,
+            "note": "内核会优雅重启（等在途请求排空）；新版本若连续两次启动未就绪，下一次启动自动回滚",
+        }))
     }
 
     // ── 剪贴板监听（plugin-spec §8.1）───────────────────────────

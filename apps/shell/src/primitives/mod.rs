@@ -44,6 +44,12 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value, 
         "app.setAutostart" => set_autostart(app, params),
         "app.info" => app_info(app),
         "app.usage" => usage::usage(),
+        // 内核热更新：即将优雅重启（内核二进制可能已被替换）。这是**计划内重启** ——
+        // supervise 会照常拉起，但不计入崩溃重启预算，且重启后要把窗口导航到新端口。
+        "kernel/restarting" => {
+            crate::sidecar::note_hot_restart(params);
+            Ok(json!({ "ok": true }))
+        }
         "app.quit" => {
             crate::shutdown(app);
             Ok(json!(null))

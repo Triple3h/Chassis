@@ -219,6 +219,8 @@ export function subscribeEvents(
       'ui/openView',
       'shell/visibility',
       'app/quit',
+      'hot/updated',
+      'hot/restarting',
     ]) {
       source.addEventListener(name, forward(name) as EventListener)
     }

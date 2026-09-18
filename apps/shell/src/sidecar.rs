@@ -12,6 +12,239 @@ use tauri::{AppHandle, Manager};
 
 const MAX_RESTARTS: u32 = 3;
 
+/// 内核因热更新主动重启（收到 `kernel/restarting` 通知后置位）。
+///
+/// 语义：**计划内重启** —— 不计入崩溃重启预算（否则连续几次热更新就会撞上 MAX_RESTARTS），
+/// 且重启后必须把窗口重新导航到新端口（内核端口每次启动都变）。
+static HOT_RESTARTING: AtomicBool = AtomicBool::new(false);
+
+/// 记录内核的热更新重启意图（由 `primitives::dispatch` 调用）。
+pub fn note_hot_restart(params: &serde_json::Value) {
+    HOT_RESTARTING.store(true, Ordering::SeqCst);
+    let reason = params.get("reason").and_then(|value| value.as_str()).unwrap_or("hot-update");
+    let version = params.get("version").and_then(|value| value.as_str()).unwrap_or("?");
+    crate::logging::log(&format!("[shell] 内核请求热更新重启（reason={reason}，version={version}）"));
+}
+
+/// 把主窗口导航到内核托管的 UI。
+///
+/// 启动与**内核重启**两条路共用：内核重启后端口会变，不重新导航 = UI 停在旧端口白屏。
+pub fn navigate_main_window(app: &tauri::AppHandle, port: u16) {
+    let url = format!("http://127.0.0.1:{port}");
+    if let Some(window) = app.get_webview_window("main") {
+        match url.parse() {
+            Ok(parsed) => {
+                let _ = window.navigate(parsed);
+            }
+            Err(err) => crate::logging::log(&format!("[shell] URL 解析失败：{err}")),
+        }
+    }
+}
+
+// ── 内核外置（热更新的落点）──────────────────────────────────────
+//
+// 内核热更新要替换二进制；替换 `.app` 内的文件会**破坏代码签名**（macOS 上可能直接起不来）。
+// 所以打包态的壳优先使用数据目录里的一份**外置副本**：热更新只动数据目录，签名 / TCC 都不受影响
+// （内核不直接调 TCC API，读选中文本 / 截图都走壳原语，责任进程仍然是壳）。
+
+/// 数据目录下的外置内核目录
+const EXTERNAL_KERNEL_SUBDIR: &str = "kernel";
+/// 外置副本的台账（记录投放来源 + 投放时的 App 版本）
+const EXTERNAL_STATE_FILE: &str = "kernel.json";
+/// 与内核同源的外置 UI 目录（内核托管 UI：一致性由同一份台账保证）
+const EXTERNAL_UI_SUBDIR: &str = "ui";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalKernelState {
+    /// 投放时的 App 版本：**变了就重投**（新 App 自带的内核优先，热更新成果作废）
+    source_app_version: String,
+    /// `bundled`（首次投放）| `hot-update`（被内核热更新替换过；投放时仍是 bundled）
+    source: String,
+    installed_at: i64,
+    bundled_kernel: String,
+}
+
+/// 内核定位结果。
+enum KernelLocation {
+    /// 打包态：包内二进制（会先投放成数据目录里的外置副本再启动）
+    Bundled(PathBuf),
+    /// 开发态 / 显式覆盖：直接用，不做外置（免得作者的本地构建被数据目录的旧副本挡住）
+    Direct(PathBuf),
+}
+
+fn kernel_exe_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "launcher-kernel.exe"
+    } else {
+        "launcher-kernel"
+    }
+}
+
+/// 内核定位（优先级从高到低）：
+///  1. `LAUNCHER_KERNEL_ENTRY`（测试与开发覆盖）
+///  2. 包内 `Resources/kernel/<exe>`（打包态）
+///  3. `target/{release,debug}/<exe>`（开发态）
+fn locate_kernel(app: &AppHandle) -> Result<KernelLocation, String> {
+    if let Ok(path) = std::env::var("LAUNCHER_KERNEL_ENTRY") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Ok(KernelLocation::Direct(path));
+        }
+        return Err(format!("LAUNCHER_KERNEL_ENTRY 指向的文件不存在：{}", path.display()));
+    }
+
+    let exe_name = kernel_exe_name();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        for candidate in [
+            resource_dir.join("kernel").join(exe_name),
+            resource_dir.join("resources").join("kernel").join(exe_name),
+        ] {
+            if candidate.exists() {
+                return Ok(KernelLocation::Bundled(candidate));
+            }
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        let mut cursor: Option<&Path> = exe.parent();
+        let mut hops = 0;
+        while let Some(dir) = cursor {
+            for profile in ["release", "debug"] {
+                let candidate = dir.join("target").join(profile).join(exe_name);
+                if candidate.exists() {
+                    return Ok(KernelLocation::Direct(candidate));
+                }
+            }
+            cursor = dir.parent();
+            hops += 1;
+            if hops > 6 {
+                break;
+            }
+        }
+    }
+
+    Err("找不到内核（先执行 pnpm build:kernel，或设置 LAUNCHER_KERNEL_ENTRY）".to_string())
+}
+
+/// 确保数据目录里的外置副本可用；返回（要启动的内核路径，外置是否生效）。
+///
+/// 台账语义：`sourceAppVersion` 等于当前 App 版本 ⇒ 保留现有副本（可能已被热更新替换过）；
+/// 不等（App 升级）或缺失 ⇒ 用包内版本重投（App 自带的内核优先），热更新成果顺带作废。
+fn ensure_external_kernel(app: &AppHandle, bundled: &Path) -> (PathBuf, bool) {
+    let dir = data_root(app).join(EXTERNAL_KERNEL_SUBDIR);
+    let exe = dir.join(kernel_exe_name());
+    let app_version = app.package_info().version.to_string();
+
+    let state: Option<ExternalKernelState> = std::fs::read_to_string(dir.join(EXTERNAL_STATE_FILE))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let fresh = state.as_ref().map(|item| item.source_app_version == app_version).unwrap_or(false);
+    if exe.exists() && fresh {
+        return (exe, true);
+    }
+    if let Some(previous) = state.as_ref() {
+        if previous.source_app_version != app_version {
+            crate::logging::log(&format!(
+                "[shell] App 已从 {} 升到 {app_version}：丢弃外置内核（含热更新版本），改用包内版本",
+                previous.source_app_version
+            ));
+        }
+    }
+
+    match install_external(app, bundled, &dir, &exe, &app_version) {
+        Ok(()) => (exe, true),
+        Err(err) => {
+            crate::logging::log(&format!("[shell] 外置内核投放失败（回落到包内）：{err}"));
+            (bundled.to_path_buf(), false)
+        }
+    }
+}
+
+fn install_external(app: &AppHandle, bundled: &Path, dir: &Path, exe: &Path, app_version: &str) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|err| format!("创建外置内核目录失败：{err}"))?;
+
+    // 二进制：先写临时文件再 rename —— 半截文件不会被下次启动当成可用内核
+    let tmp = dir.join(format!("{}.installing", kernel_exe_name()));
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::copy(bundled, &tmp).map_err(|err| format!("复制内核失败：{err}"))?;
+    set_executable(&tmp)?;
+    std::fs::rename(&tmp, exe).map_err(|err| format!("落位内核失败：{err}"))?;
+
+    // UI：与内核同一份台账（「新内核 + 旧 UI」比不更新更糟）
+    //
+    // 来源要问 `ui_dist_dir`（打包态 = `Resources/ui/`），不能按 `bundled.parent()` 猜：
+    // 内核在 `Resources/kernel/` 下、UI 在 `Resources/ui/` 下，**两者不同层**。
+    // 早先按 parent 找永远落空 ⇒ 外置副本只有内核、UI 赖在 .app 里，
+    // 内核热更新重启后就成「新内核 + 旧 UI」——恰好是这条设计要防的事。
+    let bundled_ui = ui_dist_dir(app);
+    if bundled_ui.join("index.html").exists() {
+        let target = dir.join(EXTERNAL_UI_SUBDIR);
+        let staging = dir.join(format!("{EXTERNAL_UI_SUBDIR}.installing"));
+        let old = dir.join(format!("{EXTERNAL_UI_SUBDIR}.old"));
+        let _ = std::fs::remove_dir_all(&staging);
+        let _ = std::fs::remove_dir_all(&old);
+        copy_tree(&bundled_ui, &staging).map_err(|err| format!("复制 UI 失败：{err}"))?;
+        if target.exists() {
+            std::fs::rename(&target, &old).map_err(|err| format!("暂存旧 UI 失败：{err}"))?;
+        }
+        std::fs::rename(&staging, &target).map_err(|err| format!("落位 UI 失败：{err}"))?;
+        let _ = std::fs::remove_dir_all(&old);
+    } else {
+        crate::logging::log("[shell] 包内 UI 缺失：外置副本不含 UI（内核热更新将无法同包替换 UI）");
+    }
+
+    let state = ExternalKernelState {
+        source_app_version: app_version.to_string(),
+        source: "bundled".to_string(),
+        installed_at: now_ms(),
+        bundled_kernel: bundled.display().to_string(),
+    };
+    if let Ok(text) = serde_json::to_string_pretty(&state) {
+        let _ = std::fs::write(dir.join(EXTERNAL_STATE_FILE), text);
+    }
+    crate::logging::log(&format!("[shell] 外置内核已投放：{}（App {app_version}）", exe.display()));
+    Ok(())
+}
+
+/// 递归复制目录（std 没有现成的；ui 体积小，够用）。
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+fn set_executable(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(path).map_err(|err| format!("读取权限失败：{err}"))?.permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).map_err(|err| format!("设置可执行权限失败：{err}"))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 pub struct Sidecar {
     child: Mutex<Option<Child>>,
     link: Arc<Link>,
@@ -30,10 +263,22 @@ impl Sidecar {
     }
 
     pub fn start(&self, app: &AppHandle) -> Result<(), String> {
-        let entry = kernel_entry(app)?;
         let data_root = data_root(app);
         let builtin = builtin_plugins_dir(app);
-        let ui_dist = ui_dist_dir(app);
+        // 打包态：先落一份外置副本（热更新只动数据目录，不碰 .app 签名与 TCC 授权）；
+        // 开发态：直接用本地构建产物（不然作者的重新 build 会被数据目录的旧副本挡住）。
+        let (entry, ui_dist) = match locate_kernel(app)? {
+            KernelLocation::Bundled(bundled) => {
+                let (external, active) = ensure_external_kernel(app, &bundled);
+                let external_ui = external.parent().map(|parent| parent.join(EXTERNAL_UI_SUBDIR));
+                let ui = match (active, external_ui) {
+                    (true, Some(ui)) if ui.join("index.html").exists() => ui,
+                    _ => ui_dist_dir(app),
+                };
+                (external, ui)
+            }
+            KernelLocation::Direct(path) => (path, ui_dist_dir(app)),
+        };
 
         // v2：内核本身就是可执行文件（Rust）—— 不再需要找用户的 Node、也不再拼解释器参数
         let mut command = Command::new(&entry);
@@ -125,14 +370,28 @@ impl Sidecar {
                 continue;
             }
             this.link.detach();
+            // 热更新重启：计划内行为 ⇒ 不计崩溃预算（否则连续几次热更新就撞上 MAX_RESTARTS）
+            let hot_restart = HOT_RESTARTING.swap(false, Ordering::SeqCst);
             let count = this.restarts.fetch_add(1, Ordering::SeqCst) + 1;
-            if count > MAX_RESTARTS {
+            if hot_restart {
+                this.restarts.store(0, Ordering::SeqCst);
+            } else if count > MAX_RESTARTS {
                 crate::logging::log(&format!("[shell] 内核连续退出 {count} 次，不再重启"));
                 return;
             }
-            crate::logging::log(&format!("[shell] 内核已退出，正在重启（第 {count} 次）"));
+            let label = if hot_restart { "热更新".to_string() } else { format!("第 {count} 次") };
+            crate::logging::log(&format!("[shell] 内核已退出，正在重启（{label}）"));
             if let Err(err) = this.start(&app) {
                 crate::logging::log(&format!("[shell] 内核重启失败：{err}"));
+                continue;
+            }
+            // 端口每次启动都变 ⇒ 重启后必须重新导航窗口（不导航 = UI 停在旧端口白屏）
+            match this.wait_ready(Duration::from_secs(20)) {
+                Ok(port) => {
+                    crate::logging::log(&format!("[shell] 内核重启就绪：UI 端口 {port}"));
+                    navigate_main_window(&app, port);
+                }
+                Err(err) => crate::logging::log(&format!("[shell] 内核重启后未就绪：{err}")),
             }
         });
     }
@@ -163,51 +422,6 @@ impl Sidecar {
         std::thread::sleep(Duration::from_millis(120));
         self.kill();
     }
-}
-
-fn kernel_entry(app: &AppHandle) -> Result<PathBuf, String> {
-    if let Ok(path) = std::env::var("LAUNCHER_KERNEL_ENTRY") {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Ok(path);
-        }
-        return Err(format!("LAUNCHER_KERNEL_ENTRY 指向的文件不存在：{}", path.display()));
-    }
-
-    let exe_name = if cfg!(target_os = "windows") { "launcher-kernel.exe" } else { "launcher-kernel" };
-
-    // 打包后：<resource_dir>/kernel/launcher-kernel
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        for candidate in [
-            resource_dir.join("kernel").join(exe_name),
-            resource_dir.join("resources").join("kernel").join(exe_name),
-        ] {
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-    }
-
-    // 开发态：从可执行文件往上找 target/{release,debug}/launcher-kernel
-    if let Ok(exe) = std::env::current_exe() {
-        let mut cursor: Option<&Path> = exe.parent();
-        let mut hops = 0;
-        while let Some(dir) = cursor {
-            for profile in ["release", "debug"] {
-                let candidate = dir.join("target").join(profile).join(exe_name);
-                if candidate.exists() {
-                    return Ok(candidate);
-                }
-            }
-            cursor = dir.parent();
-            hops += 1;
-            if hops > 6 {
-                break;
-            }
-        }
-    }
-
-    Err("找不到内核（先执行 pnpm build:kernel，或设置 LAUNCHER_KERNEL_ENTRY）".to_string())
 }
 
 /// 数据目录名 = 应用名（2026-09-16 起从 `Launcher` 改成 `Chassis`）

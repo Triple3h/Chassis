@@ -122,15 +122,7 @@ pub fn run() {
             std::thread::spawn(move || match ready_sidecar.wait_ready(Duration::from_secs(30)) {
                 Ok(port) => {
                     logging::log(&format!("[shell] 内核就绪：UI 端口 {port}"));
-                    let url = format!("http://127.0.0.1:{port}");
-                    if let Some(window) = ready_handle.get_webview_window("main") {
-                        match url.parse() {
-                            Ok(parsed) => {
-                                let _ = window.navigate(parsed);
-                            }
-                            Err(err) => logging::log(&format!("[shell] URL 解析失败：{err}")),
-                        }
-                    }
+                    sidecar::navigate_main_window(&ready_handle, port);
                 }
                 Err(err) => show_boot_error(&ready_handle, &err),
             });

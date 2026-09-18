@@ -173,11 +173,11 @@ impl UiServer {
 }
 
 /// 启动 UI 服务；返回的 `UiServer` 持有端口与关闭句柄。
-pub async fn serve<S>(router: Router<S>, state: S, hub: SseHub, options: ServerOptions, log: LogFn) -> Result<UiServer>
-where
-    S: Clone + Send + Sync + 'static,
-{
-    let app = router.with_state(state);
+///
+/// 接收的是一棵**已经装配好 state 的整树**（`Router<()>`）——这样调用方可以把
+/// `HotUpdate` 当前 generation 的树直接递进来，热更新换树不需要重启 listener。
+pub async fn serve(router: Router, hub: SseHub, options: ServerOptions, log: LogFn) -> Result<UiServer> {
+    let app = router;
     let listener = TcpListener::bind(("127.0.0.1", options.port))
         .await
         .map_err(|err| KernelError::new("INTERNAL", format!("UI 服务端口分配失败：{err}")))?;
