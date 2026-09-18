@@ -1,0 +1,11 @@
+{
+  "name": "demo",
+  "title": "出厂示例",
+  "version": "1.0.0",
+  "type": "module",
+  "apiVersion": "2",
+  "capabilities": [],
+  "commands": [
+    { "name": "show", "title": "示例页", "mode": "view", "searchable": true }
+  ]
+}

@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -105,6 +105,8 @@ pub struct PluginManager {
     records: Mutex<HashMap<String, PluginRecord>>,
     loaded: Mutex<HashMap<String, LoadedPlugin>>,
     stop_flag: AtomicBool,
+    /// 出厂身份表：`id → 是否 essential`，只从出厂 bundle 的清单读（见 `builtin_identity`）。
+    builtin_identity: Mutex<HashMap<String, bool>>,
 }
 
 impl PluginManager {
@@ -114,6 +116,7 @@ impl PluginManager {
             records: Mutex::new(HashMap::new()),
             loaded: Mutex::new(HashMap::new()),
             stop_flag: AtomicBool::new(false),
+            builtin_identity: Mutex::new(HashMap::new()),
         }
     }
 
@@ -182,13 +185,37 @@ impl PluginManager {
 
     /// 底座基础能力：出厂 bundle 里声明了 `essential` 的插件 —— **不可禁用**。
     ///
-    /// 只认出厂声明（`builtin`）：第三方插件即使在清单里写 `essential: true` 也不生效，
-    /// 否则它就能把自己变成「用户关不掉」的插件（权限提升）。
+    /// 只认**出厂身份表**（`builtin_identity`），不看当前生效目录的清单：否则把一个
+    /// 声明 `essential: true` 的版本放进 `extensions/` 覆盖掉非 essential 的出厂插件，
+    /// 就能白拿「不可禁用 + 免审计」（`audit.set_exempt` 走的就是这里）——权限提升。
+    ///
+    /// 出厂身份表里查不到（bundle 清单读不出）时按 `true` 处理：宁可不让覆盖，也不放过。
     pub fn is_essential(&self, id: &str) -> bool {
-        self.records()
-            .get(id)
-            .map(|record| record.builtin && record.manifest.as_ref().and_then(|manifest| manifest.essential).unwrap_or(false))
-            .unwrap_or(false)
+        let builtin = self.records().get(id).map(|record| record.builtin).unwrap_or(false);
+        if !builtin {
+            return false;
+        }
+        self.identity_guard().get(id).copied().unwrap_or(true)
+    }
+
+    /// 出厂身份表里声明了 `essential`（与「当前生效目录 / 是否已装载」无关）。
+    ///
+    /// 安装路径用它做二次拒绝：`is_essential` 依赖 `record.builtin`，而插件可能因平台过滤
+    /// 根本没进 records（`screen-recorder` 在 Windows 上就是）——那种情况下也必须拒绝覆盖。
+    pub fn is_declared_essential(&self, id: &str) -> bool {
+        self.identity_guard().get(id).copied().unwrap_or(false)
+    }
+
+    /// 该插件当前是否被 `extensions/` 下的目录覆盖（= 装的不是 App 自带的那份）。
+    pub fn has_extension_override(&self, id: &str) -> bool {
+        let Some(record) = self.records().get(id).cloned() else {
+            return false;
+        };
+        record.dir.starts_with(self.deps.data_root.join("extensions"))
+    }
+
+    fn identity_guard(&self) -> std::sync::MutexGuard<'_, HashMap<String, bool>> {
+        self.builtin_identity.lock().unwrap_or_else(|err| err.into_inner())
     }
 
     /// 该插件的条目是否不进「最近使用」（清单 `history: false`）。
@@ -364,7 +391,7 @@ impl PluginManager {
 
     pub async fn init(self: &Arc<Self>) {
         self.scan().await;
-        self.prune_essential_disabled().await;
+        self.prune_essential_disabled();
         for record in self.list() {
             if self.deps.config.get().disabled.contains(&record.id) {
                 self.set_state(&record.id, |entry| {
@@ -384,26 +411,16 @@ impl PluginManager {
 
     /// 基础能力不可禁用：配置里若残留它们的禁用项（手改配置 / 旧版本留下的），一律忽略并清掉 ——
     /// 否则「设置与插件管理」被禁用后就再没有界面能把它改回来（自救入口没了）。
-    async fn prune_essential_disabled(self: &Arc<Self>) {
+    fn prune_essential_disabled(&self) {
         let disabled = self.deps.config.get().disabled;
         if disabled.is_empty() {
             return;
         }
+        // 只看出厂身份表（不看当前生效目录的清单）：与 `is_essential` 同一口径
         let mut kept: Vec<String> = Vec::new();
         let mut dropped: Vec<String> = Vec::new();
         for id in disabled {
-            let builtin = self.records().get(&id).map(|record| record.builtin).unwrap_or(false);
-            if !builtin {
-                kept.push(id);
-                continue;
-            }
-            // 装配还没开始，manifest 只能现读一次（插件数量少，代价可忽略）
-            let record_dir = self.dir_of(&id);
-            let essential = match record_dir {
-                Some(dir) => read_manifest(&dir).await.map(|manifest| manifest.essential == Some(true)).unwrap_or(false),
-                None => false,
-            };
-            if essential {
+            if self.is_essential(&id) {
                 dropped.push(id);
             } else {
                 kept.push(id);
@@ -486,6 +503,10 @@ impl PluginManager {
     /// 目录识别规则（统一 install 与 scan）：若 `<dir>/dist/package.json` 存在，
     /// 则 `<dir>/dist` 才是插件根；否则 `<dir>` 本身是插件根。插件 id 以清单里的 `name` 为准。
     pub async fn scan(self: &Arc<Self>) {
+        // 出厂身份表先建好：`extensions` 是最后一个 root，扫描到它时要能查「这个 id 是不是 essential」
+        let identity = self.collect_builtin_identity();
+        *self.identity_guard() = identity.clone();
+
         let mut found: HashMap<String, (PathBuf, bool)> = HashMap::new();
         let mut roots: Vec<(PathBuf, bool)> = self.deps.builtin_roots.iter().map(|root| (root.clone(), true)).collect();
         roots.push((self.deps.data_root.join("extensions"), false));
@@ -516,10 +537,24 @@ impl PluginManager {
                         }
                     }
                 }
-                // 与 v1 行为一致：extensions 不覆盖同 id 的出厂 bundle
-                if builtin || !found.contains_key(&id) {
-                    found.insert(id, (candidate, builtin));
+                // 更新机制（M7）的装配前提：`extensions` 可以覆盖**非 essential** 的出厂插件，
+                // 覆盖后 `builtin` 仍是 true（不可卸载、可禁用，与出厂插件同等待遇）。
+                // essential 的三个是底座基础能力，永不被外部目录顶替。
+                let overriding = !builtin && found.contains_key(&id);
+                if overriding {
+                    if identity.get(&id).copied().unwrap_or(true) {
+                        self.log("warn", &format!("忽略 extensions 下的 {id}：出厂基础插件不可被覆盖"));
+                        continue;
+                    }
+                    // 覆盖目录的清单必须读得出且合法，否则回落到出厂版本 ——
+                    // 一次坏下载 / 不兼容的新版本不能把插件变成「没有」
+                    if let Err(issue) = read_manifest(&candidate).await {
+                        self.log("warn", &format!("忽略 extensions 下的 {id}：清单不可用（{}）", issue.message));
+                        continue;
+                    }
                 }
+                let builtin_flag = if overriding { true } else { builtin };
+                found.insert(id, (candidate, builtin_flag));
             }
         }
 
@@ -559,6 +594,38 @@ impl PluginManager {
             let _ = self.disable(&id, SessionCloseReason::Disable).await;
             self.records().remove(&id);
         }
+    }
+
+    /// 出厂身份表：`id → essential`，只从出厂 bundle 的清单读（`builtin_roots`，靠后覆盖靠前）。
+    ///
+    /// 它是「谁是底座基础能力」的唯一真源 —— 与当前生效目录解耦，覆盖版本改清单也拿不到特权。
+    /// 读不出清单的 id 不进表（随后按「查不到 ⇒ essential」的保守口径处理）。
+    fn collect_builtin_identity(&self) -> HashMap<String, bool> {
+        let mut identity: HashMap<String, bool> = HashMap::new();
+        for root in &self.deps.builtin_roots {
+            for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    continue;
+                }
+                let dir = entry.path();
+                let candidate = if path_exists(&dir.join("dist").join("package.json")) { dir.join("dist") } else { dir };
+                let Ok(raw) = std::fs::read_to_string(candidate.join("package.json")) else {
+                    continue;
+                };
+                let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+                    continue;
+                };
+                let id = value
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|id| crate::manifest::is_plugin_id(id))
+                    .unwrap_or(name.as_str())
+                    .to_string();
+                identity.insert(id, value.get("essential").and_then(Value::as_bool).unwrap_or(false));
+            }
+        }
+        identity
     }
 
     // ── 加载 / 停用 ─────────────────────────────────────────────
@@ -848,32 +915,157 @@ impl PluginManager {
                 format!("插件 {} 不支持当前运行环境：{reason}", manifest.name),
             ));
         }
-        let id = manifest.name.clone();
+        // 源目录可能在另一个文件系统（用户挑的目录）⇒ 先落到 data_root 下的 staging，
+        // 之后的 rename 才在同一文件系统内（才能原子）。
+        let staging = self.staging_dir(&manifest.name);
+        let _ = ensure_dir(&staging);
+        let outcome = async {
+            copy_dir_recursive(&source_dir, &staging)?;
+            self.install_prepared(&staging, &manifest, overwrite).await
+        }
+        .await;
+        let _ = std::fs::remove_dir_all(&staging);
+        outcome
+    }
 
-        let _ = ensure_dir(&self.deps.data_root.join("extensions"));
-        let target = self.deps.data_root.join("extensions").join(&id);
-        let existing = self.get(&id);
-        if existing.is_some() && !overwrite {
+    /// 把 staging 里的插件换成为生效版本（插件远程更新的内核侧，plugin-spec §6）。
+    ///
+    /// 与「先删再拷」的旧行为相比，这里保证：**任何失败路径都不会让插件消失** ——
+    /// 旧版本先整目录备份，落地只是一次同文件系统内的 rename，起不来就整体回滚。
+    /// 用户数据（设置 / 别名 / 历史 / 固定项）按 id 寻址，全都不在插件目录里，天然保留。
+    async fn install_prepared(
+        self: &Arc<Self>,
+        staging: &Path,
+        manifest: &PluginManifest,
+        overwrite: bool,
+    ) -> Result<PluginRecord> {
+        let id = manifest.name.clone();
+        let extensions = self.deps.data_root.join("extensions");
+        let _ = ensure_dir(&extensions);
+        let target = extensions.join(&id);
+
+        // essential 出厂插件不接受覆盖（更新器侧已过滤，这里是内核的二次拒绝）
+        if self.is_declared_essential(&id) {
+            return Err(KernelError::new(
+                "ESSENTIAL_PROTECTED",
+                format!("「{}」是底座基础能力，不可被覆盖安装", manifest.title),
+            ));
+        }
+        let was_disabled = self.deps.config.get().disabled.contains(&id);
+        let existed = self.get(&id).is_some();
+        if existed && !overwrite {
             return Err(KernelError::new("PLUGIN_ID_CONFLICT", format!("插件已存在：{id}")));
         }
-        if existing.is_some() {
-            self.disable(&id, SessionCloseReason::Disable).await;
+
+        // 停用前记下开着的 view 命令：装载成功后交给 UI 用同一命令重开（与 reload() 同语义）
+        let views: Vec<String> = self.deps.sessions.by_plugin(&id).into_iter().map(|session| session.command).collect();
+        if existed {
+            self.disable(&id, SessionCloseReason::Reload).await;
         }
 
-        if target.exists() {
-            let _ = std::fs::remove_dir_all(&target);
-        }
-        copy_dir_recursive(&source_dir, &target)?;
-
-        // scan() 已按同一条识别规则把 record.dir / builtin 指向 extensions/ 下的新目录
-        self.scan().await;
-        let Some(record) = self.get(&id) else {
-            return Err(KernelError::new("MANIFEST_INVALID", "安装后未找到插件目录"));
+        let backup = match self.move_to_backup(&id, &target).await {
+            Ok(path) => path,
+            Err(err) => {
+                // 备份没做成 ⇒ 旧版本还在原地，直接认输（永不做半替换）
+                return Err(KernelError::new("UPDATE_FAILED", format!("备份旧版本失败：{err}（旧版本未改动）")));
+            }
         };
-        if !self.deps.config.get().disabled.contains(&id) {
-            self.load(&id).await?;
+
+        if let Err(err) = rename_with_retry(staging, &target).await {
+            let rolled_back = match &backup {
+                Some(path) => self.restore_backup(path, &target).await,
+                None => false,
+            };
+            return Err(KernelError::new(
+                "UPDATE_FAILED",
+                format!("替换插件目录失败：{err}（{}）", rollback_hint(rolled_back, backup.is_none())),
+            ));
         }
-        Ok(record)
+
+        self.scan().await;
+        let mut outcome = if was_disabled {
+            // 已禁用的插件只换文件、不装载（与 reload() 的 was_disabled 分支一致）
+            self.get(&id).ok_or_else(|| KernelError::new("MANIFEST_INVALID", "安装后未找到插件目录"))
+        } else {
+            self.load(&id).await
+        };
+
+        if let Err(err) = &outcome {
+            let mut rolled_back = false;
+            if self.move_to_failed(&id, &target).await {
+                if let Some(path) = &backup {
+                    rolled_back = self.restore_backup(path, &target).await;
+                }
+                if rolled_back {
+                    self.scan().await;
+                    if !was_disabled {
+                        let _ = self.load(&id).await;
+                    }
+                }
+            }
+            outcome = Err(KernelError::new(
+                "UPDATE_FAILED",
+                format!("新版本加载失败：{}（{}）", err.message, rollback_hint(rolled_back, backup.is_none())),
+            ));
+        }
+
+        if outcome.is_ok() && !was_disabled {
+            self.deps
+                .bus
+                .emit(names::PLUGIN_RELOADED, &json!({ "pluginId": id, "commands": views, "ok": self.is_active(&id) }));
+        }
+        outcome
+    }
+
+    /// staging 目录：与 `extensions/` 同在 data_root 下（rename 才原子）。
+    fn staging_dir(&self, id: &str) -> PathBuf {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        self.deps.data_root.join(".staging").join(format!("{id}-{}-{}", crate::util::now_ms(), sequence))
+    }
+
+    /// 旧版本整目录挪去 `extensions/.backup/<id>/<版本>`（只保留最近 1 份）。
+    ///
+    /// 目录以 `.` 开头 ⇒ `scan()` 不会把它当成插件扫进来。
+    async fn move_to_backup(&self, id: &str, target: &Path) -> Result<Option<PathBuf>> {
+        if !path_exists(target) {
+            return Ok(None);
+        }
+        let version = self
+            .get(id)
+            .and_then(|record| record.manifest.as_ref().map(|manifest| manifest.version.clone()))
+            .unwrap_or_else(|| "0.0.0".to_string());
+        let backup_root = self.deps.data_root.join("extensions").join(".backup").join(id);
+        let _ = std::fs::remove_dir_all(&backup_root);
+        let _ = ensure_dir(&backup_root);
+        let destination = backup_root.join(sanitize_dir_name(&version));
+        rename_with_retry(target, &destination)
+            .await
+            .map_err(|err| KernelError::new("UPDATE_FAILED", err.to_string()))?;
+        Ok(Some(destination))
+    }
+
+    async fn restore_backup(&self, backup: &Path, target: &Path) -> bool {
+        let _ = std::fs::remove_dir_all(target);
+        rename_with_retry(backup, target).await.is_ok()
+    }
+
+    /// 起不来的新版本挪去 `extensions/.failed/<id>-<时间戳>`（供诊断，只保留最近 1 份）。
+    async fn move_to_failed(&self, id: &str, target: &Path) -> bool {
+        if !path_exists(target) {
+            return false;
+        }
+        let failed_root = self.deps.data_root.join("extensions").join(".failed");
+        let _ = ensure_dir(&failed_root);
+        let prefix = format!("{id}-");
+        for entry in std::fs::read_dir(&failed_root).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(&prefix) {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+        let destination = failed_root.join(format!("{id}-{}", crate::util::now_ms()));
+        rename_with_retry(target, &destination).await.is_ok()
     }
 
     /// 从 zip 安装（requirements §3.5 / §9「供应链」）：
@@ -914,7 +1106,7 @@ impl PluginManager {
         let prefixes: HashSet<&str> = entries.iter().filter_map(|(name, _)| name.split('/').next()).collect();
         let wrapped = (!has_root_pkg && prefixes.len() == 1).then(|| prefixes.iter().next().copied().unwrap_or_default().to_string());
 
-        let staging = self.deps.data_root.join(".staging").join(format!("install-{}", crate::util::now_ms()));
+        let staging = self.staging_dir("zip");
         let _ = ensure_dir(&staging);
         let outcome = async {
             for (name, _) in &entries {
@@ -947,7 +1139,15 @@ impl PluginManager {
                     .map_err(|err| KernelError::new("INTERNAL", format!("写入失败：{err}")))?;
                 std::io::copy(&mut entry, &mut out).map_err(|err| KernelError::new("INTERNAL", format!("解压失败：{err}")))?;
             }
-            self.install_from_directory(&staging, overwrite).await
+            // 解压结果已经是插件根（包裹层已在上面剥掉）⇒ 直接走原子替换，不再拷一次
+            let manifest = read_manifest(&staging).await.map_err(|issue| KernelError::new(issue.code, issue.message))?;
+            if let Some(reason) = manifest.unsupported_reason() {
+                return Err(KernelError::new(
+                    "PLATFORM_MISMATCH",
+                    format!("插件 {} 不支持当前运行环境：{reason}", manifest.name),
+                ));
+            }
+            self.install_prepared(&staging, &manifest, overwrite).await
         }
         .await;
         let _ = std::fs::remove_dir_all(&staging);
@@ -969,6 +1169,29 @@ impl PluginManager {
         self.records().remove(id);
         self.emit_changed();
         Ok(())
+    }
+
+    /// 恢复出厂版本：删掉 `extensions/` 下的覆盖，让 App 自带的那份重新生效。
+    ///
+    /// 这是更新机制的**逃生口** —— 出厂插件不可卸载（`uninstall` 对 builtin 是 FORBIDDEN），
+    /// 更新到坏版本后必须有等价动作可回退。返回 `false` = 本来就没有覆盖（不是错误）。
+    pub async fn revert_to_builtin(self: &Arc<Self>, id: &str) -> Result<bool> {
+        let Some(record) = self.get(id) else {
+            return Err(KernelError::not_found(format!("插件不存在：{id}")));
+        };
+        if !record.builtin {
+            return Err(KernelError::new("FORBIDDEN", "只有出厂插件能恢复出厂版本"));
+        }
+        if !self.has_extension_override(id) {
+            return Ok(false);
+        }
+        let _ = std::fs::remove_dir_all(&record.dir);
+        // 备份一起清：否则下一次安装的备份里还躺着那个坏版本
+        let _ = std::fs::remove_dir_all(self.deps.data_root.join("extensions").join(".backup").join(id));
+        self.scan().await;
+        // reload 的语义正是我们需要的：停用旧进程 → 读盘 → 加载 → 广播 plugin/reloaded（UI 重开页面）
+        self.reload(id).await?;
+        Ok(true)
     }
 
     pub async fn dispose(self: &Arc<Self>) {
@@ -1164,6 +1387,48 @@ fn is_windows_absolute(name: &str) -> bool {
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
+/// rename 的重试次数 / 间隔：Windows 上插件进程刚被杀，句柄释放会滞后一点
+/// （`disable()` 已经回收过，但杀进程是异步的）；失败就整体回滚，不做半替换。
+const RENAME_ATTEMPTS: usize = 5;
+const RENAME_RETRY_MS: u64 = 200;
+
+async fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut last: Option<std::io::Error> = None;
+    for _ in 0..RENAME_ATTEMPTS {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                last = Some(err);
+                tokio::time::sleep(Duration::from_millis(RENAME_RETRY_MS)).await;
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "rename 失败")))
+}
+
+fn rollback_hint(rolled_back: bool, no_backup: bool) -> &'static str {
+    if rolled_back {
+        "已回滚到旧版本"
+    } else if no_backup {
+        "本次是首次安装，没有旧版本可回滚"
+    } else {
+        "未能回滚，请用「恢复出厂版本」或重装"
+    }
+}
+
+/// 版本号进目录名：非 `[A-Za-z0-9._-]` 一律换成 `-`（版本号来自清单，不可信）。
+fn sanitize_dir_name(value: &str) -> String {
+    let cleaned: String = value
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') { ch } else { '-' })
+        .collect();
+    if cleaned.is_empty() {
+        "unknown".to_string()
+    } else {
+        cleaned
+    }
+}
+
 fn copy_dir_recursive(source: &Path, target: &Path) -> Result<()> {
     ensure_dir(target).map_err(|err| KernelError::new("INTERNAL", format!("创建目录失败：{err}")))?;
     let entries = std::fs::read_dir(source).map_err(|err| KernelError::new("INTERNAL", format!("读取目录失败：{err}")))?;
@@ -1296,5 +1561,229 @@ mod tests {
         assert_eq!(origin_of("http://localhost:5173/").unwrap(), "http://localhost:5173");
         assert_eq!(origin_of("http://localhost:5173/app").unwrap(), "http://localhost:5173");
         assert!(origin_of("not-a-url").is_none());
+    }
+
+    // ── 插件更新（M7）：覆盖规则 / 原子安装 / 恢复出厂 ──────────────
+
+    fn temp_root(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("manager-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_plugin_dir(dir: &Path, name: &str, version: &str, essential: bool) {
+        let mut manifest = manifest_value(name, json!([{ "name": "show", "title": "Show", "mode": "view" }]));
+        manifest["version"] = json!(version);
+        if essential {
+            manifest["essential"] = json!(true);
+        }
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("package.json"), serde_json::to_string(&manifest).unwrap()).unwrap();
+        std::fs::write(dir.join("index.html"), "<html></html>").unwrap();
+    }
+
+    fn version_of(dir: &Path) -> String {
+        let raw = std::fs::read_to_string(dir.join("package.json")).unwrap();
+        serde_json::from_str::<Value>(&raw).unwrap()["version"].as_str().unwrap().to_string()
+    }
+
+    fn test_manager(root: &Path, builtin_roots: Vec<PathBuf>) -> Arc<PluginManager> {
+        let log: LogFn = Arc::new(|_, _| {});
+        let exec = Arc::new(ScriptRuntime::new(crate::exec::RuntimeOptions {
+            data_root: root.to_path_buf(),
+            resolve_plugin_dir: Arc::new(|_| None),
+            data_path_for: Arc::new(|_| std::env::temp_dir()),
+            settings_for: Arc::new(|_| HashMap::new()),
+            handle_rpc: Arc::new(|_, _, _| Box::pin(async { Err(KernelError::not_found("测试装置不提供 RPC")) })),
+            on_failure: Arc::new(|_, _| {}),
+            on_late_result: Arc::new(|_, _, _| {}),
+        }));
+        let exec_for_entry = exec.clone();
+        let config = Arc::new(ConfigStore::new(root));
+        let _ = config.init();
+        let overrides = Arc::new(OverrideStore::new(root));
+        overrides.load();
+        let plugin_settings = Arc::new(PluginSettingStore::new(root));
+        plugin_settings.load();
+        Arc::new(PluginManager::new(PluginManagerDeps {
+            data_root: root.to_path_buf(),
+            builtin_roots,
+            config,
+            overrides,
+            plugin_settings,
+            audit: Arc::new(AuditLog::new(root)),
+            bus: EventBus::new(),
+            registry: Arc::new(CommandRegistry::new()),
+            sessions: Arc::new(SessionManager::new()),
+            servers: Arc::new(PluginServerPool::new(log.clone())),
+            exec,
+            resolve_entry: Arc::new(move |plugin_id, command| exec_for_entry.resolve_entry(plugin_id, command)),
+            log,
+            on_changed: Arc::new(|| {}),
+        }))
+    }
+
+    #[tokio::test]
+    async fn extensions_can_override_non_essential_builtin() {
+        let root = temp_root("override");
+        let builtin = root.join("builtin");
+        write_plugin_dir(&builtin.join("demo"), "demo", "1.0.0", false);
+        let manager = test_manager(&root, vec![builtin.clone()]);
+        manager.scan().await;
+        assert_eq!(manager.get("demo").unwrap().dir, builtin.join("demo"));
+
+        let extensions = root.join("extensions");
+        write_plugin_dir(&extensions.join("demo"), "demo", "2.0.0", false);
+        manager.scan().await;
+
+        let record = manager.get("demo").unwrap();
+        assert_eq!(record.dir, extensions.join("demo"), "非 essential 出厂插件可被覆盖");
+        assert!(record.builtin, "覆盖后仍是出厂插件：不可卸载、可禁用");
+        assert!(!manager.is_essential("demo"));
+        assert!(manager.has_extension_override("demo"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn extensions_never_override_essential_builtin() {
+        let root = temp_root("essential");
+        let builtin = root.join("builtin");
+        write_plugin_dir(&builtin.join("demo"), "demo", "1.0.0", true);
+        write_plugin_dir(&root.join("extensions").join("demo"), "demo", "2.0.0", false);
+        let manager = test_manager(&root, vec![builtin.clone()]);
+        manager.scan().await;
+
+        assert_eq!(manager.get("demo").unwrap().dir, builtin.join("demo"), "底座基础能力不可被外部目录顶替");
+        assert!(manager.is_essential("demo"));
+        assert!(!manager.has_extension_override("demo"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn broken_override_falls_back_to_builtin() {
+        let root = temp_root("broken");
+        let builtin = root.join("builtin");
+        write_plugin_dir(&builtin.join("demo"), "demo", "1.0.0", false);
+        let override_dir = root.join("extensions").join("demo");
+        std::fs::create_dir_all(&override_dir).unwrap();
+        std::fs::write(override_dir.join("package.json"), "{ 这不是 json").unwrap();
+
+        let manager = test_manager(&root, vec![builtin.clone()]);
+        manager.scan().await;
+        assert_eq!(manager.get("demo").unwrap().dir, builtin.join("demo"), "坏覆盖必须回落到出厂版本");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn essential_declared_in_override_grants_nothing() {
+        let root = temp_root("escalation");
+        let builtin = root.join("builtin");
+        write_plugin_dir(&builtin.join("demo"), "demo", "1.0.0", false);
+        write_plugin_dir(&root.join("extensions").join("demo"), "demo", "2.0.0", true);
+        let manager = test_manager(&root, vec![builtin.clone()]);
+        manager.scan().await;
+
+        assert!(!manager.is_essential("demo"), "essential 只认出厂身份表：覆盖版本改清单不能拿到不可禁用");
+        assert!(!manager.is_declared_essential("demo"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn overwrite_install_keeps_user_data_and_backs_up_old_version() {
+        let root = temp_root("install");
+        let builtin = root.join("builtin");
+        write_plugin_dir(&builtin.join("demo"), "demo", "1.0.0", false);
+        let manager = test_manager(&root, vec![builtin.clone()]);
+        manager.scan().await;
+        manager.load("demo").await.unwrap();
+        // 用户数据：插件设置 + 别名覆盖（升级必须原样保留）
+        let _ = manager.deps.plugin_settings.set("demo", "k", SettingValue::Str("v".to_string()));
+        let _ = manager.deps.overrides.set_plugin_keywords("demo", Some(vec!["别名".to_string()]));
+
+        let source = root.join("source");
+        write_plugin_dir(&source, "demo", "2.0.0", false);
+        manager.install_from_directory(&source, true).await.unwrap();
+
+        let record = manager.get("demo").unwrap();
+        assert_eq!(record.manifest.clone().unwrap().version, "2.0.0", "新版本生效");
+        assert_eq!(record.dir, root.join("extensions").join("demo"));
+        assert!(record.builtin, "被覆盖的出厂插件身份不变");
+        assert_eq!(
+            manager.deps.plugin_settings.get_for("demo").unwrap().get("k").cloned(),
+            Some(SettingValue::Str("v".to_string())),
+            "插件设置不随升级丢失"
+        );
+        assert!(manager.deps.overrides.get_for("demo").is_some(), "别名覆盖不随升级丢失");
+
+        // 首次覆盖不备份：出厂版本在 App 包里，本来就还在（「恢复出厂版本」就是回到它）
+        let backup_root = root.join("extensions").join(".backup").join("demo");
+        assert!(!backup_root.exists());
+
+        // 再升两级：备份始终只有最近 1 份
+        for next in ["3.0.0", "4.0.0"] {
+            let previous = manager.get("demo").unwrap().manifest.unwrap().version;
+            write_plugin_dir(&source, "demo", next, false);
+            manager.install_from_directory(&source, true).await.unwrap();
+            assert_eq!(manager.get("demo").unwrap().manifest.unwrap().version, next);
+            let backups: Vec<PathBuf> = std::fs::read_dir(&backup_root).unwrap().flatten().map(|entry| entry.path()).collect();
+            assert_eq!(backups.len(), 1, "只保留最近 1 份备份");
+            assert_eq!(version_of(&backups[0]), previous);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn install_refuses_to_overwrite_essential_plugin() {
+        let root = temp_root("refuse");
+        let builtin = root.join("builtin");
+        write_plugin_dir(&builtin.join("demo"), "demo", "1.0.0", true);
+        let manager = test_manager(&root, vec![builtin.clone()]);
+        manager.scan().await;
+
+        let source = root.join("source");
+        write_plugin_dir(&source, "demo", "2.0.0", false);
+        let err = manager.install_from_directory(&source, true).await.unwrap_err();
+        assert_eq!(err.code, "ESSENTIAL_PROTECTED");
+        assert_eq!(manager.get("demo").unwrap().dir, builtin.join("demo"), "拒绝后旧版本原地不动");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn revert_to_builtin_restores_bundle_version() {
+        let root = temp_root("revert");
+        let builtin = root.join("builtin");
+        write_plugin_dir(&builtin.join("demo"), "demo", "1.0.0", false);
+        let manager = test_manager(&root, vec![builtin.clone()]);
+        manager.scan().await;
+
+        let source = root.join("source");
+        write_plugin_dir(&source, "demo", "2.0.0", false);
+        manager.install_from_directory(&source, true).await.unwrap();
+        assert_eq!(manager.get("demo").unwrap().manifest.clone().unwrap().version, "2.0.0");
+
+        assert!(manager.revert_to_builtin("demo").await.unwrap(), "有覆盖时应真的恢复");
+        let record = manager.get("demo").unwrap();
+        assert_eq!(record.manifest.unwrap().version, "1.0.0");
+        assert_eq!(record.dir, builtin.join("demo"));
+        assert!(!manager.has_extension_override("demo"));
+        assert!(!root.join("extensions").join(".backup").join("demo").exists(), "备份一起清，避免又被装回去");
+
+        // 没有覆盖时不是错误
+        assert!(!manager.revert_to_builtin("demo").await.unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn revert_to_builtin_rejects_third_party_plugins() {
+        let root = temp_root("revert-third");
+        let manager = test_manager(&root, vec![root.join("builtin")]);
+        let source = root.join("source");
+        write_plugin_dir(&source, "demo", "1.0.0", false);
+        manager.install_from_directory(&source, false).await.unwrap();
+
+        let err = manager.revert_to_builtin("demo").await.unwrap_err();
+        assert_eq!(err.code, "FORBIDDEN", "第三方插件没有「出厂版本」可恢复");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

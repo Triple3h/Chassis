@@ -1,0 +1,12 @@
+{
+  "name": "core",
+  "title": "底座基础能力",
+  "version": "1.0.0",
+  "type": "module",
+  "apiVersion": "2",
+  "essential": true,
+  "capabilities": [],
+  "commands": [
+    { "name": "show", "title": "基础页", "mode": "view", "searchable": true }
+  ]
+}

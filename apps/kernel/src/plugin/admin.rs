@@ -65,6 +65,11 @@ impl PluginAdmin {
                 self.deps.plugins.install_from_zip(std::path::Path::new(&path), overwrite).await?;
                 Ok(json!({ "ok": true }))
             }
+            // 恢复出厂版本（插件更新机制的逃生口）：`reverted=false` = 本来就没有覆盖
+            "revertToBuiltin" => {
+                let reverted: bool = self.deps.plugins.revert_to_builtin(&id).await?;
+                Ok(json!({ "ok": true, "reverted": reverted }))
+            }
             "reveal" => {
                 let dir = self
                     .deps
