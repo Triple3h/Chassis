@@ -1,0 +1,112 @@
+# 插件远程更新：把各平台的插件 zip 与 registry.json 发到固定 tag 的 Release
+# （docs/plugin-update-plan.md §3；与 App 的 release.yml（tag v*）完全独立，避免互相顶掉 latest）。
+#
+# 为什么走固定 tag `plugins-latest`：`releases/latest` 会被 App 的 v* Release 抢走（插件索引 404），
+# 固定 tag 的直链 `releases/download/<tag>/<asset>` 长期稳定，客户端不需要 GitHub API、不需要 token。
+#
+# 零 secrets：v1 不上签名（信任模型 = 固定仓库 + HTTPS + sha256）。
+name: plugins-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      plugins:
+        description: 插件名（空格分隔；留空 = 全部非 essential 出厂插件）
+        required: false
+        default: ''
+      notes:
+        description: 更新说明（展示在更新页）
+        required: false
+        default: ''
+      min_kernel:
+        description: 最低内核版本（低于它的客户端不提示更新）
+        required: false
+        default: ''
+  push:
+    tags: ['plugins/*']
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/build-all.mjs plugins
+      - run: node scripts/pack-plugins.mjs ${{ inputs.plugins }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugins-macos-arm64
+          path: plugins/release/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/build-all.mjs plugins
+      - run: node scripts/pack-plugins.mjs ${{ inputs.plugins }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugins-windows-x64
+          path: plugins/release/*
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: plugins/release
+          merge-multiple: true
+
+      - name: 汇总生成 registry.json
+        env:
+          PLUGIN_NOTES: ${{ inputs.notes }}
+          MIN_KERNEL: ${{ inputs.min_kernel }}
+        run: |
+          args=()
+          [ -n "$MIN_KERNEL" ] && args+=(--min-kernel "$MIN_KERNEL")
+          [ -n "$PLUGIN_NOTES" ] && args+=(--notes "$PLUGIN_NOTES")
+          node scripts/gen-plugin-registry.mjs "${args[@]}"
+          rm -f plugins/release/shard-*.json
+          ls -la plugins/release
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: plugins-latest
+          name: 插件更新源
+          files: plugins/release/*
+          allowUpdates: true
+          overwrite_files: true
+          body: |
+            插件远程更新通道（客户端内置的固定源，一般不需要手动下载）。
+
+            - `registry.json`：索引（schema 1，含各平台 zip 的 sha256）
+            - `<id>-<版本>-<平台>-<架构>.zip`：插件包（逻辑层是原生产物 ⇒ 按平台分别构建）
+
+            出厂基础插件（app-launcher / file-search / internal-settings）不在此列：它们随 App 包发布。

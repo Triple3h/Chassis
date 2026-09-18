@@ -18,6 +18,7 @@
     "build:plugins": "node scripts/build-all.mjs plugins",
     "spec-check": "node scripts/spec-check.mjs",
     "pack:plugins": "node scripts/pack-plugins.mjs",
+    "pack:registry": "node scripts/gen-plugin-registry.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:kernel": "node scripts/dev.mjs kernel",
     "dev:ui": "node scripts/dev.mjs ui",
