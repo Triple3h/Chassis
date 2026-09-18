@@ -1,17 +1,20 @@
 //! 选中文本原语（requirements §6.1 `selection.read` / §6.2）：
 //! 读「此刻前台 App 里选中的那段文本」。
 //!
-//! macOS 走 Accessibility API（系统级元素 → 聚焦元素 → `AXSelectedText`）——
-//! 这是唯一既不碰用户剪贴板、也不模拟按键的读法（模拟 ⌘C 会把剪贴板冲掉）。
+//! 两端都**不碰剪贴板、也不模拟按键**（模拟 ⌘C 会把剪贴板冲掉）：
+//!  - macOS：Accessibility API（系统级元素 → 聚焦元素 → `AXSelectedText`）；
+//!  - Windows：UI Automation（`GetFocusedElement` → `TextPattern.GetSelection`）。
 //!
 //! 两条硬约束（踩坑记录见 docs/architecture.md D19）：
 //!  - **必须发生在窗口显示之前**：窗口一上屏，前台 App 就变成了自己，
-//!    `AXFocusedUIElement` 拿到的选区随之消失。顺序由调用方 `window::show` 保证。
-//!  - 需要「辅助功能」权限：未授权时 `AXIsProcessTrusted()` 为 false。
-//!    首次（状态未知）带 `prompt` 调一次系统引导；已知被拒过就只静默复核，不再打扰。
+//!    聚焦元素拿到的选区随之消失。顺序由调用方 `window::show` 保证。
+//!  - 读不到永远不是错误：`{ ok:false, reason }` 原样回给内核，唤出流程照常继续
+//!    （这个原语只负责"带来什么就带来什么"，"要不要用"是内核的决定）。
 //!
-//! 读不到永远不是错误：`{ ok:false, reason }` 原样回给内核，唤出流程照常继续
-//! （这个原语只负责"带来什么就带来什么"，"要不要用"是内核的决定）。
+//! macOS 需要「辅助功能」权限：未授权时 `AXIsProcessTrusted()` 为 false，
+//! 首次（状态未知）带 `prompt` 调一次系统引导；已知被拒过就只静默复核，不再打扰。
+//! Windows 的 UIA 不需要任何授权，但**只能拿到实现了 TextPattern 的控件**（原生编辑框、
+//! 浏览器内容、Office 等）；游戏 / 自绘界面返回 `unsupported`，属正常降级。
 
 use crate::logging::log;
 use serde_json::{json, Value};
@@ -161,13 +164,120 @@ mod imp {
     }
 }
 
+#[cfg(windows)]
+mod imp {
+    use super::{json, log};
+    use serde_json::Value;
+    use tauri::AppHandle;
+    use windows::core::Interface;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomation2, IUIAutomationTextPattern, UIA_TextPatternId,
+    };
+
+    /// UI Automation 的跨进程调用会等目标应用响应；给一个上限。
+    /// 这条链路串在 `window.show` 前面 —— 宁可这次读不到，也不拖住唤出。
+    const CONNECTION_TIMEOUT_MS: u32 = 500;
+    /// 截断上限：防「全选整篇文档」把 IPC 与搜索框打爆（内核还会再截一道）
+    const MAX_CHARS: usize = 4096;
+
+    /// 线程 COM 公寓守卫：本线程没初始化过就初始化，退出时配对释放。
+    struct ComApartment {
+        owns: bool,
+    }
+
+    impl ComApartment {
+        fn enter() -> Self {
+            // S_FALSE = 本线程此前已初始化（同样要配对 CoUninitialize）；
+            // RPC_E_CHANGED_MODE = 本线程已在别的公寓里 —— 不释放也不报错，直接用
+            let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            Self { owns: hr.is_ok() }
+        }
+    }
+
+    impl Drop for ComApartment {
+        fn drop(&mut self) {
+            if self.owns {
+                unsafe { CoUninitialize() };
+            }
+        }
+    }
+
+    pub fn read_selection() -> Value {
+        let _apartment = ComApartment::enter();
+        unsafe {
+            let automation: IUIAutomation = match CoCreateInstance(&CUIAutomation, None::<&windows::core::IUnknown>, CLSCTX_INPROC_SERVER) {
+                Ok(value) => value,
+                Err(_) => return json!({ "ok": false, "reason": "unavailable" }),
+            };
+            // 连接超时只在 IUIAutomation2（Win8+）上；拿不到就用系统默认（2s），不因此失败
+            if let Ok(automation2) = automation.cast::<IUIAutomation2>() {
+                let _ = automation2.SetConnectionTimeout(CONNECTION_TIMEOUT_MS);
+            }
+
+            let Ok(focused) = automation.GetFocusedElement() else {
+                return json!({ "ok": false, "reason": "no-focus" });
+            };
+            // TextPattern = 能拿到「选区」的那个（原生编辑框 / 浏览器内容 / Office）；
+            // 只有 ValuePattern 的控件（没有选区概念）读不到就是读不到，不硬凑
+            let Ok(pattern) = focused.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) else {
+                return json!({ "ok": false, "reason": "unsupported" });
+            };
+            let Ok(ranges) = pattern.GetSelection() else {
+                return json!({ "ok": false, "reason": "empty" });
+            };
+            let count = ranges.Length().unwrap_or(0);
+            let mut parts: Vec<String> = Vec::new();
+            for index in 0..count {
+                if let Ok(range) = ranges.GetElement(index) {
+                    // maxLength = -1：整段都要
+                    if let Ok(text) = range.GetText(-1) {
+                        let text = text.to_string();
+                        if !text.is_empty() {
+                            parts.push(text);
+                        }
+                    }
+                }
+            }
+            let joined = parts.join("\n");
+            let trimmed = joined.trim();
+            if trimmed.is_empty() {
+                return json!({ "ok": false, "reason": "empty" });
+            }
+            let text: String = trimmed.chars().take(MAX_CHARS).collect();
+            json!({ "ok": true, "text": text })
+        }
+    }
+
+    /// Windows 上没有权限流程，`app` 只是接口对齐用的。
+    pub fn read_for_show(_app: &AppHandle) -> Option<String> {
+        let value = read_selection();
+        if value.get("ok").and_then(Value::as_bool) != Some(true) {
+            return None;
+        }
+        let text = value.get("text").and_then(Value::as_str)?.to_string();
+        if text.trim().is_empty() {
+            None
+        } else {
+            // 只记长度、不记内容（与 macOS 同款口径）
+            log(&format!("[selection] 唤出带入选中文本 {} 字", text.chars().count()));
+            Some(text)
+        }
+    }
+}
+
 pub fn read(app: &AppHandle, params: &Value) -> Result<Value, String> {
     #[cfg(target_os = "macos")]
     {
         let prompt = params.get("prompt").and_then(|v| v.as_bool()).unwrap_or(false);
         Ok(imp::read(app, prompt))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        let _ = (app, params);
+        Ok(imp::read_selection())
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = (app, params);
         Ok(json!({ "ok": false, "reason": "unsupported" }))
@@ -176,11 +286,11 @@ pub fn read(app: &AppHandle, params: &Value) -> Result<Value, String> {
 
 /// 供 `window::show` 用：带得走就带（返回 `Some(text)`），读不到一律 `None`。
 pub fn read_for_show(app: &AppHandle) -> Option<String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         imp::read_for_show(app)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = app;
         None

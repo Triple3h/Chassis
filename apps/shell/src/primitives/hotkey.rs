@@ -1,6 +1,6 @@
 //! 全局热键（requirements §3.1）：注册失败要提示并引导换键。
 //!
-//! 自用现实：macOS 上 `Alt+Space` 经常被输入法/系统占用，所以失败时**自动回退**到候选键，
+//! 自用现实：首选键经常被输入法/系统占用，所以失败时**自动回退**到候选键，
 //! 并把结果写进日志 + 发系统通知，避免出现"装了却唤不出来"的死局。
 
 use crate::logging::log;
@@ -9,7 +9,19 @@ use std::str::FromStr;
 use tauri::AppHandle;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-/// 首选之后的回退顺序（越靠前越贴近用户习惯）
+/// 默认热键（分平台）：
+///  - macOS：`Alt+Space` —— Spotlight / Raycast 一族的肌肉记忆；
+///  - Windows：`Alt+Space` 是**系统窗口菜单键**（永远抢不到），改用 `Ctrl+Shift+Space`。
+#[cfg(target_os = "macos")]
+pub const DEFAULT_ACCELERATOR: &str = "Alt+Space";
+#[cfg(target_os = "windows")]
+pub const DEFAULT_ACCELERATOR: &str = "Ctrl+Shift+Space";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub const DEFAULT_ACCELERATOR: &str = "Ctrl+Space";
+
+/// 首选之后的回退顺序（越靠前越贴近用户习惯）。
+/// `Cmd` 只在 macOS 有意义（Windows 上对应的 Super 键几乎抢不过系统），所以回退链分平台。
+#[cfg(target_os = "macos")]
 const FALLBACKS: [&str; 6] = [
     "Ctrl+Space",
     "Cmd+Shift+Space",
@@ -18,13 +30,15 @@ const FALLBACKS: [&str; 6] = [
     "F1",
     "Shift+F1",
 ];
+#[cfg(not(target_os = "macos"))]
+const FALLBACKS: [&str; 4] = ["Ctrl+Space", "Ctrl+Alt+Space", "F1", "Shift+F1"];
 
 pub fn register(app: &AppHandle, params: &Value) -> Result<Value, String> {
     let requested = params
         .get("accelerator")
         .and_then(|v| v.as_str())
         .filter(|value| !value.is_empty())
-        .unwrap_or("Alt+Space")
+        .unwrap_or(DEFAULT_ACCELERATOR)
         .to_string();
 
     let mut candidates: Vec<String> = vec![requested.clone()];

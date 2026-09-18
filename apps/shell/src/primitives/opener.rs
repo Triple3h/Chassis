@@ -2,6 +2,7 @@
 //! 协议白名单（http/https/mailto）由内核校验，这里再兜一层。
 
 use serde_json::{json, Value};
+#[cfg(target_os = "macos")]
 use std::process::Command;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;

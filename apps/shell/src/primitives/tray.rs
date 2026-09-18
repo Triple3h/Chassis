@@ -51,10 +51,23 @@ pub fn ensure(app: &AppHandle) -> Result<(), String> {
             }
         });
 
-    // 菜单栏用的是模板图：macOS 只取 alpha 通道并按菜单栏明暗自动反色。
-    // 直接把彩色应用图标塞进菜单栏会又糊又不对味（系统还会把它压到 18pt）。
+    // 图标分平台：
+    //  - macOS：菜单栏用**模板图**（只取 alpha 通道，系统按明暗自动反色）。
+    //    直接把彩色应用图标塞进菜单栏会又糊又不对味（系统还会把它压到 18pt）。
+    //  - Windows：托盘用**彩色应用图标** —— 模板图是 macOS 的概念，Windows 托盘不做反色，
+    //    单色字形在深色任务栏上会糊成一团。
     match tauri::image::Image::from_bytes(TRAY_ICON_PNG) {
-        Ok(icon) => builder = builder.icon(icon).icon_as_template(true),
+        Ok(icon) => {
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder.icon(icon).icon_as_template(true);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let colored = app.default_window_icon().cloned().unwrap_or(icon);
+                builder = builder.icon(colored);
+            }
+        }
         Err(err) => {
             eprintln!("[tray] 菜单栏图标解码失败，回落到默认图标：{err}");
             if let Some(icon) = app.default_window_icon().cloned() {

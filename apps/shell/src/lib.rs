@@ -198,7 +198,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     // 无边框 ⇒ 系统没有可抓的标题栏与边框，拖动与四边/四角缩放都由 UI 画把手、
     // 调 `window.startDragging` / `window.startResizeDragging` 交给系统接管；
     // maximizable/minimizable 仍然关掉（启动台不做最大化/最小化，面板形态是靠拖的）。
-    let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+    let builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
         .title("Chassis")
         .inner_size(720.0, 480.0)
         .min_inner_size(480.0, 240.0)
@@ -209,9 +209,17 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
-        .visible(false)
-        .shadow(true)
-        .build()?;
+        .visible(false);
+    // 阴影分平台：
+    //  - macOS：系统给无边框窗口画阴影（观感就是系统面板）；
+    //  - Windows：DWM 的阴影会给透明无边框窗口描一圈不透明边（透明窗口的已知观感问题），
+    //    所以关掉系统阴影，阴影交给 CSS 画（面板自身带柔和外扩）。
+    //    实机若发现面板边缘仍有硬边，再回调这一项（B1.8）。
+    #[cfg(target_os = "macos")]
+    let builder = builder.shadow(true);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.shadow(false);
+    let window = builder.build()?;
     let _ = window.set_always_on_top(true);
     Ok(())
 }

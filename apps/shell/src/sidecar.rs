@@ -212,7 +212,9 @@ fn kernel_entry(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// 数据目录名 = 应用名（2026-09-16 起从 `Launcher` 改成 `Chassis`）
 pub const APP_DATA_DIR_NAME: &str = "Chassis";
-/// 改名前的数据目录名 —— 只用于一次性接手，别再往这里写东西
+/// 改名前的数据目录名 —— 只用于一次性接手（macOS：`Launcher` → `Chassis`），别再往这里写东西。
+/// Windows 是 M6 全新发布，没有历史目录要接手，所以这条链路只在 macOS 编。
+#[cfg(target_os = "macos")]
 const LEGACY_DATA_DIR_NAME: &str = "Launcher";
 
 pub fn data_root(app: &AppHandle) -> PathBuf {
@@ -226,6 +228,17 @@ pub fn data_root(app: &AppHandle) -> PathBuf {
                 .join("Library")
                 .join("Application Support")
                 .join(APP_DATA_DIR_NAME);
+        }
+    }
+    // Windows：`%APPDATA%\Chassis`。
+    //
+    // 刻意**不用** `app.path().app_data_dir()`：它按 bundle identifier 拼目录
+    // （`%APPDATA%\app.launcher.desktop`），与内核 `paths.rs::default_data_root` 的
+    // 「应用名」口径分叉 —— 结果就是「换个启动方式，历史全没了」。
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            return PathBuf::from(appdata).join(APP_DATA_DIR_NAME);
         }
     }
     app.path()
@@ -263,7 +276,9 @@ pub fn adopt_legacy_data_dir(current: &Path) -> Option<(PathBuf, usize)> {
     }
 }
 
-/// 递归复制目录（std 没有现成的），返回复制成功的文件数
+/// 递归复制目录（std 没有现成的），返回复制成功的文件数。
+/// 只服务 macOS 的一次性改名接手（Windows 无历史目录）。
+#[cfg(target_os = "macos")]
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<usize> {
     std::fs::create_dir_all(to)?;
     let mut count = 0;

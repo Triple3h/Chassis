@@ -35,6 +35,21 @@ tauri-runtime = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 
+# Windows 平台原语：选中文本（UI Automation）/ 自身占用（PSAPI + ToolHelp 进程枚举）。
+# 版本与 tauri 依赖树里的 windows 对齐（0.61），避免同一 crate 编译两份。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_DataExchange",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+  "Win32_UI_Accessibility",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
 [features]
 default = []
 custom-protocol = ["tauri/custom-protocol"]

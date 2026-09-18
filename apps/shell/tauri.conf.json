@@ -18,8 +18,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "icon": ["icons/icon.png", "icons/icon.icns"],
+    "targets": ["app", "dmg", "nsis"],
+    "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
     "resources": {
       "resources/kernel": "kernel/",
       "resources/builtin-plugins": "builtin-plugins/",
@@ -27,6 +27,11 @@
     },
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
     }
   }
 }
