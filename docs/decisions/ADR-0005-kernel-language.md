@@ -2,7 +2,7 @@
 
 - 状态：已采纳
 - 日期：2026-09-17
-- 相关：`docs/launcher-requirements.md` §4.1 / §7 / §8.7 / §13（M5、M6）；`docs/plugin-spec.md` §4.4 / §11；`docs/m5-rust-and-windows.md`（实施计划）；`apps/kernel`（M0–M4 TypeScript → M5 起 Rust，同一目录）
+- 相关：`docs/launcher-requirements.md` §4.1 / §7 / §8.7 / §13（M5、M6）；`docs/plugin-spec.md` §4.4 / §11；`apps/kernel`（M0–M4 TypeScript → M5 起 Rust，同一目录）
 
 ## 背景
 
@@ -33,7 +33,7 @@
 
 "机器上没有 Node"是**明确承诺**而不是打折保证。实测依据（2026-09-17）：`<dataRoot>/extensions/` 与 `config.devPlugins` 均为空、无第三方插件生态；5 个出厂插件 Rust 化后，兼容层没有任何消费者。明确不支持 > 半支持 —— 留下"能跑但要装 Node、且只在部分机器上能跑"的状态，会让同事机器上的行为无法解释。
 
-**保留后路**（零成本）：产物规范按"形态分派"表述，未来若要支持 `.mjs` 只加一节、不改既有条款；adapter + 一个 runtime 分支是纯增量改动（见 `docs/m5-rust-and-windows.md` §A3.4）。
+**保留后路**（零成本）：产物规范按"形态分派"表述，未来若要支持 `.mjs` 只加一节、不改既有条款；adapter + 一个 runtime 分支是纯增量改动。
 
 ### 4. 数据格式不变
 
@@ -69,6 +69,5 @@
 
 ## 参考
 
-- 实测数据与阶段计划：`docs/m5-rust-and-windows.md`（含 §1.2 目标占用表、协议一致性测试、回滚策略）
 - 对外契约：`docs/plugin-spec.md` §4.4（逻辑层运行时）/ §11（版本与兼容）
 - 需求源：`docs/launcher-requirements.md` §4.1 / §7 / §13（M5、M6）

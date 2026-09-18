@@ -219,7 +219,7 @@ interface SettingDecl {
 1. 差异**收在插件内部的平台分支**里，对宿主 / UI 的契约（命令、结果项字段、事件）两端完全一致；
 2. 每条能力都要有**降级路径**：拿不到就给空结果或更弱的实现，不报错、不中断其它来源；
 3. 需要在某个平台**完全不出现** ⇒ 用本节的 `platforms` 声明，不要靠"运行时失败"来隐藏；
-4. 出厂插件现状（可作写法参照，逐项状态见 `docs/m5-rust-and-windows.md` §B0）：
+4. 出厂插件现状（可作写法参照）：
    - `file-search`：macOS = Spotlight（`mdfind`）；Windows = **复用用户已装的 Everything**（按官方 IPC 协议实现，
      探不到则回退自建索引，后者带目录变化增量）；
    - `app-launcher`：macOS = `.app` bundle 扫描；Windows = 开始菜单 / 桌面快捷方式 + 注册表 `App Paths`；

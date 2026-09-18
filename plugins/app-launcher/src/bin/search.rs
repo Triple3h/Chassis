@@ -2,7 +2,7 @@
 //!
 //! 索引优先级：内存 → 宿主 storage（`app-index`）→ 现场扫描。
 //! 宿主只给 200ms 预算，首次扫描必然超时 —— 但那没关系：内核的**延迟补位**会把这批结果
-//! 通过 `search/results` 推给界面（见 `docs/m5-rust-and-windows.md` 与 kernel 的 `on_late_result`）。
+//! 通过 `search/results` 推给界面（见 kernel 的 `on_late_result`）。
 
 use std::sync::{Arc, Mutex};
 

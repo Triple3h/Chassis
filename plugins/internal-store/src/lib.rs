@@ -1,7 +1,7 @@
 //! `internal-store` 的**纯逻辑**（跨平台可单测）：索引解析 / 版本比较 / 按平台挑产物 / 哈希校验。
 //!
 //! 网络与文件 IO 在 `bin/update.rs`（唯一的可执行产物，plugin-spec §2.2 的 N1）。
-//! 索引格式见 `docs/plugin-spec.md` 附录「更新源（registry.json）」；设计见 `docs/plugin-update-plan.md`。
+//! 索引格式见 `docs/plugin-spec.md` 附录「更新源（registry.json）」。
 
 use std::collections::HashMap;
 

@@ -12,7 +12,7 @@
  * 输出：plugins/release/registry.json
  *
  * 索引里**不含** essential 出厂插件（pack-plugins 已跳过），也不含任何签名 —— v1 的信任模型是
- * 「固定仓库 + HTTPS + sha256」（docs/plugin-update-plan.md §6）；`sig` 字段是后续版本的预留位。
+ * 「固定仓库 + HTTPS + sha256」（见 docs/plugin-spec.md 附录 C）；`sig` 字段是后续版本的预留位。
  */
 import fs from 'node:fs'
 import path from 'node:path'

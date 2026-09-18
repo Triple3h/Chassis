@@ -373,7 +373,7 @@ launcher/
 ## 7. 内核规格（语言无关）
 
 > **实现语言（2026-09-17 更新，M5）**：本节是**行为规格**，与实现语言无关。v1（M0–M4）实现为 TypeScript（`apps/kernel/src/`）；M5 起实现为 Rust（`apps/kernel/src/`，bin `launcher-kernel`）。下文代码片段用 TS 书写以便阅读 —— **字段名与语义是契约**，两份实现逐条一致。
-> v1 模块 → M5 模块（完整映射见 `docs/m5-rust-and-windows.md` §A1.1）：`registry.ts` / `pipeline.ts` / `history.ts` / `audit.ts` / `search.ts` → 同名 `.rs`；`plugin.ts` → `plugin/{manager,admin,settings}.rs`；`context.ts` 的装配职责并入 `kernel.rs` 与 `plugin/manager.rs`。
+> v1 模块 → M5 模块：`registry.ts` / `pipeline.ts` / `history.ts` / `audit.ts` / `search.ts` → 同名 `.rs`；`plugin.ts` → `plugin/{manager,admin,settings}.rs`；`context.ts` 的装配职责并入 `kernel.rs` 与 `plugin/manager.rs`。
 
 ### 7.1 服务总线
 
@@ -819,7 +819,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 - hosts 插件 UAC 提权读写、区外字节不动；托盘 / 状态条 / 设置生效；退出无残留进程
 - 交付给使用 Windows 的同事日常使用
 
-**进度（2026-09-18）**：上述交付物**代码已全部落地**（逐项状态见 `docs/m5-rust-and-windows.md` §B0），
+**进度（2026-09-18）**：上述交付物**代码已全部落地**，
 内核 / SDK / 各插件与壳均已通过 Windows 目标的交叉检查（`cargo check --target x86_64-pc-windows-msvc`）；
 `build-windows.yml` 负责真机编译 / 测试 / 打包。**尚未做的**：UWP 应用扫描、文件预览增量、`release.yml`；
 `clipboard-history` 已落地（含壳 `clipboard.watch` 与内核新 capability），**待 Windows 实机验收**。

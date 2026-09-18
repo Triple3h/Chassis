@@ -64,7 +64,7 @@ Chassis 的选择是把边界一条条钉死：
 | `no-view` | 独立子进程，一次性执行 | 无界面的命令（刷新索引、读写配置…） |
 | `script` | 独立子进程，可被 `exec.run` 调用；贡献型搜索可常驻 | 后台逻辑、搜索数据源 |
 
-设计细节、与需求的差异清单与已知边界见 [`docs/architecture.md`](docs/architecture.md) 与 [`docs/decisions/`](docs/decisions)（ADR-0001~0005）。
+设计细节、与需求的差异清单与已知边界见 [`docs/architecture.md`](docs/architecture.md) 与 [`docs/decisions/`](docs/decisions)（ADR-0001~0006）。
 
 ## 安装与构建
 
@@ -280,7 +280,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | [`docs/architecture.md`](docs/architecture.md) | 内核实现细节 + 与需求的差异清单 + 已知边界 + 测试与验收 |
 | [`AGENTS.md`](AGENTS.md) | 仓库指南（给 AI 与新贡献者）：结构、命令、风格、提交规范 |
 
-**历史与合规**：[`docs/decisions/`](docs/decisions)（ADR-0001~0005）｜ [`docs/m5-rust-and-windows.md`](docs/m5-rust-and-windows.md)（全 Rust 化与 Windows 计划）｜ [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) ｜ [`LICENSE`](LICENSE)
+**历史与合规**：[`docs/decisions/`](docs/decisions)（ADR-0001~0006）｜ [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) ｜ [`LICENSE`](LICENSE)
 
 ## 当前状态
 
@@ -291,8 +291,8 @@ macOS 上自用可用：热键唤出、搜索、应用启动、文件搜索、�
 | macOS 自用版（`pnpm app:local` → `dist-app/Chassis.app`） | ✅ 实机在用 |
 | Rust 内核 + Rust 逻辑层插件（apiVersion 2，免 Node） | ✅ |
 | 视图层插件（Vue + iframe，独立 origin） | ✅ |
-| Windows 10/11（`pnpm app:win` → 绿色版 zip；CI 原生构建） | 🚧 代码就位，待实机验收（见 [`docs/m5-rust-and-windows.md`](docs/m5-rust-and-windows.md) §B0 / §B5） |
-| 插件远程更新（`internal-store`） | 🚧 链路就位，待真 Release 验收（见 [`docs/plugin-update-plan.md`](docs/plugin-update-plan.md) §12） |
+| Windows 10/11（`pnpm app:win` → 绿色版 zip；CI 原生构建） | 🚧 代码就位，待实机验收（缺口见下方「已知问题」） |
+| 插件远程更新（`internal-store`） | 🚧 链路就位，待真 Release 验收（契约见 [`docs/plugin-spec.md`](docs/plugin-spec.md) §6.4 / 附录 C） |
 
 质量门（仓库内全绿）：
 

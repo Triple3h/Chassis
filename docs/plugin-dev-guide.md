@@ -21,7 +21,7 @@
 > - 读代码从简到繁：`plugins/web-open/src/`（最小）→ `file-search`（两个入口 + 外部命令）→
 >   `host-manager`（提权写系统文件）→ `totp`（读图转 base64）→ `app-launcher`（并发扫描 + 本地化 + 图标缓存）。
 > - 带 view 的插件：`build:view` 走 vite、`build:scripts` 走 cargo + `--copy-scripts --keep-dist`（合并进同一 `dist/`）。
-> - 权威规格：`plugin-spec.md` §2.2 / §4.2–4.4 / §11；迁移计划与实测数据：`m5-rust-and-windows.md`。
+> - 权威规格：`plugin-spec.md` §2.2 / §4.2–4.4 / §11；迁移背景：`decisions/ADR-0005-kernel-language.md`。
 > - 收益：**机器上不再需要 Node**（内核与插件都是原生产物）。
 
 ---
@@ -578,7 +578,7 @@ fn main() {
 
 - `scripts/build-plugin.mjs <id> --copy-scripts`：把仓库根 `target/release/<bin>` 复制为 `dist/<name>`（0755），并写入裁剪后的清单。
 - 本机自测：`cargo test -p <crate>`；协议一致性用 `tests/fixtures/echo-plugin` 的双宿主对拍（`pnpm test`）。
-- 跨平台产物必须在各自平台编译（CI 双 job，见 `docs/m5-rust-and-windows.md` §B3.7）；`.exe` 只出现在 Windows 包内。
+- 跨平台产物必须在各自平台编译（CI 双 job）；`.exe` 只出现在 Windows 包内。
 
 ### 7.4 v1 → v2 迁移对照
 

@@ -38,7 +38,7 @@
 
 ## 2. 目录 → 模块映射
 
-> v1（TS，`apps/kernel`）→ v2（Rust，`apps/kernel`）的逐模块映射与迁移细节见 `docs/m5-rust-and-windows.md` §A1.1；
+> v1（TS）→ v2（Rust）的迁移背景见 [`ADR-0005`](decisions/ADR-0005-kernel-language.md)；
 > 下表是当前实现（Rust）落在哪里。
 
 | 需求（§5/§7） | 实现 | 备注 |
@@ -223,7 +223,7 @@ active → degraded（脚本连续失败 3 次）
 | D10 | §10「主线程 > 50ms 的必须进 Worker」（拼音索引构建、大文件解析） | 拼音索引规模小（命令级），暂未进 Worker；历史文件 ≤ 2000 条，读取在毫秒级 | 记为待办：命令数量破千或历史破万时迁移 |
 | D11 | §6.3 打包体积/冷启动指标 | 未做基准；自用版（`pnpm app:local`）已实机运行 | 需要真机 `tauri build` 才能量体积；自用不分发，暂不阻塞 |
 | D12 | §8.10 与第三方旧宿主的兼容层 | **不做兼容**（2026-09-16 起）：桥只认原生信封 `__launcher: 1`，清单校验不放过 `apiVersion` / `capabilities` 缺省，旧布局数据迁移一并移除 | 半兼容的代价是长期维护两套语义，还会把"未实现的能力"伪装成"能用"；底座与插件同仓库，没有历史包袱要背 |
-| D13 | §7.5 「拼音匹配」 | 用 `pinyin` crate（内置词典；多音字按读音变体展开，见 §4） | 需求 §12 风险对策明确要求"用成熟库"；Rust 侧依赖选型见 `docs/m5-rust-and-windows.md` §A1.2 |
+| D13 | §7.5 「拼音匹配」 | 用 `pinyin` crate（内置词典；多音字按读音变体展开，见 §4） | 需求 §12 风险对策明确要求"用成熟库" |
 | D14 | 未规定 plist 读取方式 | v2 由 `plugins/app-launcher/rust` 用 `plist` crate 读（binary + XML 只读）；v1 是自研 TS 解析器 | v1 的 `simple-plist` 内部是运行时 `require`，打不进自包含产物；v2 换 Rust 后由 crate 承担 |
 | D15 | §7.6「插件在 200ms 内回结果」 | 插件激活后**延迟 800ms 预热**贡献型搜索 worker | 否则用户第一次输入必然吃一次 worker 冷启动 + 索引加载而超时（体验上就是"第一次搜不到"） |
 | D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |

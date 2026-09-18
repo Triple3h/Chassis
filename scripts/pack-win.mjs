@@ -6,7 +6,7 @@
  *   3. 压成 dist-app/Chassis-<version>-win-<arch>.zip
  *
  * 为什么是绿色版而不是直接出 NSIS：自用优先「解压即用」；NSIS 安装器留给
- * `cargo tauri build --bundles nsis`（需要 tauri-cli，见 docs/m5-rust-and-windows.md §B3）。
+ * `cargo tauri build --bundles nsis`（需要 tauri-cli）。
  *
  * 资源布局与**壳的查找顺序**一一对应（`apps/shell/src/sidecar.rs::kernel_entry`）：
  *   <exe 目录>/resources/kernel/launcher-kernel.exe

@@ -4,7 +4,7 @@
 # 为什么放在仓库根：Cargo 要求 workspace 成员必须位于 workspace 根**之下**（子目录），
 # 而成员分散在 packages/、apps/ 与 plugins/ 三处；只有仓库根能同时罩住它们。
 # apps/shell 是独立 workspace（自己的 target 与打包路径假设），必须显式 exclude。
-# 设计见 docs/m5-rust-and-windows.md §A1.1。
+# 设计见 docs/decisions/ADR-0005-kernel-language.md。
 [workspace]
 resolver = "2"
 members = [

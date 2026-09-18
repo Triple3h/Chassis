@@ -2,7 +2,7 @@
 
 - 状态：已采纳
 - 日期：2026-09-18
-- 相关：`docs/plugin-update-plan.md`（方案全文）、`docs/plugin-spec.md` §2.3 / §6.4 / 附录 C、`docs/launcher-requirements.md` §9 / §13（M7）；ADR-0003（`ctx.settings` 只注入 `internal-` 前缀）
+- 相关：`docs/plugin-spec.md` §2.3 / §6.4 / 附录 C、`docs/launcher-requirements.md` §9 / §13（M7）；ADR-0003（`ctx.settings` 只注入 `internal-` 前缀）
 
 ## 背景
 
