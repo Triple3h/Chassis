@@ -35,6 +35,7 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value, 
 
         "clipboard.readText" => clipboard::read_text(app),
         "clipboard.writeText" => clipboard::write_text(app, params),
+        "clipboard.watch" => clipboard::watch(app, params),
 
         "open.url" => opener::open_url(app, params),
         "open.path" => opener::open_path(app, params),
