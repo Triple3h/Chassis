@@ -713,6 +713,7 @@ pnpm test                       # 全量测试（含各插件的 core·view 用�
 - [ ] `capabilities` 与实际调用完全一致（`spec-check` 无差集）
 - [ ] 每个命令有 `title`；逻辑层命令的 `name` 等于产物文件名
 - [ ] `searchable` / `contributes` 按 §9.1 选对，`placeholder` 已写
+- [ ] 只在单一平台可用 ⇒ 声明 `platforms` / `arch`（§3.5）；声明了 `clipboard.watch` ⇒ 有 `record` 命令与「收不到事件也能用」的降级路径（§8.1）
 
 **产物**
 - [ ] `dist/index.html` + `assets/` 存在，资源路径相对（`base: './'`）
