@@ -473,10 +473,24 @@ mod tests {
     use super::*;
 
     fn tmp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("file-search-index-{tag}-{}", std::process::id()));
+        // 落点必须**不命中噪声名单**：Windows 的 %TEMP% 位于 `AppData\Local\Temp\` 下，
+        // 路径段 `Temp` 在 should_skip_dir 里 ⇒ is_noisy_path 整条过滤，增量事件收不到
+        // （upsert 永远 false、watcher 用例必然超时；首次 CI 抓到的就是这两条）。
+        // 统一放仓库内 `.dev/`（已 gitignore）：两平台一致，也不触噪声过滤。
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".dev")
+            .join(format!("file-search-index-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// 回归：夹具落点不得命中噪声过滤（`std::env::temp_dir()` 在 Windows 上正相反）。
+    #[test]
+    fn tmp_fixture_is_not_noisy() {
+        let dir = tmp("guard");
+        assert!(!is_noisy_path(&dir), "夹具落点不得命中跳过名单：{}", dir.display());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
