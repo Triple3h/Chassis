@@ -1032,6 +1032,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// POSIX 形态（macOS / Linux 同一条分支）。
+    #[cfg(not(windows))]
     #[test]
     fn acl_entry_and_permission_command_shape() {
         assert_eq!(write_acl_entry("alice"), "user:alice allow write");
@@ -1041,6 +1043,20 @@ mod tests {
         assert!(grant.contains("'/etc/hosts'"), "{grant}");
         let revoke = permission_command(Path::new("/etc/hosts"), false, "alice");
         assert!(revoke.contains("chmod -a"), "{revoke}");
+    }
+
+    /// Windows 形态：icacls + `%USERNAME%:(W)`（`permission_command` 的 windows 分支）。
+    /// 首次 CI 暴露：这条用例原先没平台门，在 windows-latest 上按 POSIX 形态断言必挂。
+    #[cfg(windows)]
+    #[test]
+    fn acl_entry_and_permission_command_shape_windows() {
+        let target = Path::new("C:\\Windows\\System32\\drivers\\etc\\hosts");
+        let grant = permission_command(target, true, "alice");
+        assert!(grant.contains("icacls"), "{grant}");
+        assert!(grant.contains("/grant"), "{grant}");
+        assert!(grant.contains("\"%USERNAME%:(W)\""), "{grant}");
+        let revoke = permission_command(target, false, "alice");
+        assert!(revoke.contains("/remove"), "{revoke}");
     }
 
     #[test]
