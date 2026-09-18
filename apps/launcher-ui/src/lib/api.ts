@@ -216,6 +216,7 @@ export function subscribeEvents(
       'ui/searchContent',
       'ui/footer',
       'ui/hide',
+      'ui/openView',
       'shell/visibility',
       'app/quit',
     ]) {

@@ -1050,11 +1050,17 @@ impl Kernel {
             "show" => {
                 let _ = self.show_window_animated(true).await;
             }
-            "settings" => {
-                let _ = self.invoke("internal-settings:settings", None, "host").await;
-            }
-            "plugins" => {
-                let _ = self.invoke("internal-settings:manage", None, "host").await;
+            "settings" | "plugins" => {
+                // 托盘点菜单时窗口多半藏着：先唤出，再打开对应页面。
+                let _ = self.show_window_animated(true).await;
+                let command = if id == "settings" { "settings" } else { "manage" };
+                let result = self.invoke(&format!("internal-settings:{command}"), None, "host").await;
+                // UI 打开插件页靠的是 invoke 的返回值（HTTP 路径由调用方处理）；
+                // 托盘这条路没有调用方，结果不广播 = 点了没反应。带上完整
+                // ActionResult 广播，UI 端复用同一条 handleResult（失败也能 toast）。
+                if let Ok(value) = serde_json::to_value(&result) {
+                    self.bus.emit(names::UI_OPEN_VIEW, &value);
+                }
             }
             "reload" => self.plugins.reload_all().await,
             "quit" => self.quit(true).await,

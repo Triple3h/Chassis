@@ -475,6 +475,12 @@ function handleKernelEvent(event: string, payload: unknown): void {
   if (event === 'ui/hide') {
     void api.hideWindow().catch(() => undefined)
   }
+  // 内核主动让 UI 打开插件页（托盘「设置…」「插件管理…」）：载荷 = invoke 的 ActionResult，
+  // 复用同一条处理 —— 打开 iframe，失败时 toast
+  if (event === 'ui/openView') {
+    handleResult(payload as ActionResult)
+    return
+  }
   // 插件页会话被内核关掉：停用 / 卸载 ⇒ 直接卸载 iframe；重载 ⇒ 等 plugin/reloaded 后重开
   if (event === 'session/closed') {
     const info = payload as { sid?: string; reason?: string }

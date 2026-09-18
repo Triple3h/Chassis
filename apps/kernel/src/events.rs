@@ -26,6 +26,8 @@ pub mod names {
     pub const UI_SEARCH_CONTENT: &str = "ui/searchContent";
     pub const UI_FOOTER: &str = "ui/footer";
     pub const UI_HIDE: &str = "ui/hide";
+    /// 内核主动让 UI 打开插件页（托盘「设置…」「插件管理…」）；载荷 = `ActionResult`
+    pub const UI_OPEN_VIEW: &str = "ui/openView";
     pub const SHELL_VISIBILITY: &str = "shell/visibility";
     pub const APP_QUIT: &str = "app/quit";
 }
