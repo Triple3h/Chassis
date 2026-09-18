@@ -25,3 +25,5 @@ semver = "1"
 sha2 = "0.10"
 # HTTP：同步客户端（与 translate 同款：关默认特性，只留 rustls 后端）
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# 解压内核更新包（launcher-kernel + ui/）；与内核侧 installZip 同款依赖、同款最小 features
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

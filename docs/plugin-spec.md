@@ -453,6 +453,17 @@ active → crashed（页面崩溃 / 脚本连续失败）→ 可重试
 - 更新只替换**安装目录**；插件设置 / 别名覆盖 / 历史 / 固定项都按 id 寻址，天然保留（N1 / N2 的直接推论）。
 - 出厂插件不可卸载，等价动作是管理动作 `revertToBuiltin`（删除覆盖 + 回到 App 自带的那份）。
 
+**内核更新（`applyKernelUpdate`，2026-09-18 起）**：内核自身的更新与插件同构 —— 下载在插件、应用由内核裁决：
+
+| 环节 | 规格 |
+|---|---|
+| 来源 | 固定 tag **`kernel-latest`** 的 Release：`kernel-registry.json` + `launcher-kernel-<版本>-<平台>-<架构>.zip`（与 App 的 `v*`、插件的 `plugins-latest` 三方独立） |
+| 包结构 | zip 根 = `launcher-kernel(.exe)` + `ui/`（**UI 与内核同包**：只换内核会出现「新内核 + 旧 UI」） |
+| 下载/校验/解压 | `internal-store` 的逻辑层命令（`check-kernel` / `download-kernel`）；解压时恢复可执行位、防路径穿越、校验结构 |
+| 应用 | view 调 `ctx.settings.pluginAction('applyKernelUpdate', { path, uiPath?, version?, restart? })`（仅 `internal-` 前缀可用）：内核 `--hot-probe` 自检 → 备份 → 原子替换（内核与 UI 一起，失败一起回滚）→ 优雅重启（壳拉起新二进制；连续两次启动未就绪自动回滚） |
+| 版本门槛 | 索引带 `minHotVersion`：客户端热更新机制低于它 ⇒ 界面提示但不给「更新」按钮 |
+| 打包版 | 内核从 `.app` 复制成**数据目录里的外置副本**后启动（壳负责，App 版本变化时重投），替换不触碰代码签名 |
+
 ---
 
 ## 7. 宿主 API（UI 侧）
@@ -463,7 +474,7 @@ active → crashed（页面崩溃 / 脚本连续失败）→ 可重试
 import { host, storage, hostUi, exec, shell, clipboard, notify } from '@launcher/api'
 
 const inLauncher = host.isLauncher()        // 同步判断，用于降级分支
-const info = await host.info()              // { version, platform, dataRoot, pluginId, command, sid }
+const info = await host.info()              // { version, hotVersion, platform, dataRoot, pluginId, command, sid }
 await storage.set('accounts', list)
 const content = await hostUi.getSearchContent()
 ```
@@ -479,7 +490,7 @@ const content = await hostUi.getSearchContent()
 | 方法 | capability | 参数 | 返回 |
 |---|---|---|---|
 | `host.isLauncher()` | — | — | `boolean` |
-| `host.info()` | — | — | `{ version, platform, dataRoot, pluginId, command, sid }` |
+| `host.info()` | — | — | `{ version, hotVersion, platform, dataRoot, pluginId, command, sid }`（`hotVersion` = 内核热更新机制版本，0.1.0 起；更新器用它判断内核更新包装不装得上） |
 | `host.log(level, message, data?)` | — | — | `void`（进审计日志） |
 | `commands.invoke({ command, args? })` | — | | `ActionResult` |
 | `commands.close()` | — | — | `void` |

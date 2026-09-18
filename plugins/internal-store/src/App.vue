@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * 插件更新页（internal-store）。
+ * 更新页（internal-store）：**插件**（plugins-latest）与**内核**（kernel-latest）两条独立通道。
  *
- * 分工：
+ * 分工（两条通道同构）：
  *   - 拉索引 / 下载 / 校验 → 逻辑层命令 `update`（子进程，网络在插件侧）
- *   - 安装 → **本页发起** `installZip`（更新本插件时安装会杀掉命令进程，view 不受影响）
- *   - 覆盖规则 / 原子替换 / 回滚 → 内核（插件只给一个本地 zip 路径）
+ *   - 安装 → **本页发起**：插件走 `installZip`、内核走 `applyKernelUpdate`
+ *     （安装会杀掉命令进程、内核更新还会重启内核，view 跑在宿主 webview 不受影响）
+ *   - 覆盖规则 / 原子替换 / 回滚 → 内核（插件只给本地路径）
  */
 import { computed, onMounted, ref } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
@@ -36,6 +37,16 @@ interface OverriddenItem {
   version: string
 }
 
+/** 内核更新（kernel-latest 通道；`hotOk=false` ⇒ 客户端机制版本不够，不给「更新」） */
+interface KernelUpdateItem {
+  current: string
+  latest: string
+  notes?: string | null
+  hotVersion?: string | null
+  minHotVersion?: string | null
+  hotOk: boolean
+}
+
 type Stage = 'idle' | 'checking' | 'error' | 'ready'
 
 const inHost = host.isLauncher()
@@ -46,6 +57,9 @@ const busy = ref('')
 const updates = ref<UpdateItem[]>([])
 const overridden = ref<OverriddenItem[]>([])
 const checkedAt = ref(0)
+const kernelVersion = ref('')
+const hotVersion = ref('')
+const kernelUpdate = ref<KernelUpdateItem | null>(null)
 
 const updatable = computed(() => updates.value.filter((item) => item.minKernelOk))
 
@@ -79,6 +93,8 @@ async function check(): Promise<void> {
   notice.value = ''
   try {
     const info = await host.info()
+    kernelVersion.value = info.version
+    hotVersion.value = info.hotVersion ?? ''
     const installed = await collectInstalled()
     const result = (await exec.run({
       command: 'update',
@@ -93,9 +109,59 @@ async function check(): Promise<void> {
     updates.value = result.updates ?? []
     checkedAt.value = result.checkedAt ?? Date.now()
     stage.value = 'ready'
+    await checkKernel()
   } catch (err) {
     error.value = messageOf(err)
     stage.value = 'error'
+  }
+}
+
+/** 内核通道（kernel-latest）：失败不覆盖插件那侧的错误（两个通道网络条件相同，插件侧已会提示） */
+async function checkKernel(): Promise<void> {
+  if (!kernelVersion.value) return
+  try {
+    const result = (await exec.run({
+      command: 'update',
+      args: { mode: 'check-kernel', current: kernelVersion.value, hotVersion: hotVersion.value },
+      timeoutMs: 20000,
+    })) as { ok?: boolean; update?: KernelUpdateItem | null }
+    kernelUpdate.value = result?.ok ? (result.update ?? null) : null
+  } catch {
+    kernelUpdate.value = null
+  }
+}
+
+/** 内核更新：下载在逻辑层 → 解压 → **本页发起** `applyKernelUpdate`（内核会优雅重启，本页自动重开） */
+async function updateKernel(): Promise<void> {
+  const item = kernelUpdate.value
+  if (busy.value || !item || !item.hotOk) return
+  busy.value = 'kernel'
+  error.value = ''
+  try {
+    notice.value = `正在下载内核 ${item.latest}…`
+    const downloaded = (await exec.run({
+      command: 'update',
+      args: { mode: 'download-kernel', current: item.current, hotVersion: hotVersion.value },
+      timeoutMs: 120000,
+    })) as { ok?: boolean; error?: string; path?: string; uiPath?: string; version?: string }
+    if (!downloaded?.ok || !downloaded.path) {
+      error.value = downloaded?.error ?? '下载失败'
+      notice.value = ''
+      return
+    }
+    const version = downloaded.version ?? item.latest
+    notice.value = `正在应用内核 ${version}（优雅重启，本页会自动重开）…`
+    await settings.pluginAction('applyKernelUpdate', {
+      path: downloaded.path,
+      uiPath: downloaded.uiPath,
+      version,
+    })
+    notice.value = `内核已更新到 ${version}，正在重启…`
+  } catch (err) {
+    error.value = messageOf(err)
+    notice.value = ''
+  } finally {
+    busy.value = ''
   }
 }
 
@@ -131,6 +197,8 @@ async function updateAll(): Promise<void> {
   for (const item of updatable.value) {
     await updateOne(item)
   }
+  // 内核放最后：它会重启内核（页面重开），前面插件的进度与提示要先落定
+  if (kernelUpdate.value?.hotOk) await updateKernel()
 }
 
 async function revert(item: OverriddenItem): Promise<void> {
@@ -167,9 +235,11 @@ onMounted(async () => {
       <header class="flex items-center justify-between border-b border-line px-4 py-2.5">
         <div class="flex items-center gap-2">
           <UiIcon name="refresh" :size="15" class="text-muted" />
-          <h1 class="text-[13.5px] font-medium">插件更新</h1>
+          <h1 class="text-[13.5px] font-medium">更新</h1>
         </div>
         <div class="text-[11.5px] text-faint">
+          <span v-if="kernelVersion">内核 v{{ kernelVersion }}</span>
+          <span v-if="kernelVersion" class="mx-1">·</span>
           {{ stage === 'checking' ? '检查中…' : checkedAt ? `检查于 ${formatTime(checkedAt)}` : '' }}
         </div>
       </header>
@@ -190,11 +260,41 @@ onMounted(async () => {
             </button>
           </div>
 
-          <p v-else-if="!updates.length && !overridden.length" class="text-[12px] text-muted">
-            所有插件都是最新版本。
+          <p v-else-if="!updates.length && !overridden.length && !kernelUpdate" class="text-[12px] text-muted">
+            插件与内核都是最新版本。
           </p>
 
           <template v-else>
+            <section v-if="kernelUpdate" class="mb-3 rounded-lg border border-line bg-panel px-3 py-2.5">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <UiIcon name="cpu" :size="14" class="text-muted" />
+                    <span class="text-[13px]">内核</span>
+                  </div>
+                  <div class="mt-0.5 text-[11.5px] text-muted">
+                    <span>{{ kernelUpdate.current }}</span>
+                    <span class="mx-1">→</span>
+                    <span class="text-fg">{{ kernelUpdate.latest }}</span>
+                  </div>
+                  <p v-if="kernelUpdate.notes" class="mt-1 text-[11.5px] text-faint">{{ kernelUpdate.notes }}</p>
+                  <p v-if="!kernelUpdate.hotOk" class="mt-1 text-[11.5px] text-danger">
+                    当前热更新机制版本过低（需要 {{ kernelUpdate.minHotVersion ?? '—' }}），请先升级应用
+                  </p>
+                  <p v-else class="mt-1 text-[11px] text-faint">
+                    替换内核与 UI 并优雅重启内核（不重启 App）；连续两次启动失败会自动回滚。
+                  </p>
+                </div>
+                <button
+                  class="shrink-0 rounded-md border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
+                  :disabled="!kernelUpdate.hotOk || !!busy"
+                  @click="updateKernel"
+                >
+                  {{ busy === 'kernel' ? '更新中…' : '更新内核' }}
+                </button>
+              </div>
+            </section>
+
             <ul v-if="updates.length" class="space-y-2">
               <li
                 v-for="item in updates"

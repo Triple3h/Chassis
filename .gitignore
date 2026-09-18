@@ -4,6 +4,7 @@ dist/
 .DS_Store
 tmp-*
 plugins/release/
+kernel/release/
 
 # CodeBuddy 的本地目录：默认只放本地
 # 规则（rules）与技能（skills）入库、随代码版本化；记忆（memory）等其它内容不入库

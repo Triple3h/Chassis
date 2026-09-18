@@ -1,0 +1,109 @@
+# 内核热更新：把内核 + UI 的打包产物与 kernel-registry.json 发到固定 tag 的 Release
+# （与 App 的 release.yml（tag v*）、插件的 plugins-release.yml（tag plugins-latest）完全独立 ——
+#  三个通道各自 releases/download/<tag>/... 直链，互不顶替）。
+#
+# 消费方：internal-store 的「内核更新」区（下载 → sha256 → 解压 → /api/hot/binary → 优雅重启）。
+name: kernel-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 更新说明（展示在更新页）
+        required: false
+        default: ''
+      min_hot_version:
+        description: 要求的最低热更新机制版本（低于它的客户端不提示更新；留空 = 用产物自报）
+        required: false
+        default: ''
+  push:
+    tags: ['kernel/*']
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/build-all.mjs kernel
+      - run: node scripts/build-all.mjs ui
+      - run: node scripts/pack-kernel.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-macos
+          path: kernel/release/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/build-all.mjs kernel
+      - run: node scripts/build-all.mjs ui
+      - run: node scripts/pack-kernel.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-windows
+          path: kernel/release/*
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: kernel/release
+          merge-multiple: true
+
+      - name: 汇总生成 kernel-registry.json
+        env:
+          NOTES: ${{ inputs.notes }}
+          MIN_HOT: ${{ inputs.min_hot_version }}
+        run: |
+          args=()
+          [ -n "$NOTES" ] && args+=(--notes "$NOTES")
+          [ -n "$MIN_HOT" ] && args+=(--min-hot-version "$MIN_HOT")
+          node scripts/gen-kernel-registry.mjs "${args[@]}"
+          rm -f kernel/release/kernel-shard-*.json
+          ls -la kernel/release
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kernel-latest
+          name: 内核更新源
+          files: kernel/release/*
+          allowUpdates: true
+          overwrite_files: true
+          body: |
+            内核热更新通道（客户端内置的固定源，一般不需要手动下载）。
+
+            - `kernel-registry.json`：索引（schema 1，含各平台产物的 sha256 与最低机制版本）
+            - `launcher-kernel-<版本>-<平台>-<架构>.zip`：内核 + UI（解压结构 = `launcher-kernel` + `ui/`）
+
+            安装由 `internal-store` 的「内核更新」发起：下载 → sha256 校验 → 解压 →
+            `POST /api/hot/binary`（备份 + 原子替换 + 优雅重启）；新内核连续两次启动未就绪会自动回滚。
