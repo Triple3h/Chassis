@@ -213,6 +213,19 @@ interface SettingDecl {
 2. 两个维度**独立判定**，都匹配才装载；空数组**非法**（语义歧义：是"全平台"还是"全不支持"？一律 `MANIFEST_INVALID`）。
 3. 未知取值 / 非数组 / 非字符串元素 → `MANIFEST_INVALID`（§3.3）。
 
+**平台能力差异与降级（插件作者须知）**：系统级能力两端并不对等 —— 典型如 macOS 有 Spotlight
+（`mdfind`）与 Quick Look，Windows 没有等价物。约定：
+
+1. 差异**收在插件内部的平台分支**里，对宿主 / UI 的契约（命令、结果项字段、事件）两端完全一致；
+2. 每条能力都要有**降级路径**：拿不到就给空结果或更弱的实现，不报错、不中断其它来源；
+3. 需要在某个平台**完全不出现** ⇒ 用本节的 `platforms` 声明，不要靠"运行时失败"来隐藏；
+4. 出厂插件现状（可作写法参照，逐项状态见 `docs/m5-rust-and-windows.md` §B0）：
+   - `file-search`：macOS = Spotlight（`mdfind`）；Windows = **复用用户已装的 Everything**（按官方 IPC 协议实现，
+     探不到则回退自建索引，后者带目录变化增量）；
+   - `app-launcher`：macOS = `.app` bundle 扫描；Windows = 开始菜单 / 桌面快捷方式 + 注册表 `App Paths`；
+   - `host-manager`：macOS = `osascript` + POSIX ACL；Windows = UAC + `icacls`（免授权写入的等价物）；
+   - `screen-recorder`：`platforms: ["macos"]`（整包依赖 `screencapture` 与屏幕录制权限）。
+
 **执行时机与不匹配时的处理**（两处，语义不同）：
 
 | 时机 | 判定 | 行为 |
@@ -507,6 +520,7 @@ const content = await hostUi.getSearchContent()
 | `storage` | 插件私有 KV（落 `<dataRoot>/plugins/<id>/storage.json`） | 低 | 否 |
 | `clipboard.read` | 读系统剪贴板 | 中 | 是 |
 | `clipboard.write` | 写系统剪贴板 | 低 | 否 |
+| `clipboard.watch` | 订阅系统剪贴板**变化事件**（不带内容，见 §8.1） | 中 | 是 |
 | `shell.open` | 用系统程序打开 URL / 文件 / 应用 | 中 | 是 |
 | `exec.spawn` | 拉起本插件的脚本（可读写文件） | **高** | 是 |
 | `notify.show` | 系统通知 | 低 | 否 |
@@ -519,6 +533,37 @@ const content = await hostUi.getSearchContent()
 2. 未声明的能力在运行时**不存在**（属性为 `undefined`，且不出现在 `Object.keys`）
 3. 高风险能力（`exec.spawn` / `clipboard.read` / `shell.open` / `screenshot`）在安装时展示给用户，用户可拒绝 → 该服务不挂载，插件**必须**有降级路径
 4. 新增能力只能由底座发布（新 capability 属于 minor 变更，§11）
+
+### 8.1 `clipboard.watch` 的驱动方式（事件 → 命令）
+
+剪贴板历史这类插件要的是「用户复制了东西」这个**事件**，而插件进程是按需 spawn 的（搜索源还会被空闲回收），
+自己常驻监听并不可靠 —— 所以监听放在**常驻的壳**里，插件只在事件到达时被拉起一次：
+
+```text
+系统剪贴板变化 ──▶ 壳（AddClipboardFormatListener / WM_CLIPBOARDUPDATE）
+                    │ 通知 clipboard/changed { changeCount, kinds }（不带内容）
+                    ▼
+                 内核：找出声明了 clipboard.watch 且处于 active 的插件
+                    │ exec.run(pluginId, 'record', { changeCount, kinds })
+                    ▼
+                 插件的 record 命令（script）：自己读剪贴板 → 入库 → done → 进程回收
+```
+
+契约要点：
+
+- **命令名固定 `record`**，必须是 `mode: "script"`（不出现在搜索结果里，只能被宿主调用）。缺这条命令 ⇒ 内核记 warn 并跳过该插件。
+- 通知**不带内容**：内容由 `record` 命令自己按平台读（Windows 直读 `CF_UNICODETEXT` / `CF_DIB(V5)` / `CF_HDROP`）。
+  这样做的原因：图片经「壳 → 内核 → 插件」三跳 IPC 传 base64 是纯浪费，而读取本身是这个插件的能力。
+- `changeCount` 是系统剪贴板序号（`GetClipboardSequenceNumber`），**插件侧按它去重**：同一序号只处理一次。
+- `kinds` 取值 `text`（`CF_UNICODETEXT`）/ `image`（`CF_DIB` / `CF_DIBV5`）/ `file`（`CF_HDROP`）/ `unknown`（本次没抢到剪贴板所有权）。
+  它只是**提示**：插件仍应自己读一遍，读不到就静默跳过（不报错）。
+- 调用是一次性的（`run` 语义：spawn → done → 回收，默认 10s 超时），**不受**搜索源 5 分钟空闲回收影响；
+  连续失败 3 次按 §6.1 判 `degraded`。
+- 插件自己写回剪贴板（「粘贴历史条目」）**也会触发**一次变化 —— 由插件侧去重（内容 hash 合并 / 记录自己刚写过的序号），
+  底座不替插件判断。
+- **降级路径必写**：平台不支持（非 Windows）时壳返回 `{ ok:false, reason:'unsupported' }`，内核不订阅；
+  插件必须能在「从未收到事件」的情况下仍然可用（至少保留手动同步入口）。
+- 声明该能力的插件默认**不写最近使用**（建议同时声明 `history: false`）：它不是用户主动触发的入口。
 
 ---
 

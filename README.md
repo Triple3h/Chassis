@@ -72,7 +72,7 @@ Chassis 的选择是把边界一条条钉死：
 
 | | 版本 | 说明 |
 |---|---|---|
-| macOS | 11+ | 目前只支持 macOS（Windows 支持见「路线图」） |
+| 系统 | macOS 11+ / Windows 10+ | 两端都在各自平台上**原生构建**（Windows 走 CI，见 `.github/workflows/build-windows.yml`） |
 | Rust | stable | 壳、内核、逻辑层插件都要编译 |
 | Node.js | ≥ 22 | **仅开发期**（pnpm / Vite 工具链、测试运行器）；打包产物运行时零 Node |
 | pnpm | 10 | 工作区管理器（`pnpm@10.33.0`） |
@@ -82,10 +82,18 @@ Chassis 的选择是把边界一条条钉死：
 ```bash
 pnpm install
 pnpm build        # 内核 + 启动台 UI + 14 个出厂插件
-pnpm app:local    # release 编译 + 组装 + 代码签名 → dist-app/Chassis.app
+pnpm app:local    # macOS：release 编译 + 组装 + 代码签名 → dist-app/Chassis.app
+pnpm app:win      # Windows：release 编译 + 组装绿色版 → dist-app/Chassis-<version>-win-x64.zip
 ```
 
-把 `dist-app/Chassis.app` 拖进 `/Applications` 双击即可。
+macOS：把 `dist-app/Chassis.app` 拖进 `/Applications` 双击即可。
+
+Windows：解压 zip 后双击 `Chassis.exe`。首次运行会有 SmartScreen 提示（未签名）——
+点「更多信息 → 仍要运行」；系统缺 WebView2 时会提示安装（Win11 已自带）。
+
+> **Windows 的文件搜索**：如果你装了 [Everything](https://www.voidtools.com/)，启动台会**直接复用它**
+> 已经建好的全盘索引（无需任何配置；只读取，不改动、也不随包分发它的任何二进制）；
+> 没装则用内置索引（首次运行在后台建库，建好之前只返回空结果）。
 
 > **为什么要签名**：Apple Silicon 上未签名的可执行文件会被内核直接杀掉（`Killed: 9`）。
 > 打包脚本优先用**本机自签名的代码签名证书**（`node scripts/make-signing-cert.mjs` 一次性创建，免费、仅本机有效；找不到证书时回落 `codesign --sign -` 的 ad-hoc 签名）。
@@ -103,6 +111,7 @@ pnpm app:local    # release 编译 + 组装 + 代码签名 → dist-app/Chassis.
 | 文件与文件夹（桌面 / 图片等） | TOTP 扫截图目录、文件搜索命中受保护目录 | 对应范围搜不到 |
 
 > **前置说明**：**打开应用 / 文件 / 网址走的是 `/usr/bin/open`（LaunchServices），不需要任何权限** —— 所以「自动化」那条只在真的动 hosts 时才弹，不是启动就弹。
+> **Windows 上这些授权一个都不需要**：读选中文本走 UI Automation（系统 API，无需授权；只对实现了 TextPattern 的控件有效，其余静默跳过）；hosts 写入走 UAC 授权框（"是否允许此应用对你的设备进行更改？"，与 macOS 的提权框对应）；区域截图唤起系统截图（等同 Win+Shift+S）。
 > **host-manager 可以不开这条**：顶栏点「需授权」→「开启免授权写入」，会把 `/etc/hosts` 的写权限**一次性**授给当前账户（POSIX ACL `chmod +a`，与 uTools / SwitchHosts 引导你手动做的是同一件事），此后保存直接写入、不再弹「自动化」框；随时可在同一面板撤销，恢复系统默认。
 > TCC 授权是**绑代码签名身份**的：用固定证书签名（默认路径）时重新打包不影响授权；回落 ad-hoc 时每次重新打包都会被系统当成「第一次」重弹一次。
 > 弹窗里只有「拒绝 / 打开系统设置」（没有「允许」）时，说明之前拒绝过或签名已变，去 系统设置 → 隐私与安全性 → 自动化 手动勾上即可。
@@ -128,7 +137,7 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run）
 
 | 操作 | 说明 |
 |---|---|
-| `⌥Space` | 唤出 / 隐藏（可在设置里改） |
+| `⌥Space`（Windows：`Ctrl+Shift+Space`） | 唤出 / 隐藏（可在设置里改） |
 | `↑` `↓` `←` `→` / `Tab` | 网格导航（跨分区连续） |
 | `Enter` / `⌘Enter` | 执行默认动作 / 第二动作 |
 | `⌘K` | 动作菜单：固定、复制标题、移出最近使用、打开插件目录、禁用或卸载插件 |
@@ -138,10 +147,10 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run）
 
 | 数据位置 | 说明 |
 |---|---|
-| `~/Library/Application Support/Chassis/` | 数据目录（`LAUNCHER_DATA_ROOT` 可覆盖；从旧目录 `Launcher/` 自动接手一次） |
+| `~/Library/Application Support/Chassis/`（macOS）／`%APPDATA%\Chassis\`（Windows） | 数据目录（`LAUNCHER_DATA_ROOT` 可覆盖；macOS 上会从旧目录 `Launcher/` 自动接手一次） |
 | `.../logs/shell.log` | 壳与内核日志（内核日志走 stderr，由壳转发落盘），排障先看这里 |
 | `.../extensions/<id>/` | 已安装的插件 |
-| `.../plugins/<id>/` | 插件数据目录（插件的唯一可写处） |
+| `.../plugins/<id>/` | 插件数据目录（插件的唯一可写处；`file-search` 的文件索引也在这里） |
 | `.../logs/audit-*.jsonl` | 插件调用审计日志（滚动 7 天） |
 
 ## 示例
@@ -269,7 +278,7 @@ macOS 上自用可用：热键唤出、搜索、应用启动、文件搜索、�
 | macOS 自用版（`pnpm app:local` → `dist-app/Chassis.app`） | ✅ 实机在用 |
 | Rust 内核 + Rust 逻辑层插件（apiVersion 2，免 Node） | ✅ |
 | 视图层插件（Vue + iframe，独立 origin） | ✅ |
-| Windows 10/11 | 🚧 规划中（见「路线图」） |
+| Windows 10/11（`pnpm app:win` → 绿色版 zip；CI 原生构建） | 🚧 代码就位，待实机验收（见 [`docs/m5-rust-and-windows.md`](docs/m5-rust-and-windows.md) §B0 / §B5） |
 
 质量门（仓库内全绿）：
 
@@ -288,7 +297,7 @@ pnpm smoke:real          # 真内核 + 14 个出厂插件冒烟
 
 | 项 | 说明 |
 |---|---|
-| Windows 10/11 支持 | 壳平台分支（热键 / 托盘 / UIA 选中文本）、`app-launcher` 与 `file-search` 的 Windows 后端、NSIS 安装包 + 便携版；构建走 GitHub Actions 双平台，分发走 GitHub Releases |
+| Windows 10/11 收尾 | 实机验收（托盘 / 透明窗口观感 / 通知 / 拖动缩放）、UWP 应用扫描、Everything 加速件、NSIS 安装包、`release.yml` + GitHub Releases 分发 |
 | 分发链路 | 代码签名 / 公证、自动更新、dmg 打包 |
 | 插件脚手架 CLI | 一条命令生成插件工程骨架 |
 | 测试补齐 | Playwright E2E、zip 安装的自动化用例、万条历史性能基准 |
@@ -298,7 +307,10 @@ pnpm smoke:real          # 真内核 + 14 个出厂插件冒烟
 - **逻辑层命令无沙箱**：`no-view` / `script` 产物是独立子进程，拥有当前用户的完整权限（这是该形态的固有代价）。安装时会展示 `exec.spawn` 等高风险能力，但无法阻止脚本自行起进程；真正的隔离需要 WASM 或平台沙箱。
 - **签名与 TCC 授权**：授权记录绑定代码签名身份 —— 默认的**固定证书**签名跨重新打包稳定；没有证书回落 **ad-hoc** 时，每次重新打包 macOS 都会把授权当成「第一次」重弹。弹窗里若只有「拒绝 / 打开系统设置」，去 系统设置 → 隐私与安全性 的对应分类**删掉旧条目再重新授权**（旧条目对应旧身份，留着也不生效）。
 - **未公证**：从网络下载的 `.app` 会带 quarantine，需要「右键 → 打开」或 `xattr -dr com.apple.quarantine Chassis.app`。
-- **平台限制**：目前只有 macOS；`host-manager` 的旧版备份不会自动迁移（历史版本把备份放在安装目录的 `data/backups`，迁移涉及提权写路径，留待单独处理）。
+- **平台限制**：macOS 实机在用；Windows 代码就位、**待实机验收** —— 已知缺口是 UWP 应用（从 Microsoft Store 装的）搜不到；
+  文件搜索优先复用你已装的 Everything（装了就直接可用、毫秒级；只读它的索引，不随包分发它的任何二进制），
+  没装才用内置索引（首次运行要等后台建库）；未签名会触发 SmartScreen 提示。
+- **`host-manager` 的旧版备份**不会自动迁移（历史版本把备份放在安装目录的 `data/backups`，迁移涉及提权写路径，留待单独处理）。
 
 ## 贡献指南
 

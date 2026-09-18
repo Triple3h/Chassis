@@ -110,11 +110,11 @@ export function exportHtml(note: Note): string {
 <style>
   :root { color-scheme: light dark; }
   body { max-width: 760px; margin: 40px auto; padding: 0 20px; line-height: 1.75;
-    font: 15px/1.75 -apple-system, "PingFang SC", "Helvetica Neue", Arial, sans-serif; }
+    font: 15px/1.75 -apple-system, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif; }
   h1,h2,h3,h4 { line-height: 1.35; margin: 1.4em 0 .6em; }
   h1 { font-size: 1.7em; border-bottom: 1px solid rgba(128,128,128,.3); padding-bottom: .2em; }
   h2 { font-size: 1.35em; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em;
+  code { font-family: ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em;
     background: rgba(128,128,128,.16); border-radius: 4px; padding: 1px 4px; }
   pre { background: rgba(128,128,128,.12); border-radius: 8px; padding: 12px; overflow: auto; }
   pre code { background: transparent; padding: 0; }

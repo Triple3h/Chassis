@@ -453,6 +453,39 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 
 **工期**：AI 实现 8–12 小时｜人工 3–5 周（含实机调试）
 
+### B0 进度（2026-09-18：代码落地，待实机验收）
+
+下面各表的「做法」列仍是设计口径；这一节记录**实际落了什么**（没打勾的 = 必须实机验证或后续增量）。
+
+| 区块 | 状态 | 落点 |
+|---|---|---|
+| B1 数据目录 / 热键 / 托盘 / UIA 选中文本 / `app.usage` / 截图原语 / 窗口参数 | ✅ 代码就位 | `apps/shell/src/sidecar.rs`、`primitives/{hotkey,tray,selection,usage,opener}.rs`、`lib.rs` |
+| B1.8 透明窗口观感 / B1.10 通知 AUMID / B1.11 单实例 / B1.12 拖动缩放 | ⏳ 实机调优 | 逐条对 B5 |
+| B2.1 `app-launcher`（开始菜单 / 桌面 / `App Paths` / shell 图标） | ✅ 代码就位（**UWP 未做**：需要手写 IDispatch） | `plugins/app-launcher/src/{windows,mac,lib}.rs` |
+| B2.2 + B2.6 `file-search` 契约层 + **Everything 复用** + 自建索引（含目录变化增量） | ✅ 全部（步骤 1+2+3，2026-09-18 补） | `plugins/file-search/src/{lib,index,everything}.rs` |
+| B2.3 `host-manager`（UAC + `icacls` 免授权写入） | ✅ 代码就位 | `plugins/host-manager/src/lib.rs` |
+| B2.4 `totp`（扫描目录 + 路径分隔符） | ✅ | `plugins/totp/src/lib.rs` |
+| B2.7 预览 | 🚧 **第一步（文本 / 元数据）已做**；富预览未做 | `plugins/file-search/src/preview.rs` |
+| B2.9 `clipboard-history` | ⏳ 未做 | — |
+| B3 打包（`.ico` / 彩色托盘 / `pack-win.mjs` / `nsis` / 便携 zip） | ✅ 代码就位（NSIS 待实机） | `scripts/{make-icon,pack-win}.mjs`、`apps/shell/tauri.conf.json` |
+| B3.7 CI | 🚧 新增 `build-windows.yml`（构建 + `cargo test` + 打包 + artifact）；`release.yml` 待发布流程定 | `.github/workflows/` |
+| B4 字体栈 | ✅ | `apps/launcher-ui/src/styles/app.css`、`packages/ui/styles/theme.css` |
+| B5 实机验收 | ⏳ 待 Windows 实机 | 本文件末清单 |
+
+**本地验证（macOS 上就能做的部分）**：
+
+```bash
+# 内核 / SDK / 各插件：Windows 交叉检查（translate 依赖 ring 的 C 代码，交叉编不过，跳过）
+cargo check --workspace --exclude launcher-plugin-translate --target x86_64-pc-windows-msvc
+
+# 壳：tauri-build 交叉编资源需要资源编译器（llvm-rc / windres）。
+# 本地用一个「只 touch 输出文件」的假 llvm-rc 打通 check（cargo check 不链接）：
+#   RC=<仓库内任意可执行脚本，探测时输出 "OVERVIEW: LLVM Resource Converter"，其余调用直接退出 0>
+cd apps/shell && RC=... cargo check --target x86_64-pc-windows-msvc
+```
+
+真机编译 / 测试 / 打包走 `.github/workflows/build-windows.yml`（windows-latest 原生构建）。
+
 ### B1 壳侧（逐项）
 
 | # | 项 | 现状 | Windows 做法 |
@@ -512,13 +545,26 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 - **降级路径要当一等公民做**：多数同事机器上不会有 Everything ⇒ 自建索引必须与同一套契约等价。方案：固定盘首次全盘建索引（排除 `Windows\` / `\$Recycle.Bin` / `Recovery` 等系统目录，可选跳 `node_modules` / `.git`），`notify` crate（Windows 上即 `ReadDirectoryChangesW`）做增量；索引落 `<dataRoot>/plugins/file-search/index/`（插件唯一可写处）；冷启动先出上一轮索引的结果、后台重建。
 - **mac 侧对照**：Spotlight 索引由系统维护，所以 macOS **没有**「自建索引」这一层；`-onlyin` 的根列表（`search_roots()`）在 Windows 上换成**盘符 + `%USERPROFILE%`**。两端差异全部落在 `#[cfg(target_os)]` 分支内（符合「平台限定逻辑必须隔离」）。
 
-#### 落地顺序（每步都能独立验收）
+#### 落地顺序（每步都能独立验收）—— 三步均已落地（2026-09-18）
 
-1. **先抽接口**（`FileBackend` trait + macOS 实现）：纯重构、行为不变、现有单测全绿 —— **这一步在 macOS 上就能做完并验收**。
-2. Windows 上先只实现降级路径（自建索引），目标「能搜」。
-3. Everything 作为**加速件**后补：契约不变，只是多一个后端实现 + 探测逻辑。
+1. **先抽接口**（`FileBackend` trait + macOS 实现）：纯重构、行为不变、现有单测全绿 —— **这一步在 macOS 上就能做完并验收**。✅
+2. Windows 上先只实现降级路径（自建索引），目标「能搜」。✅ 另加 `notify` 增量（会话内新建/删除/改名即时生效）。
+3. Everything 作为**加速件**：契约不变，只是多一个后端实现 + 探测逻辑。✅
+   **实现方式（2026-09-18 定）**：按官方公开的 IPC 协议**纯代码实现**（`src/everything.rs`），
+   **不随包带 SDK DLL**（N2 要求产物自包含），也**不内置 Everything 本体** —— 理由：
+   - 内置要跑得动必须解决「NTFS 索引需要 Everything Service 或以管理员运行」（官方 FAQ 原文口径），
+     而壳 `spawn` 无法静默提权（每次弹 UAC）或要引导用户装一个系统服务；
+   - 自带一个 35–100MB 常驻第三方进程，与「内核 13MB」的轻量定位冲突；
+   - 复用已装实例还省掉了与用户自己那份 Everything 抢默认 IPC 管道的问题。
+   探不到 ⇒ 静默回退自建索引；查询失败 ⇒ **熔断 60s**（避免装了但不可用时每次搜索卡满 3s 超时）。
 
-### B2.7 文件搜索预览：跨平台实现（可选增量）
+### B2.7 文件搜索预览：跨平台实现（**第一步已落地**，2026-09-18）
+
+**第一步（零契约变更）已完成**：`plugins/file-search/src/preview.rs` 给结果项填 `detail`
+（`plugin-spec` §9.2 已有的纯文本字段）—— 文本类给前若干行（扩展名白名单 + ≤512KB + 首 8KB 无 NUL），
+其余给「类型 · 大小」元数据；读不到（权限 / 不存在）就不带这个字段。
+**只对最终展示的 ≤8 条算**，不新增 capability（`exec.spawn` 的语义已含「可读写文件」）。
+**富预览（图片缩略图 / PDF 首页）仍未做** —— 那需要新 capability `file.read` 与结果项字段（见下）。
 
 参考 uTools「本地搜索」的形态（左列表 + 右预览）：我们的短板**只在预览**，搜索 / 打开 / 在资源管理器中显示现在全有（`files` 命令已有 `actions`：reveal + 复制路径）。
 
@@ -654,7 +700,9 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 - [ ] 搜索：应用（图标正确）、文件、网页、快捷键
 - [ ] 启动应用 / 打开文件 / 在资源管理器中显示 / 复制路径
 - [ ] **文件搜索（未装 Everything 的机器）**：首次冷启动有索引结果 → 搜文件名命中 → 后台索引重建完成（§B2.6）
-- [ ] **文件搜索（装了 Everything 的机器）**：结果一致且更快；**关掉 Everything 进程后仍可用**（降级路径实测）
+- [ ] **文件搜索（装了 Everything 的机器）**：结果一致且更快；**关掉 Everything 进程后仍可用**（降级路径实测）；
+      装了但查询失败时不能每次搜索都卡满 3s（熔断 60s 后回退自建索引，日志有说明）
+- [ ] **文件搜索（增量）**：会话内新建 / 删除 / 改名一个文件后，不重启就能搜到 / 搜不到（`notify` 增量）
 - [ ] 文件预览（若本期做）：文本前 N 行 / 二进制元数据；图片缩略图可取到，取不到时退回大图标（§B2.7）
 - [ ] 选中文本唤出带入（支持的应用内；不支持的应用静默跳过）
 - [ ] 插件页：totp / host-manager / text-diff / json-tools 全部可用；Esc 退出；主题跟随

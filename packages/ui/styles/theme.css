@@ -117,7 +117,9 @@
   --color-addfg: var(--launcher-add-fg);
   --color-delbg: var(--launcher-del-bg);
   --color-delfg: var(--launcher-del-fg);
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  /* 等宽：macOS 走 SF Mono，Windows 走 Cascadia Mono（Win10+ 自带）/ Consolas */
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Cascadia Code",
+    "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
 html,

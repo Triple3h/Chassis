@@ -310,20 +310,30 @@ launcher/
 | `window.setSize` | `{ width: number; height: number }` | `{ width, height }` | 用户记忆的窗口尺寸（宽度 480–2000、高度 240–1400）；内容自适应仍走 `window.setHeight` |
 | `window.startDragging` | — | `void` | 无边框窗口：UI 在拖拽区 mousedown 时调用，之后的移动交给系统 |
 | `window.startResizeDragging` | `{ direction: 'north'\|'south'\|'east'\|'west'\|'northEast'\|'northWest'\|'southEast'\|'southWest' }` | `void` | 无边框窗口的四边 / 四角缩放 |
-| `selection.read` | `{ prompt?: boolean }` | `{ ok: boolean; text?: string; reason?: string }` | 前台 App 的选中文本（macOS 走 Accessibility API；`reason` 见 §6.2） |
+| `selection.read` | `{ prompt?: boolean }` | `{ ok: boolean; text?: string; reason?: string }` | 前台 App 的选中文本（macOS 走 Accessibility API、Windows 走 UI Automation；`reason` 见 §6.2） |
 | `hotkey.register` | `{ accelerator: string }` | `{ ok: boolean; reason?: string }` | 失败要能给出"被占用"的原因 |
 | `hotkey.unregister` | — | `void` | |
 | `tray.setMenu` | `{ items: TrayItem[] }` | `void` | 菜单由内核提供（便于插件加项） |
 | `notify.show` | `{ title, body, silent? }` | `void` | 需要系统权限时返回 `{ ok:false, reason:'denied' }` |
 | `clipboard.readText` | — | `string` | |
 | `clipboard.writeText` | `{ text: string }` | `void` | 优先 `arboard`；失败回落 |
+| `clipboard.watch` | `{ enabled: boolean }` | `{ ok: boolean; reason?: string }` | 订阅系统剪贴板**变化事件**（不带内容）。Windows：`AddClipboardFormatListener` → `WM_CLIPBOARDUPDATE`（零轮询）；其余平台 `{ ok:false, reason:'unsupported' }`。变化时壳主动通知内核 `clipboard/changed`（见 §4.1 通知表） |
 | `open.url` | `{ url: string }` | `void` | 只允许 http/https/mailto |
 | `open.path` | `{ path: string }` | `void` | 用系统默认程序打开 |
-| `open.reveal` | `{ path: string }` | `void` | Finder 中显示 |
+| `open.reveal` | `{ path: string }` | `void` | 文件管理器中显示（macOS Finder / Windows 资源管理器） |
 | `app.quit` | — | `void` | |
 | `app.setAutostart` | `{ enabled: boolean }` | `void` | |
 | `app.info` | — | `{ version, platform, arch, dataRoot }` | |
-| `app.usage` | — | `{ ok: boolean; rss: number; cpuMs: number }` | 壳进程**自身**的常驻内存（bytes）与累计 CPU 时间（ms）—— 状态条要"启动台一共占多少"，内核算另一半 |
+| `app.usage` | — | `{ ok: boolean; rss: number; cpuMs: number }` | 壳进程**自身**的常驻内存（bytes）与累计 CPU 时间（ms）—— 状态条要"启动台一共占多少"，内核算另一半（Windows 上含挂在壳下的 WebView2 进程组：它是系统托管的独立进程，不加会严重低估） |
+
+**壳主动通知内核**（无 `id`、不等应答，与请求同走 stdio JSON-RPC）：
+
+| 通知 | 载荷 | 触发 |
+|---|---|---|
+| `window/toggled` | `{ visible, selection? }` | 热键 / 托盘 / 单实例**真正改了显隐**之后（不是"按了键"） |
+| `window/blurred` | `{}` | 启动台失焦（延迟 120ms；`hideOnBlur` 打开时内核才隐藏） |
+| `tray/menu` | `{ id }` | 托盘菜单项被点 |
+| `clipboard/changed` | `{ changeCount, kinds: ('text'\|'image'\|'file'\|'unknown')[] }` | `clipboard.watch` 已开启且系统剪贴板变化。**不带内容**（内容由插件自己读，见 §8.6）；`unknown` = 本次没抢到剪贴板所有权、没读出格式 |
 
 **壳不做的事**：不做搜索、不读插件目录、不认识"命令"这个概念、不做排序、不存历史。
 
@@ -340,6 +350,8 @@ launcher/
 - 多屏：唤出时读鼠标坐标 → 选最近屏 → 该屏工作区居中（y 取 1/4 高度处更符合习惯）
 - **选中文本**（`selection.read`）：macOS 走 Accessibility API（`AXFocusedUIElement` → `AXSelectedText`），
   需要"辅助功能"权限；未授权时**首次**带 `prompt` 调用一次系统引导，之后静默返回 `reason: 'denied'`。
+  Windows 走 UI Automation（`GetFocusedElement` → `TextPattern.GetSelection`），**不需要任何授权**；
+  只支持实现了 TextPattern 的控件（原生编辑框 / 浏览器内容 / Office），其余静默返回 `reason: 'unsupported'`。
   读取必须发生在 `window.show` **之前**（窗口一显示，前台 App 就变成了自己，选区也随之消失）
 - 内核崩溃时：壳显示错误面板 + "重载内核 / 查看日志 / 退出"三个动作（不许白屏）
 
@@ -347,6 +359,10 @@ launcher/
 
 - Tauri 2；内核作为 sidecar 打进 app bundle（`Contents/Resources/kernel/`）。**M5 起为 Rust 二进制 `launcher-kernel`（无 Node 运行时，见 ADR-0005）**；M0–M4 过渡期是 Node sidecar + 系统 Node
 - macOS：签名 + 公证（**需第 1 周启动 Apple Developer 流程**）；更新走 `tauri-plugin-updater` + minisign
+- Windows（M6）：**绿色版 zip**（`pnpm app:win` → `dist-app/Chassis-<version>-win-<arch>.zip`，解压双击即用；
+  资源布局 `resources/{kernel,ui,builtin-plugins}` 与壳的查找顺序对齐）+ NSIS 安装包
+  （`cargo tauri build --bundles nsis`；`webviewInstallMode: downloadBootstrapper` 安装时自取 WebView2，Win11 已自带）；
+  **未签名** ⇒ 首次运行有 SmartScreen 提示（"更多信息 → 仍要运行"，写进 README）
 - 目标（2026-09-17 更新为 M5 口径）：App 体积 ≤ 35MB（Rust 内核 + 5 个插件二进制 + 壳，不含 Node）；冷启动到可唤出 ≤ 800ms；常驻内存（壳 + 内核 + 常驻插件子进程，状态条口径）≤ 150MB
 
 ---
@@ -799,6 +815,16 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 - hosts 插件 UAC 提权读写、区外字节不动；托盘 / 状态条 / 设置生效；退出无残留进程
 - 交付给使用 Windows 的同事日常使用
 
+**进度（2026-09-18）**：上述交付物**代码已全部落地**（逐项状态见 `docs/m5-rust-and-windows.md` §B0），
+内核 / SDK / 各插件与壳均已通过 Windows 目标的交叉检查（`cargo check --target x86_64-pc-windows-msvc`）；
+`build-windows.yml` 负责真机编译 / 测试 / 打包。**尚未做的**：UWP 应用扫描、文件预览增量、
+`clipboard-history` 插件、`release.yml`。
+文件搜索在 Windows 上**优先复用用户已装的 Everything**（按官方 IPC 协议实现，不随包分发任何第三方二进制；
+探不到则回退自建索引，带目录变化增量）。
+当前平台差异（对外可见的部分）：热键默认 `Ctrl+Shift+Space`（`Alt+Space` 是系统窗口菜单键）；
+选中文本走 UI Automation（**无需授权**，只支持实现了 TextPattern 的控件）；
+区域截图唤起系统截图（`ms-screenclip:`）；数据目录 `%APPDATA%\Chassis`。
+
 ---
 
 ## 14. 待拍板项（已给默认值，未反对即按默认执行）
@@ -811,5 +837,5 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 | 4 | 平台 | **macOS（arm64）+ Windows 10/11**（2026-09-17 更新）。Windows 由「M4 之后单独立项」提升为 **M6**（动机：分享给使用 Windows 的同事）；两端均在各自平台上原生构建 |
 | 5 | 运行时依赖 | **2026-09-17 更新：不内嵌 Node，且 M5 起不再需要 Node**（内核与逻辑层插件 Rust 化）。开发期依赖系统 Node ≥ 22 只是过渡态；交付物（macOS 换包 / Windows 安装包）不含 Node |
 | 6 | UI 框架 | **Vue 3 + Vite + Pinia + Tailwind v4**（与现有插件资产一致，可直接复用组件与设计令牌） |
-| 7 | 默认热键 | `⌥Space` |
-| 8 | 插件数据目录 | `<dataRoot>/plugins/<pluginId>/`，`dataRoot = ~/Library/Application Support/<AppName>` |
+| 7 | 默认热键 | macOS `⌥Space`；**Windows `Ctrl+Shift+Space`**（`Alt+Space` 是系统窗口菜单键，永远抢不到） |
+| 8 | 插件数据目录 | `<dataRoot>/plugins/<pluginId>/`，`dataRoot` = macOS `~/Library/Application Support/<AppName>` / **Windows `%APPDATA%\<AppName>`** |

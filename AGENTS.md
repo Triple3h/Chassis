@@ -24,6 +24,9 @@ Chassis is a plugin-based macOS launcher: Tauri 2 Rust shell (system primitives 
 - `pnpm dev:kernel` / `pnpm dev:ui` — run kernel and UI without the shell.
 - `pnpm smoke:real` / `pnpm smoke:first-batch` — real kernel + real plugins, HTTP only.
 - `npm run shell:dev` / `npm run app:local` — run or package the real macOS app.
+- `pnpm app:win` (Windows only) — package the Windows portable zip (`dist-app/Chassis-<version>-win-<arch>.zip`).
+- Windows cross-check from macOS: `cargo check --workspace --exclude launcher-plugin-translate --target x86_64-pc-windows-msvc`.
+  The shell (`apps/shell`) additionally needs a resource compiler for `tauri-build` — point `RC` at a stub script (its probe output must start with `OVERVIEW: LLVM Resource Converter`, then exit 0). Real Windows builds run in `.github/workflows/build-windows.yml`.
 
 ## Coding Style & Naming Conventions
 
@@ -41,4 +44,4 @@ Pull requests: state the behavior change and rationale, list commands run (`type
 
 ## Security & Configuration
 
-Runtime data lives in `~/Library/Application Support/Chassis` (override with `LAUNCHER_DATA_ROOT`; the pre-rename `Launcher/` directory is adopted once by the shell); plugins may only write under their injected `dataPath`. Kernel protocol output stays on stdout, logs on stderr. Never persist secrets in plaintext.
+Runtime data lives in `~/Library/Application Support/Chassis` (macOS) / `%APPDATA%\Chassis` (Windows), overridable with `LAUNCHER_DATA_ROOT`; the pre-rename `Launcher/` directory is adopted once by the shell (macOS only — Windows had no prior release). Plugins may only write under their injected `dataPath`. Kernel protocol output stays on stdout, logs on stderr. Never persist secrets in plaintext.

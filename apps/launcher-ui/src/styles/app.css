@@ -94,7 +94,9 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif;
+  /* 分平台字体栈：macOS 走 SF / 苹方，Windows 走 Segoe UI / 微软雅黑（§B4） */
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei UI', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
   font-size: 13px;
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
