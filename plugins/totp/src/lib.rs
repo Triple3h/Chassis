@@ -52,8 +52,17 @@ fn ext_mime(ext: &str) -> Option<&'static str> {
     }
 }
 
+/// 家目录：Windows 优先 `USERPROFILE`（Git Bash 之类环境里 `HOME` 可能是 MSYS 风格路径）。
 fn home_dir() -> PathBuf {
-    std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"))
+    for key in ["USERPROFILE", "HOME"] {
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed);
+            }
+        }
+    }
+    PathBuf::from("/")
 }
 
 /// 常见截图落点（macOS 截图默认在桌面，Windows 在「图片/屏幕截图」）。
@@ -73,9 +82,9 @@ pub fn default_scan_dirs() -> Vec<PathBuf> {
     dirs.into_iter().filter(|dir| seen.insert(dir.clone())).collect()
 }
 
-/// `path.extname().toLowerCase()` 的等价实现（小写、含前导点）。
+/// `path.extname().toLowerCase()` 的等价实现（小写、含前导点；两种路径分隔符都认）。
 pub fn extension_of(file_path: &str) -> String {
-    let name = file_path.rsplit('/').next().unwrap_or(file_path);
+    let name = file_path.rsplit(['/', '\\']).next().unwrap_or(file_path);
     match name.rfind('.') {
         Some(index) if index > 0 => name[index..].to_lowercase(),
         _ => String::new(),

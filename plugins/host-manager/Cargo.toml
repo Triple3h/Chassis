@@ -31,7 +31,10 @@ serde_json = "1"
 chrono = "0.4"
 # 提权路径的 UTF-16LE base64（Windows）
 base64 = "0.22"
-# `access(2)`：判断当前进程对目标文件有没有直接写权限（与 v1 的 accessSync 等价）
-libc = "0.2"
 # 提权对话框可能要等用户输密码（最长 120s），超时要能杀掉子进程
 tokio = { version = "1", features = ["rt", "process", "time", "io-util", "sync"] }
+
+# `access(2)`：判断当前进程对目标文件有没有直接写权限（与 v1 的 accessSync 等价）。
+# 只在 Unix 用 —— Windows 走「以写方式打开」，不需要它。
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -196,8 +196,17 @@ pub fn remove_outside_lines(file_text: &str, remove: &[String]) -> String {
 
 // ── 路径 ────────────────────────────────────────────────────────
 
+/// 家目录：Windows 优先 `USERPROFILE`（Git Bash 之类环境里 `HOME` 可能是 MSYS 风格路径）。
 fn home_dir() -> PathBuf {
-    std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"))
+    for key in ["USERPROFILE", "HOME"] {
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed);
+            }
+        }
+    }
+    PathBuf::from("/")
 }
 
 /// 展开开头的 `~`（用户写 `LAUNCHER_HOSTS_PATH` 时习惯这么写）。
@@ -319,12 +328,21 @@ fn mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-/// 当前进程对目标文件可不可写（access(2)，按真实用户判断，不看权限位）。
+/// 当前进程对目标文件可不可写。
+///
+/// macOS / Linux：`access(2)` —— 按真实用户判断，不看权限位（与 v1 的 `accessSync(target, W_OK)` 等价，
+/// 且会把 ACL 一起算进去 —— 这正是「免授权写入」生效后要看到的）。
+/// Windows：尝试以写方式打开（`%SystemRoot%\System32\drivers\etc\hosts` 普通用户必然被拒）。
+#[cfg(unix)]
 pub fn is_writable(path: &Path) -> bool {
     use std::ffi::CString;
     let Ok(raw) = CString::new(path.as_os_str().as_encoded_bytes()) else { return false };
-    // access(2)：与 v1 的 accessSync(target, W_OK) 等价
     unsafe { libc::access(raw.as_ptr(), libc::W_OK) == 0 }
+}
+
+#[cfg(windows)]
+pub fn is_writable(path: &Path) -> bool {
+    std::fs::OpenOptions::new().write(true).open(path).is_ok()
 }
 
 pub fn read_hosts_file(target: Option<&Path>) -> HostsReadResult {
@@ -572,22 +590,42 @@ fn unix_username() -> Option<String> {
     Some(name.to_string())
 }
 
-/// 目标文件的 ACL 里有没有本插件加的那条（`/bin/ls -le` 只读检测，不需要提权）。
+/// 目标文件的写入授权里有没有本插件加的那条（只读检测，不需要提权，也不会弹框）。
+///
+/// macOS / Linux：`/bin/ls -le` 里找 POSIX ACL 文本。
+/// Windows：解析 `icacls` 输出 —— **只认带当前用户名的行**，
+/// 避免把 `BUILTIN\Users:(R)` 这类通用条目误当成"我们加过授权"。
 pub fn has_write_acl(target: &Path, username: &str) -> bool {
-    if cfg!(target_os = "windows") {
-        return false;
+    #[cfg(windows)]
+    {
+        let Ok(output) = std::process::Command::new("icacls").arg(target).output() else { return false };
+        if !output.status.success() {
+            return false;
+        }
+        let needle = username.to_lowercase();
+        String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+            let lower = line.to_lowercase();
+            if !lower.contains(&needle) {
+                return false;
+            }
+            // (W) 写 / (M) 修改 / (F) 完全控制 都算「能写」
+            lower.contains("(w)") || lower.contains("(m)") || lower.contains("(f)")
+        })
     }
-    let Ok(output) = std::process::Command::new("/bin/ls").arg("-le").arg(target).output() else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
+    #[cfg(not(windows))]
+    {
+        let Ok(output) = std::process::Command::new("/bin/ls").arg("-le").arg(target).output() else {
+            return false;
+        };
+        if !output.status.success() {
+            return false;
+        }
+        let needle = write_acl_entry(username);
+        String::from_utf8_lossy(&output.stdout).lines().any(|line| line.contains(&needle))
     }
-    let needle = write_acl_entry(username);
-    String::from_utf8_lossy(&output.stdout).lines().any(|line| line.contains(&needle))
 }
 
-/// 提权加 / 撤 ACL（macOS 走 osascript 系统授权框，Linux 走 pkexec）。
+/// 提权加 / 撤写入授权（macOS 走 osascript 系统授权框，Linux 走 pkexec，Windows 走 UAC）。
 ///
 /// 幂等：目标状态已经达成（grant 时已有 / revoke 时本来就没有）时不弹框、直接成功 ——
 /// `chmod -a` 删不存在的条目会以 "No ACL present" 退出，靠这层判断绕开。
@@ -598,26 +636,56 @@ pub fn apply_write_acl(target: &Path, grant: bool) -> Result<bool, String> {
     if has_write_acl(target, &username) == grant {
         return Ok(false);
     }
-    if cfg!(target_os = "windows") {
-        return Err("Windows 上暂不支持「免授权写入」（M6 平台化时用 icacls 补上）".to_string());
-    }
-    let flag = if grant { "+a" } else { "-a" };
-    let entry = write_acl_entry(&username);
-    let target_text = target.to_string_lossy().to_string();
 
-    if cfg!(target_os = "macos") {
-        let shell = format!("/bin/chmod {flag} {} {}", shq(&entry), shq(&target_text));
-        // `serde_json` 的字符串字面量恰好是合法的 AppleScript 字符串（与 elevate 同款技巧）
-        let script = format!("do shell script {} with administrator privileges", serde_json::to_string(&shell).unwrap_or_default());
-        let mut process = std::process::Command::new("/usr/bin/osascript");
-        process.arg("-e").arg(script);
-        run_blocking(process, Duration::from_millis(ELEVATE_TIMEOUT_MS))?;
+    #[cfg(windows)]
+    {
+        windows_apply_acl(target, &username, grant)?;
         return Ok(true);
     }
-    let mut process = std::process::Command::new("/usr/bin/pkexec");
-    process.args(["/bin/chmod", flag, &entry, &target_text]);
-    run_blocking(process, Duration::from_millis(ELEVATE_TIMEOUT_MS))?;
-    Ok(true)
+
+    #[cfg(not(windows))]
+    {
+        let flag = if grant { "+a" } else { "-a" };
+        let entry = write_acl_entry(&username);
+        let target_text = target.to_string_lossy().to_string();
+
+        if cfg!(target_os = "macos") {
+            let shell = format!("/bin/chmod {flag} {} {}", shq(&entry), shq(&target_text));
+            // `serde_json` 的字符串字面量恰好是合法的 AppleScript 字符串（与 elevate 同款技巧）
+            let script = format!("do shell script {} with administrator privileges", serde_json::to_string(&shell).unwrap_or_default());
+            let mut process = std::process::Command::new("/usr/bin/osascript");
+            process.arg("-e").arg(script);
+            run_blocking(process, Duration::from_millis(ELEVATE_TIMEOUT_MS))?;
+            return Ok(true);
+        }
+        let mut process = std::process::Command::new("/usr/bin/pkexec");
+        process.args(["/bin/chmod", flag, &entry, &target_text]);
+        run_blocking(process, Duration::from_millis(ELEVATE_TIMEOUT_MS))?;
+        Ok(true)
+    }
+}
+
+/// Windows 的免授权写入：`icacls <hosts> /grant "<用户>:(W)"` —— 与 macOS 的 ACL 是同一件事
+/// （「文件属性 → 安全 → 勾写入」的等价命令）。需要管理员权限 ⇒ 走 UAC 授权框。
+///
+/// 撤销 = `/remove`（移除该账户的显式条目，回到系统默认）。
+#[cfg(windows)]
+fn windows_apply_acl(target: &Path, username: &str, grant: bool) -> Result<(), String> {
+    let target_text = target.to_string_lossy().to_string();
+    let inner = if grant {
+        format!("icacls {} /grant {}", psq(&target_text), psq(&format!("{username}:(W)")))
+    } else {
+        format!("icacls {} /remove {}", psq(&target_text), psq(username))
+    };
+    // 与 `elevate` 同款：内层命令转 UTF-16LE base64，绕开 Start-Process 参数重新拼接的引号地狱
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(utf16le_bytes(&inner));
+    let outer = format!(
+        "Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -ArgumentList '-NoProfile','-EncodedCommand','{encoded}'"
+    );
+    let mut process = std::process::Command::new("powershell.exe");
+    process.args(["-NoProfile", "-NonInteractive", "-Command", &outer]);
+    run_blocking(process, Duration::from_millis(ELEVATE_TIMEOUT_MS))
 }
 
 /// 展示用的等价命令（面板里写「自己动手也可以这么做」）。

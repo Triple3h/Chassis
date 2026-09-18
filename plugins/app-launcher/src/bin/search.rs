@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use launcher_plugin_app_launcher::{
-    now_ms, runtime, scan_applications, search_apps, AppEntry, AppIndex, IconCache, INDEX_KEY,
+    home_dir, now_ms, runtime, scan_applications, search_apps, AppEntry, AppIndex, IconCache, INDEX_KEY,
 };
 use launcher_plugin_sdk::{json, Context, Result, Storage, Value};
 
@@ -35,7 +35,7 @@ fn dispatch(ctx: &Context) -> Result<()> {
         });
     }
 
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = home_dir();
     ctx.on_query(move |query, _token| {
         let apps = ensure_index(&storage, &index);
         if apps.is_empty() {
@@ -71,7 +71,7 @@ async fn load_or_scan(storage: &Storage) -> Vec<AppEntry> {
             }
         }
     }
-    if !cfg!(target_os = "macos") {
+    if !cfg!(any(target_os = "macos", windows)) {
         return Vec::new();
     }
     let result = scan_applications().await;
@@ -106,9 +106,10 @@ async fn to_item(app: &AppEntry, score: f64, icons: &IconCache, home: &str) -> V
     item
 }
 
+/// 所在目录（两种路径分隔符都认：macOS 的 `.app` 与 Windows 的 `.lnk` 共用这一段）
 fn parent_of(path: &str) -> String {
-    match path.rfind('/') {
-        Some(0) => "/".to_string(),
+    match path.rfind(['/', '\\']) {
+        Some(0) => path[..1].to_string(),
         Some(index) => path[..index].to_string(),
         None => ".".to_string(),
     }

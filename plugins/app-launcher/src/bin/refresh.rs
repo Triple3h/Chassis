@@ -8,8 +8,8 @@ fn main() {
 }
 
 fn dispatch(ctx: &Context) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        return ctx.done(json!({ "ok": false, "reason": "仅支持 macOS" }));
+    if !cfg!(any(target_os = "macos", windows)) {
+        return ctx.done(json!({ "ok": false, "reason": "当前平台不支持应用扫描" }));
     }
     let storage = ctx.storage();
     let before = storage
