@@ -152,6 +152,17 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run）
 | `.../extensions/<id>/` | 已安装的插件 |
 | `.../plugins/<id>/` | 插件数据目录（插件的唯一可写处；`file-search` 的文件索引也在这里） |
 | `.../logs/audit-*.jsonl` | 插件调用审计日志（滚动 7 天） |
+| `.../extensions/.backup/<id>/` | 插件更新前的上一版本（只留最近 1 份，「恢复出厂版本」后可清） |
+
+### 插件更新
+
+搜「插件更新」（或设置页 → 插件）打开更新页：拉索引 → 下载 → 校验 → **不重启 App 生效**。
+
+- **范围**：除 3 个底座基础能力（`app-launcher` / `file-search` / `internal-settings`）外的出厂插件。它们随 App 包发布，不接受覆盖（内核会拒绝）。
+- **来源**：编译期内置的固定仓库 + 固定 tag（`plugins-latest`）的 GitHub Release，不接受自定义源；`registry.json` 里每个插件带各平台产物的 sha256，下载后逐字节校验，不匹配即丢弃。
+- **回滚**：新版本加载不起来会自动回到上一版；也可以手动「恢复出厂版本」，回到 App 自带的那份。
+- **数据不受影响**：只替换安装目录，插件设置 / 别名 / 历史 / 固定项都按插件 id 寻址。
+- **发版**：`plugins-release.yml`（手动触发或 tag `plugins/*`）在 macOS 与 Windows 上各自原生构建插件 → 打 `<id>-<版本>-<平台>-<架构>.zip` → 汇总 `registry.json` → 发到固定 tag。
 
 ## 示例
 
@@ -245,6 +256,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | `web-open` | `web`（script，贡献型） | esbuild / Rust |
 | `translate` | `panel`（view）+ `translate`（script，贡献型） | Vite + Vue / Rust |
 | `internal-settings` | `settings` + `manage`（view） | esbuild / — |
+| `internal-store` | `updates`（view）+ `update`（script） | Vite + Vue / Rust |
 | `totp` | `totp`（view）+ `read-image`（script） | Vite + Vue / Rust |
 | `host-manager` | `hosts`（view）+ `hosts-read` / `hosts-write` / `hosts-permission`（script） | Vite + Vue / Rust |
 | `text-diff` | `diff`（view） | Vite + Vue / — |
@@ -280,6 +292,7 @@ macOS 上自用可用：热键唤出、搜索、应用启动、文件搜索、�
 | Rust 内核 + Rust 逻辑层插件（apiVersion 2，免 Node） | ✅ |
 | 视图层插件（Vue + iframe，独立 origin） | ✅ |
 | Windows 10/11（`pnpm app:win` → 绿色版 zip；CI 原生构建） | 🚧 代码就位，待实机验收（见 [`docs/m5-rust-and-windows.md`](docs/m5-rust-and-windows.md) §B0 / §B5） |
+| 插件远程更新（`internal-store`） | 🚧 链路就位，待真 Release 验收（见 [`docs/plugin-update-plan.md`](docs/plugin-update-plan.md) §12） |
 
 质量门（仓库内全绿）：
 
@@ -289,7 +302,7 @@ pnpm typecheck           # 全部工作区包（Vue 工程走各自的 vue-tsc�
 pnpm test                # 单元 / 契约 / 验收 + 各插件的 core 用例
 pnpm build               # kernel + ui + 全部出厂插件
 pnpm spec-check          # 出厂插件规范自检（清单 / 能力 / 产物 / 远程资源）
-pnpm smoke:real          # 真内核 + 15 个出厂插件冒烟
+pnpm smoke:real          # 真内核 + 出厂插件冒烟
 ```
 
 ## 路线图与已知问题
@@ -300,6 +313,7 @@ pnpm smoke:real          # 真内核 + 15 个出厂插件冒烟
 |---|---|
 | Windows 10/11 收尾 | 实机验收（托盘 / 透明窗口观感 / 通知 / 拖动缩放）、UWP 应用扫描、Everything 加速件、NSIS 安装包、`release.yml` + GitHub Releases 分发 |
 | 分发链路 | 代码签名 / 公证、自动更新、dmg 打包 |
+| 插件更新收尾 | 真 GitHub Release 走一遍完整链路（`plugins-release.yml`）、Windows 实机（rename 重试 / 更新正在使用的插件）、自动检查与商店页 |
 | 插件脚手架 CLI | 一条命令生成插件工程骨架 |
 | 测试补齐 | Playwright E2E、zip 安装的自动化用例、万条历史性能基准 |
 

@@ -78,7 +78,7 @@ my-plugin/
 - zip 根 = 插件目录内容；允许一层包裹目录（`my-plugin/package.json` 也接受）
 - **不得**包含符号链接、绝对路径、`..`
 - 单文件 ≤ 50MB，解压后 ≤ 200MB
-- 文件名建议 `<pluginId>-<version>.zip`
+- 文件名**必须**是 `<pluginId>-<version>.zip`（远程更新通道另加平台后缀：`<pluginId>-<version>-<platform>-<arch>.zip`，见附录 C）
 
 ---
 
@@ -435,6 +435,23 @@ active → crashed（页面崩溃 / 脚本连续失败）→ 可重试
 ### 6.3 热重载
 
 开发模式下改动 `extensions/<id>/` 或 dev server 文件会触发重载：**历史上限、固定项、`ctx.storage` 数据必须保持不变**。插件不得在启动时做破坏性数据迁移（要迁移必须先判断版本号）。
+
+### 6.4 更新（远程更新通道，v1）
+
+出厂插件可被 `extensions/<id>/` 下的新版本覆盖（内核 `scan()`）：
+
+| 出厂 bundle 有该 id | 出厂声明 `essential` | `extensions/` 有同 id | 结果 |
+|---|---|---|---|
+| 是 | `true` | 有 | **忽略 extensions 版本**（底座基础能力不可被外部内容顶替），记 warn |
+| 是 | `false` / 省略 | 有 | 用 extensions 目录；`builtin` 仍为 **true**（不可卸载、可禁用） |
+| 是 | — | 无 | 用 bundle |
+| 否 | — | — | 用 extensions（第三方插件） |
+
+- `essential` 只认**出厂 bundle 的清单**（身份表）：被覆盖的版本即便在清单里写 `essential: true` 也拿不到「不可禁用 + 免审计」。
+- 覆盖目录的清单读不出 / 非法 / 平台不匹配 ⇒ 回落到出厂版本（一次坏下载不能让插件变成「没有」）。
+- 安装（含覆盖）是**原子替换**：`staging → 停用（Reload 语义）→ 旧版本整目录备份到 `.backup/<id>/<版本> → rename 落地 → 重新装载`；装载失败自动回滚并报 `UPDATE_FAILED`。
+- 更新只替换**安装目录**；插件设置 / 别名覆盖 / 历史 / 固定项都按 id 寻址，天然保留（N1 / N2 的直接推论）。
+- 出厂插件不可卸载，等价动作是管理动作 `revertToBuiltin`（删除覆盖 + 回到 App 自带的那份）。
 
 ---
 
@@ -825,3 +842,44 @@ fn main() {
 | dataPath | `<dataRoot>/plugins/<pluginId>/`，插件唯一可写目录 |
 | disposer | 注册时返回的清理函数，停用/重载时按逆序调用 |
 | 会话（session） | 一次 view 命令的打开实例，由 `sid` 标识 |
+| 出厂身份表 | 内核从出厂 bundle 清单读出的 `id → essential`，判定「谁是底座基础能力」的唯一真源 |
+
+---
+
+## 附录 C：更新源（`registry.json`）
+
+远程更新通道的索引格式（schema 1）。**由 `internal-store` 消费**，内核不认识它（内核零能力：只接受一个本地 zip 路径）。
+
+```jsonc
+{
+  "schema": 1,                       // 未知 schema ⇒ 客户端拒绝（不猜测）
+  "generatedAt": "2026-09-18T12:00:00Z",
+  "plugins": {
+    "totp": {
+      "title": "双重验证器",
+      "version": "0.5.0",            // semver，来自产物清单
+      "apiVersion": "2",
+      "minKernel": null,             // 可选：低于此内核版本不给出「更新」按钮
+      "notes": "修复倒计时漂移",      // 可选：展示在更新页
+      // 一个平台一份产物（逻辑层是原生产物，不可能跨平台共用）
+      "assets": [
+        {
+          "platforms": ["macos"],    // 省略 / 空数组 = 不限制（与 §3.5 同义）
+          "arch": ["arm64"],
+          "url": "https://github.com/<owner>/<repo>/releases/download/plugins-latest/totp-0.5.0-macos-arm64.zip",
+          "sha256": "…64 位十六进制…",
+          "bytes": 808995
+        }
+      ]
+    }
+  }
+}
+```
+
+契约要点：
+
+- **schema 稳定**：字段只增不改；`schema` 不认识 ⇒ 拒绝整份索引（不挑字段读）。
+- `sig` 字段为**预留**（后续版本的签名，`null` 表示未启用）。v1 的信任模型是「固定仓库 + HTTPS + sha256」。
+- 客户端**只接受插件 id 作为入参**，下载地址一律从本索引取 —— URL 不可被外部注入。
+- 索引与产物发布在**固定 tag**（`plugins-latest`）的 Release 上；各平台各发一份 zip，sha256 必须逐字节一致于构建产物。
+- essential 出厂插件（app-launcher / file-search / internal-settings）**不在索引里**：它们随 App 包发布。

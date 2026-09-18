@@ -68,7 +68,8 @@ provider:
 
 ## 插件策略（内核侧）
 
-- **`essential`（不可禁用）**：只认出厂清单的 `essential: true`（`is_essential = builtin && manifest.essential`，第三方写了无效）；启动期 `prune_essential_disabled()`（`plugin/manager.rs`）清配置里的残留禁用；其调用**不进审计**（`audit.set_exempt`）。
+- **`essential`（不可禁用）**：只认**出厂身份表**（`PluginManager::collect_builtin_identity()`，`scan()` 时从出厂 bundle 的清单读出 `id → essential`），`is_essential = builtin && 身份表[id]`（第三方写了无效，**被覆盖的版本写了也无效** —— 否则改一下清单就白拿「不可禁用 + 免审计」）；身份表查不到时按 `true` 处理（保守）；启动期 `prune_essential_disabled()`（`plugin/manager.rs`）清配置里的残留禁用；其调用**不进审计**（`audit.set_exempt`）。
+- **插件可被覆盖更新（M7，有意为之的例外）**：`extensions/<id>/` 能覆盖**非 essential** 出厂插件（`scan()`），覆盖后 `builtin` 保持 true（不可卸载、可禁用）；essential 的忽略 extensions 版本并记 warn。覆盖目录清单读不出 / 非法 / 平台不合法 ⇒ 回落到出厂版本。安装一律走 `install_prepared()`：**staging → disable(Reload) → 旧版整目录备份到 `.backup/<id>/<版本>（只留 1 份）→ rename 落地 → scan + load**，load 失败自动回滚并报 `UPDATE_FAILED`；**绝不走 `uninstall` 路径**（那条会清 `plugin-overrides` 与 `plugin-settings`）。出厂插件的「卸载」等价动作是 `pluginAction('revertToBuiltin')`。
 - **`history: false`（不进最近使用）**：写历史前判 `PluginManager::excludes_history(id)`（`Kernel::invoke` 与 `rememberItemResult` 两处）**且**启动装配期 `history.drop_history_by(...)` 摘掉存量条目（只「以后不写」的话，界面上旧记录还在 = 用户以为没生效）；只动历史、**不动固定项**。
 - **清单字段白名单只有一份**：`scripts/lib/manifest-keys.mjs`（两套构建器 + spec-check 共用），加字段先动它。新字段要**三处一起落**：白名单 + 内核 `manifest.rs` + TS 契约包 `packages/plugin-manifest`（少一处 = 字段被静默裁掉或两边校验口径不一致）。
 - **搜索命中面 = 命令 `title` / `subtitle` / `keywords`**（`pinyin::match_target`：前缀 1.0 / 包含 0.7 / 全拼 0.6 / 首字母 0.5 / subtitle 与 keywords 0.4；多音字按 `ToPinyinMulti` 展开读音变体、封顶 8 个，改打分要跑 `pinyin.rs` 的用例组）；别名两层 = 插件级（兜底全部入口命令）∪ 命令级；用户改动存 `<dataRoot>/plugin-overrides.json`（`undefined` = 用清单值 / `[]` = 显式清空），改完只 `registry.update` 即时生效、**不重载插件**。

@@ -718,6 +718,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 | 敏感数据 | 存储默认明文（本地 KV）；插件自行加密（提供 `packages/crypto` 参考实现：PBKDF2 + AES-GCM，口令不落盘） |
 | 审计 | 全部调用落 jsonl，敏感字段打码 |
 | 供应链 | 插件 zip 只解压到目标目录、拒绝绝对路径与 `..`、拒符号链接、单文件 ≤ 50MB |
+| 供应链（插件更新） | 更新源是**编译期常量 + 固定 tag 的 Release**，不接受自定义源；下载后强制 sha256 校验（不匹配即删除）；`essential` 出厂插件不参与更新（内核二次拒绝，错误码 `ESSENTIAL_PROTECTED`）；替换是原子的（失败自动回滚），并有「恢复出厂版本」逃生口 |
 
 ---
 
@@ -827,6 +828,17 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 当前平台差异（对外可见的部分）：热键默认 `Ctrl+Shift+Space`（`Alt+Space` 是系统窗口菜单键）；
 选中文本走 UI Automation（**无需授权**，只支持实现了 TextPattern 的控件）；
 区域截图唤起系统截图（`ms-screenclip:`）；数据目录 `%APPDATA%\Chassis`。
+
+### M7 — 插件远程更新（2026-09-18 立项）
+**交付**：内核侧三条规则（extensions 可覆盖非 essential 出厂插件 / 原子安装 + 备份 + 回滚 / `revertToBuiltin`）、
+分发链路（zip 命名带平台、`gen-plugin-registry.mjs`、`plugins-release.yml` 双平台发布到固定 tag `plugins-latest`）、
+更新器插件 `internal-store`（索引比对 + 下载校验 + 一键更新页）。
+**验收**：
+- 三个 essential 插件（app-launcher / file-search / internal-settings）不可被覆盖（内核 `ESSENTIAL_PROTECTED`）
+- 在 `internal-store` 页点更新 → 不重启 App → 新版本生效；更新后插件设置 / 别名 / 历史 / 固定项不变
+- 断网 / 坏索引 / sha256 不匹配 / 新版本加载失败各走一遍：旧版本仍在，界面给出明确提示
+- 「恢复出厂版本」能回到 App 自带的那份
+- 真 GitHub Release 走一遍完整链路（M7.2 通道可发）
 
 ---
 

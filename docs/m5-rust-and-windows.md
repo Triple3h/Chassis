@@ -476,7 +476,7 @@ SDK 固定在 `packages/plugin-sdk-rs/`（与它替代的 `packages/plugin-api-n
 
 ```bash
 # 内核 / SDK / 各插件：Windows 交叉检查（translate 依赖 ring 的 C 代码，交叉编不过，跳过）
-cargo check --workspace --exclude launcher-plugin-translate --target x86_64-pc-windows-msvc
+cargo check --workspace --exclude launcher-plugin-translate --exclude launcher-plugin-internal-store --target x86_64-pc-windows-msvc
 
 # 壳：tauri-build 交叉编资源需要资源编译器（llvm-rc / windres）。
 # 本地用一个「只 touch 输出文件」的假 llvm-rc 打通 check（cargo check 不链接）：
