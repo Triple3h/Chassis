@@ -3,7 +3,7 @@ name = "launcher-shell"
 # 壳版本的**唯一源**是 `tauri.conf.json` 的 `version`（`build.rs` 读它注入 `SHELL_VERSION`，
 # `pack-local-app.mjs` / `pack-app.mjs` 读同一处）。这里保持同值只是让 cargo 元数据看起来一致，
 # 不参与任何判定 —— 两边分叉时以 `tauri.conf.json` 为准。
-version = "0.1.2"
+version = "0.1.3"
 description = "Launcher shell: system primitives only (window / hotkey / tray / notify / clipboard / open)"
 authors = ["launcher"]
 edition = "2021"
