@@ -11,6 +11,10 @@ mod ipc;
 mod logging;
 mod primitives;
 mod sidecar;
+mod update;
+
+/// `--hot-probe` 的输出（`main.rs` 用）：自更新链路判断「候选包能不能跑」的入口。
+pub use update::probe_report;
 
 use ipc::Link;
 use serde_json::json;
@@ -21,6 +25,31 @@ use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 数据目录 →（接手旧目录）→ 日志 → 自更新守卫：**顺序不能反** ——
+    //  ① 接手老目录（应用改名迁移）必须早于 `logging::init`：日志会在数据目录里建 `logs/`，
+    //     让「新目录已存在」成立之后，旧目录就再也不会被接手；
+    //  ② 自更新守卫要排在 Tauri 装配**之前**：候选包连续两次没走到就绪，就得在这里换回备份并退出
+    //     （坏包可能连窗口都建不出来，守卫不能挂在 setup 里）。
+    let data_root = sidecar::data_root_best_effort();
+    let adopted = sidecar::adopt_legacy_data_dir(&data_root);
+    logging::init(&data_root);
+    if let Some((legacy, count)) = adopted {
+        logging::log(&format!(
+            "[shell] 已接手旧数据目录：{} → {}（复制 {count} 个文件，老目录保留可回退）",
+            legacy.display(),
+            data_root.display()
+        ));
+    }
+    logging::log(&format!("[shell] 启动 v{}，数据目录 {}", update::version(), data_root.display()));
+
+    if let Some(outcome) = update::boot_guard(&data_root) {
+        logging::log(&format!("[shell] {}", outcome.detail));
+        if outcome.restart {
+            // helper 已在等着「换回备份 + 重新 open」：本进程先走，否则新实例抢不到单实例锁
+            return;
+        }
+    }
+
     let link = Link::new();
     let sidecar = Arc::new(Sidecar::new(Arc::clone(&link)));
 
@@ -49,20 +78,9 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
 
-            // ① 数据目录 + 日志：GUI 启动时 stderr 会被丢弃，必须落盘才能排查
-            // 顺序不能反：接手老目录（应用改名迁移）必须早于 `logging::init`，
-            // 因为日志初始化会在数据目录下建 `logs/`，让「新目录已存在」成立后就再也不迁了。
+            // ① 数据目录：日志与旧目录接手已在 `run()` 开头完成（自更新启动守卫必须排在最前），
+            // 这里再取一次同源路径，供窗口 / 内核 / 原语使用。
             let data_root = sidecar::data_root(&handle);
-            let adopted = sidecar::adopt_legacy_data_dir(&data_root);
-            logging::init(&data_root);
-            if let Some((legacy, count)) = adopted {
-                logging::log(&format!(
-                    "[shell] 已接手旧数据目录：{} → {}（复制 {count} 个文件，老目录保留可回退）",
-                    legacy.display(),
-                    data_root.display()
-                ));
-            }
-            logging::log(&format!("[shell] 启动，数据目录 {}", data_root.display()));
 
             // ② macOS：不进 Dock（Accessory）
             #[cfg(target_os = "macos")]
@@ -119,9 +137,14 @@ pub fn run() {
             // ⑦ 内核就绪后把窗口导航到内核托管的启动台 UI（ADR-0001）
             let ready_handle = handle.clone();
             let ready_sidecar = Arc::clone(&sidecar_setup);
+            let ready_data_root = data_root.clone();
             std::thread::spawn(move || match ready_sidecar.wait_ready(Duration::from_secs(30)) {
                 Ok(port) => {
                     logging::log(&format!("[shell] 内核就绪：UI 端口 {port}"));
+                    // 走到这里才算「本次启动成功」：自更新的待验证台账可以清了（不再回滚）
+                    if let Some(note) = update::mark_boot_success(&ready_data_root) {
+                        logging::log(&format!("[shell] {note}"));
+                    }
                     sidecar::navigate_main_window(&ready_handle, port);
                 }
                 Err(err) => show_boot_error(&ready_handle, &err),

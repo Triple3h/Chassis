@@ -431,7 +431,12 @@ pub const APP_DATA_DIR_NAME: &str = "Chassis";
 #[cfg(target_os = "macos")]
 const LEGACY_DATA_DIR_NAME: &str = "Launcher";
 
-pub fn data_root(app: &AppHandle) -> PathBuf {
+/// 数据目录（不依赖 `AppHandle`）：`run()` 最前面就要用 ——
+/// 「接手旧数据目录 → 日志初始化 → 自更新启动守卫」都排在 Tauri 装配之前。
+///
+/// 口径与 `data_root` 完全一致，只是少了最后那层 `app.path()` 兜底
+/// （前三条都没命中时返回 `.`，调用方可以据此判断要不要换用 `AppHandle` 版本）。
+pub fn data_root_best_effort() -> PathBuf {
     if let Ok(path) = std::env::var("LAUNCHER_DATA_ROOT") {
         return PathBuf::from(path);
     }
@@ -444,16 +449,25 @@ pub fn data_root(app: &AppHandle) -> PathBuf {
                 .join(APP_DATA_DIR_NAME);
         }
     }
-    // Windows：`%APPDATA%\Chassis`。
-    //
-    // 刻意**不用** `app.path().app_data_dir()`：它按 bundle identifier 拼目录
-    // （`%APPDATA%\app.launcher.desktop`），与内核 `paths.rs::default_data_root` 的
-    // 「应用名」口径分叉 —— 结果就是「换个启动方式，历史全没了」。
     #[cfg(target_os = "windows")]
     {
         if let Some(appdata) = std::env::var_os("APPDATA") {
             return PathBuf::from(appdata).join(APP_DATA_DIR_NAME);
         }
+    }
+    PathBuf::from(".")
+}
+
+pub fn data_root(app: &AppHandle) -> PathBuf {
+    // Windows：`%APPDATA%\Chassis`。
+    //
+    // 刻意**不用** `app.path().app_data_dir()`：它按 bundle identifier 拼目录
+    // （`%APPDATA%\app.launcher.desktop`），与内核 `paths.rs::default_data_root` 的
+    // 「应用名」口径分叉 —— 结果就是「换个启动方式，历史全没了」。
+    // 只有环境变量与平台目录都不认时，才退回 Tauri 给的路径（最后的兜底）。
+    let best_effort = data_root_best_effort();
+    if best_effort != Path::new(".") {
+        return best_effort;
     }
     app.path()
         .app_data_dir()

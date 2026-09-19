@@ -49,6 +49,10 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Outcome {
         "app.setAutostart" => Outcome::Now(set_autostart(app, params)),
         "app.info" => Outcome::Now(app_info(app)),
         "app.usage" => Outcome::Now(usage::usage()),
+
+        // 应用（壳）自更新：校验候选包 → 写台账 → 交独立 helper → 壳退出重启。
+        // 响应先发出去，壳在 400ms 后退出（helper 等壳完全退出才动手替换 `.app`）。
+        "shell.applyUpdate" => Outcome::Now(apply_shell_update(app, params)),
         // 内核热更新：即将优雅重启（内核二进制可能已被替换）。这是**计划内重启** ——
         // supervise 会照常拉起，但不计入崩溃重启预算，且重启后要把窗口导航到新端口。
         "kernel/restarting" => Outcome::Now({
@@ -82,9 +86,29 @@ fn app_info(app: &AppHandle) -> Result<Value, String> {
     // 报告给插件的 dataRoot 与真实数据目录会分叉，插件按它去找文件会找不到。
     let data_root = crate::sidecar::data_root(app).to_string_lossy().to_string();
     Ok(json!({
+        // 旧字段（= `tauri.conf.json` 的 version，外置内核台账用的就是它）
         "version": version,
+        // 自更新链路认这两个：壳产物版本 + 壳自更新机制版本（与内核的 hotVersion 各自独立）
+        "shellVersion": crate::update::version(),
+        "shellHotVersion": crate::update::hot_version(),
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "dataRoot": data_root,
+        // 自更新可行性：打包态 + 安装位置可写（开发态 / 只读位置 ⇒ 更新页不给「更新应用」）
+        "bundlePath": crate::update::bundle_path().map(|path| path.display().to_string()),
+        "canSelfUpdate": crate::update::can_self_update(),
     }))
+}
+
+/// 应用自更新（`internal-store` 的「更新应用」发起）：`{ appPath }` = 已解压的候选 `.app`。
+///
+/// 壳自己不做网络与解压（那是内核侧 internal-store 的职责），只做三件事：
+/// 校验候选包 → 写台账 → 交 helper，然后退出重启。失败一律留在当前版本。
+fn apply_shell_update(app: &AppHandle, params: &Value) -> Result<Value, String> {
+    let candidate = params
+        .get("appPath")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "appPath 必填（候选 .app 的本地路径）".to_string())?;
+    let data_root = crate::sidecar::data_root(app);
+    crate::update::apply(app, &data_root, std::path::Path::new(candidate))
 }
