@@ -53,8 +53,6 @@ jobs:
           fi
           KEYCHAIN=/tmp/chassis-signing.keychain-db
           printf '%s' "$P12_BASE64" | openssl base64 -d -A -out /tmp/chassis-signing.p12
-          # 取出证书本体：稍后要显式信任它（`security import` 只导身份，不会把它标成受信任）
-          openssl pkcs12 -in /tmp/chassis-signing.p12 -nokeys -clcerts -passin pass:"$P12_PASSWORD" -out /tmp/chassis-signing.pem
 
           security create-keychain -p actions "$KEYCHAIN"
           security set-keychain-settings -lut 900 "$KEYCHAIN"
@@ -62,6 +60,16 @@ jobs:
           security import /tmp/chassis-signing.p12 -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          # 取出证书本体：稍后要显式信任它（`security import` 只导身份，不会把它标成受信任）。
+          #
+          # 两处讲究：
+          #  - 用 `security find-certificate` 而不是 `openssl pkcs12`：macOS `security export` 生成的
+          #    p12 是 RC2-40-CBC 加密，runner 上的 Homebrew OpenSSL 3 默认拒绝
+          #    （`unsupported algorithm RC2-40-CBC`，首次修复时踩过）；
+          #  - 必须按名字取（`-c`）：p12 里带完整证书链，`-a -p` 会把 GlobalSign 中间证书排在前面，
+          #    拿它去 add-trusted-cert 就信任错了对象。
+          security find-certificate -c "Chassis Local Signing" -p "$KEYCHAIN" > /tmp/chassis-signing.pem
 
           # 自签名证书**必须显式信任**：否则 `find-identity -v` 报 "0 valid identities"，
           # 打包脚本（detectSigningIdentity）找不到身份 ⇒ 静默回落 ad-hoc（首次发版踩过：
