@@ -9,13 +9,22 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, ChildStdout};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
 
+/// 原语的处理结果：
+///  - `Now`：同步执行完，立刻应答；
+///  - `Later`：慢原语（交互式截图等）已在别的线程上跑，读循环把「等结果 + 应答」交给独立线程，
+///    自己继续服务后续请求 —— 读循环是单线程串行的，内联等几十秒会把壳整个堵死。
+pub enum Outcome {
+    Now(Result<Value, String>),
+    Later(Receiver<Result<Value, String>>),
+}
+
 /// 原语处理器：内核请求 → 壳执行（见 primitives::dispatch）
-pub type Handler = fn(&AppHandle, &str, &Value) -> Result<Value, String>;
+pub type Handler = fn(&AppHandle, &str, &Value) -> Outcome;
 
 pub struct Link {
     stdin: Mutex<Option<ChildStdin>>,
@@ -115,15 +124,27 @@ impl Link {
                 // 内核 → 壳 的请求
                 Some(name) => {
                     let params = message.get("params").cloned().unwrap_or(Value::Null);
-                    let result = {
+                    let outcome = {
                         let handler = self.handler.lock().ok().and_then(|slot| *slot);
                         let app = self.app.lock().ok().and_then(|slot| slot.clone());
                         match (handler, app) {
                             (Some(handler), Some(app)) => handler(&app, &name, &params),
-                            _ => Err("壳尚未就绪".to_string()),
+                            _ => Outcome::Now(Err("壳尚未就绪".to_string())),
                         }
                     };
-                    self.reply(id, result);
+                    match outcome {
+                        Outcome::Now(result) => self.reply(id, result),
+                        // 慢原语：执行已经在独立线程上跑，这里只把「等结果 + 应答」挪出读循环
+                        Outcome::Later(receiver) => {
+                            let link = Arc::clone(&self);
+                            std::thread::spawn(move || {
+                                let result = receiver
+                                    .recv()
+                                    .unwrap_or_else(|_| Err("原语任务未返回结果".to_string()));
+                                link.reply(id, result);
+                            });
+                        }
+                    }
                 }
             }
         }

@@ -257,7 +257,10 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
                 // 剪贴板监听：假壳按「支持」应答（真壳在 Windows 上开线程监听，其余平台返回 unsupported）
                 : message.method === 'clipboard.watch'
                   ? { ok: true }
-                  : null
+                  // 截图原语（D18 下沉后由壳执行）：假壳按「成功触发」应答
+                  : message.method === 'screenshot.start'
+                    ? { ok: true }
+                    : null
         const reply = JSON.stringify({ jsonrpc: '2.0', id: message.id, result })
         debugLink('→', reply)
         stdin.write(`${reply}\n`)

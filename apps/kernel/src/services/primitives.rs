@@ -14,6 +14,10 @@ use crate::services::audited;
 
 const ALLOWED_URL_PROTOCOLS: [&str; 3] = ["http:", "https:", "mailto:"];
 
+/// 交互式截图要等用户操作（拖选区 / 取消，可能几十秒）：链路超时给足。
+/// 别用默认 3s —— 那会把「用户正在截图」判成失败，截图完成时内核早已放弃。
+const SCREENSHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppUsage {
     pub rss: i64,
@@ -117,36 +121,21 @@ impl Primitives {
         .await
     }
 
-    /// 区域截图 → 系统剪贴板（requirements §8.6：只返回是否成功触发）。
+    /// 区域截图 → 系统剪贴板（requirements §6.1 / §8.6：只返回是否成功触发）。
     ///
-    /// 平台实现（**都要落到系统剪贴板**，调用方不需要自己取图）：
-    ///  - macOS：`screencapture -i -c`（系统自带的交互式区域截图）；
-    ///  - Windows：唤起系统截图（`ms-screenclip:`，即 Win+Shift+S 那条），截完进剪贴板；
-    ///  - 其余平台：返回 false（降级，UI 侧提示不可用）。
+    /// 截图是**系统调用，由壳执行**（architecture D18：内核不再直接 exec；macOS 壳跑
+    /// `screencapture -i -c`、Windows 壳跑 `ms-screenclip:`、其余平台壳返回 `unsupported`）。
+    /// 交互式截图会等用户完成 / 取消（可能几十秒），超时按 `SCREENSHOT_TIMEOUT` 给足；
+    /// 壳未连接 / 不支持 / 超时：一律 false —— 这是**预期内的降级**（UI 侧提示不可用），
+    /// 不是错误。
     pub async fn screenshot_start(&self, plugin_id: &str) -> Result<bool> {
         audited(&self.audit, plugin_id, "ui", "ctx.screenshot.start", "screenshot", None, async {
-            #[cfg(target_os = "macos")]
-            {
-                let status = tokio::process::Command::new("screencapture")
-                    .args(["-i", "-c"])
-                    .status()
-                    .await
-                    .map_err(|err| KernelError::new("INTERNAL", format!("screencapture 启动失败：{err}")))?;
-                return Ok(status.success());
-            }
-            #[cfg(windows)]
-            {
-                // explorer 处理 `ms-screenclip:` 协议：直接拉出截图覆盖层，不经过 cmd 窗口
-                let status = tokio::process::Command::new("explorer")
-                    .arg("ms-screenclip:")
-                    .status()
-                    .await
-                    .map_err(|err| KernelError::new("INTERNAL", format!("explorer 启动失败：{err}")))?;
-                return Ok(status.success());
-            }
-            #[cfg(not(any(target_os = "macos", windows)))]
-            {
-                Ok(false)
+            match self.link.request_with_timeout("screenshot.start", None, SCREENSHOT_TIMEOUT).await {
+                Ok(res) => Ok(res.get("ok").and_then(Value::as_bool).unwrap_or(false)),
+                Err(err) => {
+                    crate::log_warn!("截图原语不可用（{}）：{}", err.code, err.message);
+                    Ok(false)
+                }
             }
         })
         .await
@@ -300,10 +289,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn visibility_and_usage_return_none_when_disconnected() {
+    async fn visibility_usage_and_screenshot_degrade_when_disconnected() {
         let link = ShellLink::new(Arc::new(|_| {}));
         let primitives = Primitives::new(link, Arc::new(AuditLog::new(std::path::Path::new("/tmp/nowhere-primitives"))));
         assert_eq!(primitives.is_visible().await, None, "壳未连接必须返回 None 而不是 false");
         assert!(primitives.app_usage().await.is_none());
+        // 截图已下沉到壳（D18）：壳未连接时降级为 false，绝不能在内核里自己 exec
+        assert!(!primitives.screenshot_start("test-plugin").await.unwrap(), "壳未连接时截图降级为 false");
     }
 }

@@ -5,57 +5,62 @@ pub mod clipboard;
 pub mod hotkey;
 pub mod notify;
 pub mod opener;
+pub mod screenshot;
 pub mod selection;
 pub mod tray;
 pub mod usage;
 pub mod window;
 
+use crate::ipc::Outcome;
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
 /// JSON-RPC 方法分发：内核请求 → 壳执行
-pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value, String> {
+pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Outcome {
     match method {
-        "window.show" => window::show(app, params),
-        "window.hide" => window::hide(app),
-        "window.isVisible" => window::is_visible(app),
-        "window.setHeight" => window::set_height(app, params),
-        "window.setSize" => window::set_size(app, params),
-        "window.startDragging" => window::start_dragging(app),
-        "window.startResizeDragging" => window::start_resize_dragging(app, params),
+        // 交互式截图要等用户操作（拖选区 / 取消，可能几十秒）：执行放独立线程，读循环继续服务
+        "screenshot.start" => Outcome::Later(screenshot::start(app, params)),
 
-        "selection.read" => selection::read(app, params),
+        "window.show" => Outcome::Now(window::show(app, params)),
+        "window.hide" => Outcome::Now(window::hide(app)),
+        "window.isVisible" => Outcome::Now(window::is_visible(app)),
+        "window.setHeight" => Outcome::Now(window::set_height(app, params)),
+        "window.setSize" => Outcome::Now(window::set_size(app, params)),
+        "window.startDragging" => Outcome::Now(window::start_dragging(app)),
+        "window.startResizeDragging" => Outcome::Now(window::start_resize_dragging(app, params)),
 
-        "hotkey.register" => hotkey::register(app, params),
-        "hotkey.unregister" => hotkey::unregister(app),
+        "selection.read" => Outcome::Now(selection::read(app, params)),
 
-        "tray.setMenu" => tray::set_menu(app, params),
+        "hotkey.register" => Outcome::Now(hotkey::register(app, params)),
+        "hotkey.unregister" => Outcome::Now(hotkey::unregister(app)),
 
-        "notify.show" => notify::show(app, params),
+        "tray.setMenu" => Outcome::Now(tray::set_menu(app, params)),
 
-        "clipboard.readText" => clipboard::read_text(app),
-        "clipboard.writeText" => clipboard::write_text(app, params),
-        "clipboard.watch" => clipboard::watch(app, params),
+        "notify.show" => Outcome::Now(notify::show(app, params)),
 
-        "open.url" => opener::open_url(app, params),
-        "open.path" => opener::open_path(app, params),
-        "open.reveal" => opener::reveal(app, params),
+        "clipboard.readText" => Outcome::Now(clipboard::read_text(app)),
+        "clipboard.writeText" => Outcome::Now(clipboard::write_text(app, params)),
+        "clipboard.watch" => Outcome::Now(clipboard::watch(app, params)),
 
-        "app.setAutostart" => set_autostart(app, params),
-        "app.info" => app_info(app),
-        "app.usage" => usage::usage(),
+        "open.url" => Outcome::Now(opener::open_url(app, params)),
+        "open.path" => Outcome::Now(opener::open_path(app, params)),
+        "open.reveal" => Outcome::Now(opener::reveal(app, params)),
+
+        "app.setAutostart" => Outcome::Now(set_autostart(app, params)),
+        "app.info" => Outcome::Now(app_info(app)),
+        "app.usage" => Outcome::Now(usage::usage()),
         // 内核热更新：即将优雅重启（内核二进制可能已被替换）。这是**计划内重启** ——
         // supervise 会照常拉起，但不计入崩溃重启预算，且重启后要把窗口导航到新端口。
-        "kernel/restarting" => {
+        "kernel/restarting" => Outcome::Now({
             crate::sidecar::note_hot_restart(params);
             Ok(json!({ "ok": true }))
-        }
-        "app.quit" => {
+        }),
+        "app.quit" => Outcome::Now({
             crate::shutdown(app);
             Ok(json!(null))
-        }
+        }),
 
-        other => Err(format!("壳未实现该方法：{other}")),
+        other => Outcome::Now(Err(format!("壳未实现该方法：{other}"))),
     }
 }
 
