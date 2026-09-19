@@ -99,6 +99,8 @@ jobs:
           files: kernel/release/*
           allowUpdates: true
           overwrite_files: true
+          # 不抢仓库的 Latest 徽标（人浏览仓库时看到应是 App 的 v* Release）
+          make_latest: false
           body: |
             内核热更新通道（客户端内置的固定源，一般不需要手动下载）。
 
