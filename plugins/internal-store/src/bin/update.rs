@@ -5,6 +5,8 @@
 //!   `{ mode: 'download', id }`                                → 下载插件包 + sha256 校验，返回本地 zip 路径
 //!   `{ mode: 'check-kernel', current, hotVersion }`           → 拉内核索引 + 比对（kernel-latest 通道）
 //!   `{ mode: 'download-kernel', current, hotVersion }`        → 下载内核包 + sha256 + 解压（launcher-kernel + ui/）
+//!   `{ mode: 'check-app', current, shellHotVersion }`         → 拉应用索引 + 比对（app-latest 通道）
+//!   `{ mode: 'download-app', current, shellHotVersion }`      → 下载应用包 + sha256 + 解压（Chassis.app/）
 //!
 //! **只接受 id / 版本号，不接受 URL**：下载地址一律从索引里取（杜绝「被诱导下载任意包」）。
 //! **出网**：更新源是 GitHub。策略 = **先直连，连不上再降级到 `launcher_plugin_sdk::proxy` 探测到的
@@ -18,9 +20,10 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use launcher_plugin_internal_store::{
-    collect_kernel_update, collect_updates, current_arch, current_platform, download_name, host_of, is_allowed_host,
-    parse_kernel_registry, parse_registry, pick_asset, sha256_hex, unzip_kernel_bundle, InstalledPlugin, KernelRegistry,
-    RegistryAsset, KERNEL_REGISTRY_URL, MAX_DOWNLOAD_BYTES, REGISTRY_URL,
+    collect_app_update, collect_kernel_update, collect_updates, current_arch, current_platform, download_name, host_of,
+    is_allowed_host, parse_app_registry, parse_kernel_registry, parse_registry, pick_asset, sha256_hex,
+    unzip_app_bundle, unzip_kernel_bundle, AppRegistry, InstalledPlugin, KernelRegistry, RegistryAsset,
+    APP_REGISTRY_URL, KERNEL_REGISTRY_URL, MAX_DOWNLOAD_BYTES, REGISTRY_URL,
 };
 use launcher_plugin_sdk::{json, proxy, Context, Level, Result, Value};
 
@@ -51,6 +54,8 @@ fn dispatch(ctx: &Context) -> Result<()> {
         "download" => download(ctx, &args),
         "check-kernel" => check_kernel(ctx, &args),
         "download-kernel" => download_kernel(ctx, &args),
+        "check-app" => check_app(ctx, &args),
+        "download-app" => download_app(ctx, &args),
         other => ctx.done(json!({ "ok": false, "error": format!("未知 mode：{other}") })),
     }
 }
@@ -301,6 +306,110 @@ fn download_kernel(ctx: &Context, args: &Value) -> Result<()> {
             ctx.done(json!({ "ok": false, "stage": "unzip", "error": message }))
         }
     }
+}
+
+// ── 应用（壳）自更新（app-latest 通道）──────────────────────────
+
+/// 检查应用更新。`current` / `shellHotVersion` 由 view 从 `pluginAction('shellInfo')` 读
+/// （壳是唯一知道自己版本与安装位置的角色）。
+///
+/// 非 macOS 平台拿不到产物 ⇒ 与「已是最新」同样的结果（`update: null`）：
+/// Windows 的运行中 exe 无法替换，自更新只在 macOS 成立、不在这里报错。
+fn check_app(ctx: &Context, args: &Value) -> Result<()> {
+    let current = args.get("current").and_then(Value::as_str).unwrap_or_default().to_string();
+    if current.is_empty() {
+        return ctx.done(json!({
+            "ok": false, "stage": "args",
+            "error": "缺少 current（当前应用版本，由 view 从 pluginAction('shellInfo') 读取）",
+        }));
+    }
+    let hot = args.get("shellHotVersion").and_then(Value::as_str).map(str::to_string);
+    let registry = match fetch_app_index(ctx) {
+        Ok(registry) => registry,
+        Err(message) => {
+            ctx.log(&format!("检查应用更新失败：{message}"), None, Level::Warn)?;
+            return ctx.done(json!({ "ok": false, "stage": "index", "error": message }));
+        }
+    };
+    match collect_app_update(&registry, &current, current_platform(), current_arch(), hot.as_deref()) {
+        Some(update) => {
+            ctx.log(&format!("发现应用新版本 {} → {}", update.current, update.latest), None, Level::Info)?;
+            ctx.done(json!({ "ok": true, "checkedAt": now_ms(), "update": update }))
+        }
+        None => ctx.done(json!({ "ok": true, "checkedAt": now_ms(), "update": null })),
+    }
+}
+
+fn download_app(ctx: &Context, args: &Value) -> Result<()> {
+    let current = args.get("current").and_then(Value::as_str).unwrap_or_default().to_string();
+    let hot = args.get("shellHotVersion").and_then(Value::as_str).map(str::to_string);
+    let registry = match fetch_app_index(ctx) {
+        Ok(registry) => registry,
+        Err(message) => return ctx.done(json!({ "ok": false, "stage": "index", "error": message })),
+    };
+    let Some(update) = collect_app_update(&registry, &current, current_platform(), current_arch(), hot.as_deref()) else {
+        return ctx.done(json!({
+            "ok": false, "stage": "index",
+            "error": "没有可用的应用更新（当前已是最新，或没有适配当前平台的产物）",
+        }));
+    };
+    if !is_allowed_host(&update.asset.url) {
+        return ctx.done(json!({
+            "ok": false, "stage": "source",
+            "error": format!("更新源域名不在白名单：{}", host_of(&update.asset.url).unwrap_or_default()),
+        }));
+    }
+
+    let directory = ctx.data_path().join("downloads").join("app");
+    if let Err(err) = std::fs::create_dir_all(&directory) {
+        return ctx.done(json!({ "ok": false, "stage": "io", "error": format!("无法创建下载目录：{err}") }));
+    }
+    let path = directory.join(format!("Chassis-{}-{}-{}.zip", update.latest, current_platform(), current_arch()));
+
+    let bytes = match fetch_asset(ctx, &update.asset, &path) {
+        Ok(bytes) => bytes,
+        Err(message) => {
+            let _ = std::fs::remove_file(&path);
+            ctx.log(&format!("下载应用更新包失败：{message}"), None, Level::Warn)?;
+            return ctx.done(json!({ "ok": false, "stage": "download", "error": message }));
+        }
+    };
+    let digest = match std::fs::read(&path) {
+        Ok(content) => sha256_hex(&content),
+        Err(err) => {
+            return ctx.done(json!({ "ok": false, "stage": "io", "error": format!("读取已下载文件失败：{err}") }))
+        }
+    };
+    if !digest.eq_ignore_ascii_case(&update.asset.sha256) {
+        // 校验不通过的文件绝不留下：坏包一旦被交给壳就是「整个应用被换坏」
+        let _ = std::fs::remove_file(&path);
+        ctx.log(&format!("应用更新包校验失败（索引 {} / 实际 {}）", update.asset.sha256, digest), None, Level::Error)?;
+        return ctx.done(json!({ "ok": false, "stage": "verify", "error": "文件校验失败（已删除，请重试）" }));
+    }
+
+    let out_dir = directory.join(format!("app-{}", update.latest));
+    match unzip_app_bundle(&path, &out_dir) {
+        Ok(bundle) => {
+            ctx.log(&format!("应用更新包已就绪：v{}（{} 字节）", update.latest, bytes), None, Level::Info)?;
+            ctx.done(json!({
+                "ok": true,
+                "version": update.latest,
+                "current": update.current,
+                "appPath": bundle.app,
+                "sha256": digest,
+                "bytes": bytes,
+            }))
+        }
+        Err(message) => {
+            ctx.log(&format!("解压应用更新包失败：{message}"), None, Level::Warn)?;
+            ctx.done(json!({ "ok": false, "stage": "unzip", "error": message }))
+        }
+    }
+}
+
+fn fetch_app_index(ctx: &Context) -> std::result::Result<AppRegistry, String> {
+    let raw = fetch_text(ctx, APP_REGISTRY_URL, TIMEOUT_INDEX)?;
+    parse_app_registry(&raw)
 }
 
 fn fetch_kernel_index(ctx: &Context) -> std::result::Result<KernelRegistry, String> {

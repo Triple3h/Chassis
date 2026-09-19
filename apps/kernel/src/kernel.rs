@@ -52,6 +52,20 @@ pub const RECORD_COMMAND: &str = "record";
 /// `record` 的超时：读一次剪贴板 + 落盘，5s 足够（默认 10s 会让异常插件多占一个进程槽）
 const RECORD_TIMEOUT_MS: u64 = 5_000;
 
+/// 应用（壳）自动更新的检查通道插件：下载 / 代理降级 / 白名单 / sha256 全在它那侧。
+const APP_UPDATE_STORE_PLUGIN: &str = "internal-store";
+
+/// 启动后先等这么久再查第一次：把启动时的 IO / 网络让给窗口与插件加载。
+const APP_UPDATE_FIRST_DELAY: std::time::Duration = std::time::Duration::from_secs(90);
+/// 之后的检查间隔：应用更新不是急事，一天几轮足够。
+const APP_UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+/// 下载完成后最多等这么久才重启：等窗口收起（用户已接受自动重启，这里只是给「正在输入」让路）。
+const APP_UPDATE_QUIET_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
+const APP_UPDATE_QUIET_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+/// 交给 internal-store 命令的超时：索引 30s；下载（十几 MB）给 3 分钟。
+const APP_UPDATE_CHECK_TIMEOUT_MS: u64 = 30_000;
+const APP_UPDATE_DOWNLOAD_TIMEOUT_MS: u64 = 180_000;
+
 pub struct KernelOptions {
     pub data_root: PathBuf,
     /// 出厂插件根目录（可多个；开发态默认就是仓库根的 `plugins/`）
@@ -755,6 +769,9 @@ impl Kernel {
         self.stats.warmup().await;
 
         self.log("info", &format!("内核就绪：UI http://127.0.0.1:{}，数据目录 {}", self.ui_port(), self.data_root()));
+
+        // 应用（壳）自更新的后台守护：启动 90s 后查一次，之后每 6h 一轮（默认开，见 config.autoUpdateApp）
+        self.spawn_app_update_watch();
         Ok(())
     }
 
@@ -1207,6 +1224,14 @@ impl Kernel {
         if action == "applyKernelUpdate" {
             return self.apply_kernel_update(payload).await;
         }
+        // 应用（壳）自更新：同一条闸门。替换与重启全在壳侧（内核不做宿主之外的编排）
+        if action == "applyShellUpdate" {
+            return self.apply_shell_update(payload).await;
+        }
+        // 壳自身信息（版本 / 安装位置 / 能否自更新）：更新页决定给不给「更新应用」
+        if action == "shellInfo" {
+            return Ok(self.shell_info().await);
+        }
         let result = self.admin.run(action, payload).await;
         // 启用 / 禁用 / 安装 / 卸载都会改变「谁在订阅剪贴板」
         self.sync_clipboard_watch().await;
@@ -1267,6 +1292,151 @@ impl Kernel {
             "restartScheduled": restart,
             "note": "内核会优雅重启（等在途请求排空）；新版本若连续两次启动未就绪，下一次启动自动回滚",
         }))
+    }
+
+    /// 壳自身信息（`pluginAction('shellInfo')`）：更新页与「能否自更新」判断的唯一来源。
+    ///
+    /// 壳未连接 ⇒ `{ available: false }`：UI 显示「不可用」，不要拿内核版本凑数
+    /// （那会让更新页拿错版本去比对应用通道）。
+    async fn shell_info(&self) -> Value {
+        match self.primitives.shell_info().await {
+            Some(info) => json!({
+                "available": true,
+                "version": info.get("shellVersion").and_then(Value::as_str).unwrap_or_default(),
+                "hotVersion": info.get("shellHotVersion").and_then(Value::as_str).unwrap_or_default(),
+                "platform": info.get("platform").cloned().unwrap_or(Value::Null),
+                "arch": info.get("arch").cloned().unwrap_or(Value::Null),
+                "bundlePath": info.get("bundlePath").cloned().unwrap_or(Value::Null),
+                "canSelfUpdate": info.get("canSelfUpdate").and_then(Value::as_bool).unwrap_or(false),
+            }),
+            None => json!({ "available": false }),
+        }
+    }
+
+    /// 应用（壳）自更新（`internal-store` 的「更新应用」发起）：把候选 `.app` 交给壳。
+    ///
+    /// 与内核对侧的分工：下载 / 校验 / 解压在逻辑层（`internal-store` 的 `download-app`），
+    /// 校验候选包 / 备份 / 替换 / 重启在壳侧。壳会在回执之后退出重启 ——
+    /// **内核跟着一起重启**（壳退出会停掉内核，新壳再拉起新内核），所以这里不需要额外收尾。
+    async fn apply_shell_update(self: &Arc<Self>, payload: &Value) -> Result<Value> {
+        let app_path = payload
+            .get("appPath")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::bad_args("appPath 必填（候选 .app 的本地路径）"))?;
+        let result = self.primitives.shell_apply_update("internal-store", app_path).await?;
+        self.log("info", &format!("应用自更新已交壳执行：{app_path}（即将重启应用）"));
+        Ok(result)
+    }
+
+    /// 应用（壳）自更新的后台守护：启动后延迟查一次，之后每 6 小时一轮。
+    ///
+    /// 分工与手动链路**完全同一套**：
+    ///  - 检查 / 下载 / 解压 → `internal-store` 的 `update` 命令（内核进程内 `exec.run`，
+    ///    与剪贴板 `record` 同一条路子；代理降级 / 域名白名单 / sha256 都在那一侧）；
+    ///  - 校验候选包 / 备份 / 替换 / 重启 → 壳（唯一能替换自己的角色）。
+    ///
+    /// 静默跳过（不报错）的情况：用户关了 `autoUpdateApp`、通道插件被禁用或没有产物、
+    /// 壳不在可自更新状态（开发态 / 只读安装位置 / 非 macOS）、没有新版本。
+    /// 任何一步失败只记一行日志、等下一轮 —— 后台任务不该刷屏，也不该重试到把网络打满。
+    pub fn spawn_app_update_watch(self: &Arc<Self>) {
+        let kernel = Arc::clone(self);
+        tokio::spawn(async move {
+            tokio::time::sleep(APP_UPDATE_FIRST_DELAY).await;
+            loop {
+                if let Err(err) = kernel.try_app_update().await {
+                    crate::log_warn!("应用自动更新跳过：{}", err.message);
+                }
+                tokio::time::sleep(APP_UPDATE_INTERVAL).await;
+            }
+        });
+    }
+
+    /// 一轮「检查 → 下载 → 应用」。`Ok` 表示这轮处理结束（含「无事可做」）。
+    async fn try_app_update(self: &Arc<Self>) -> Result<()> {
+        let config = self.config.get();
+        if !config.auto_update_app {
+            return Ok(());
+        }
+        if config.disabled.iter().any(|id| id == APP_UPDATE_STORE_PLUGIN) {
+            return Ok(());
+        }
+        if self.exec.resolve_entry(APP_UPDATE_STORE_PLUGIN, "update").is_none() {
+            return Ok(());
+        }
+        // 壳自己知道版本 / 安装位置 / 能不能自更新（开发态与只读位置在这里被挡掉）
+        let Some(info) = self.primitives.shell_info().await else { return Ok(()) };
+        if info.get("canSelfUpdate").and_then(Value::as_bool) != Some(true) {
+            return Ok(());
+        }
+        let current = info.get("shellVersion").and_then(Value::as_str).unwrap_or_default().to_string();
+        let hot = info.get("shellHotVersion").and_then(Value::as_str).unwrap_or_default().to_string();
+        if current.is_empty() {
+            return Ok(());
+        }
+
+        let checked = self
+            .exec
+            .run(
+                APP_UPDATE_STORE_PLUGIN,
+                "update",
+                Some(json!({ "mode": "check-app", "current": current, "shellHotVersion": hot })),
+                Some(APP_UPDATE_CHECK_TIMEOUT_MS),
+            )
+            .await?;
+        if checked.get("ok").and_then(Value::as_bool) != Some(true) {
+            let detail = checked.get("error").and_then(Value::as_str).unwrap_or("索引不可用");
+            crate::log_warn!("应用自动更新：检查失败（{detail}）");
+            return Ok(());
+        }
+        let Some(update) = checked.get("update").filter(|value| !value.is_null()) else {
+            // 绝大多数轮次都停在这里：已是最新
+            return Ok(());
+        };
+        let latest = update.get("latest").and_then(Value::as_str).unwrap_or_default().to_string();
+        if update.get("hotOk").and_then(Value::as_bool) == Some(false) {
+            self.log(
+                "warn",
+                &format!("应用有新版本 {latest}，但当前壳的自更新机制版本过低：请手动换包（App 通道 v*）"),
+            );
+            return Ok(());
+        }
+        self.log("info", &format!("应用有新版本 {current} → {latest}：开始下载"));
+
+        let downloaded = self
+            .exec
+            .run(
+                APP_UPDATE_STORE_PLUGIN,
+                "update",
+                Some(json!({ "mode": "download-app", "current": current, "shellHotVersion": hot })),
+                Some(APP_UPDATE_DOWNLOAD_TIMEOUT_MS),
+            )
+            .await?;
+        if downloaded.get("ok").and_then(Value::as_bool) != Some(true) {
+            let detail = downloaded.get("error").and_then(Value::as_str).unwrap_or("下载失败");
+            crate::log_warn!("应用自动更新：下载失败（{detail}）");
+            return Ok(());
+        }
+        let Some(app_path) = downloaded.get("appPath").and_then(Value::as_str) else {
+            return Ok(());
+        };
+
+        // 等一个安静的时刻再重启：用户正在输入时窗口是可见的，这是我们唯一的「空闲」信号
+        self.wait_for_quiet().await;
+        self.log("info", &format!("应用更新就绪：正在重启换上 v{latest}（{app_path}）"));
+        self.apply_shell_update(&json!({ "appPath": app_path })).await?;
+        Ok(())
+    }
+
+    /// 等窗口不处于「可见」状态（最多 `APP_UPDATE_QUIET_WAIT`）。
+    /// 问不到可见性（壳未连接等）⇒ 直接放行：更新本来就由壳执行，链路上它一定在。
+    async fn wait_for_quiet(&self) {
+        let started = std::time::Instant::now();
+        while self.primitives.is_visible().await == Some(true) {
+            if started.elapsed() >= APP_UPDATE_QUIET_WAIT {
+                return;
+            }
+            tokio::time::sleep(APP_UPDATE_QUIET_POLL).await;
+        }
     }
 
     // ── 剪贴板监听（plugin-spec §8.1）───────────────────────────

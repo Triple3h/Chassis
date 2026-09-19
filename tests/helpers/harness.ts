@@ -260,7 +260,22 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
                   // 截图原语（D18 下沉后由壳执行）：假壳按「成功触发」应答
                   : message.method === 'screenshot.start'
                     ? { ok: true }
-                    : null
+                    // 应用（壳）自更新：`app.info` 报壳自己的版本 / 安装位置 / 能否自更新
+                    : message.method === 'app.info'
+                      ? {
+                          version: '0.1.0',
+                          shellVersion: '0.1.0',
+                          shellHotVersion: '0.1.0',
+                          platform: 'macos',
+                          arch: 'arm64',
+                          dataRoot: '/tmp/fake-shell-data',
+                          bundlePath: '/Applications/Chassis.app',
+                          canSelfUpdate: true,
+                        }
+                      // 交壳替换并重启整个应用：假壳按「已接受」应答（真壳在回执后 400ms 退出）
+                      : message.method === 'shell.applyUpdate'
+                        ? { ok: true, restarting: true, from: '0.1.0', to: '0.1.1' }
+                        : null
         const reply = JSON.stringify({ jsonrpc: '2.0', id: message.id, result })
         debugLink('→', reply)
         stdin.write(`${reply}\n`)

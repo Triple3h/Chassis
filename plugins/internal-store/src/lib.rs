@@ -282,14 +282,12 @@ pub fn kernel_exe_name() -> &'static str {
     }
 }
 
-/// 解压内核更新包（结构 = `launcher-kernel(.exe)` + `ui/`）。
-///
-/// 三件事必须做对：**防路径穿越**（`enclosed_name`）、**恢复可执行位**（zip 记了 unix 权限，
-/// 不恢复则内核二进制起不来）、**结构校验**（缺二进制 / 缺 `ui/index.html` 直接拒绝）。
-pub fn unzip_kernel_bundle(zip_path: &Path, target_dir: &Path) -> std::result::Result<KernelBundle, String> {
+/// 解压 zip 到目录：**防路径穿越**（`enclosed_name`）+ **恢复 unix 权限位**
+/// （zip 记了权限，不恢复则二进制起不来）。内核包与应用包共用这一段。
+fn extract_zip(zip_path: &Path, target_dir: &Path) -> std::result::Result<(), String> {
     let file = std::fs::File::open(zip_path).map_err(|err| format!("无法打开更新包：{err}"))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|err| format!("更新包不是合法 zip：{err}"))?;
-    // 目标目录先清干净：混入上一次的半成品会被内核的结构校验放过去
+    // 目标目录先清干净：混入上一次的半成品会被结构校验放过去
     let _ = std::fs::remove_dir_all(target_dir);
     std::fs::create_dir_all(target_dir).map_err(|err| format!("无法创建解压目录：{err}"))?;
 
@@ -316,7 +314,13 @@ pub fn unzip_kernel_bundle(zip_path: &Path, target_dir: &Path) -> std::result::R
             }
         }
     }
+    Ok(())
+}
 
+/// 解压内核更新包（结构 = `launcher-kernel(.exe)` + `ui/`）：解压 + 结构校验
+/// （缺二进制 / 缺 `ui/index.html` 直接拒绝 —— 装上去只会得到「内核起不来」）。
+pub fn unzip_kernel_bundle(zip_path: &Path, target_dir: &Path) -> std::result::Result<KernelBundle, String> {
+    extract_zip(zip_path, target_dir)?;
     let binary = target_dir.join(kernel_exe_name());
     if !binary.exists() {
         return Err(format!("更新包里没有 {}（结构应为 launcher-kernel + ui/）", kernel_exe_name()));
@@ -326,6 +330,137 @@ pub fn unzip_kernel_bundle(zip_path: &Path, target_dir: &Path) -> std::result::R
         return Err("更新包里缺少 ui/index.html（内核与 UI 必须同包）".to_string());
     }
     Ok(KernelBundle { binary, ui })
+}
+
+// ── 应用（壳）自更新（app-latest 索引 + 整包替换）─────────────────
+
+/// 应用更新源：**独立固定 tag**。App 的 `v*` 是「给人下载的换包通道」，
+/// 这里是**给客户端内置源用的自更新通道** —— 两者互不顶替（与内核 / 插件三方独立）。
+pub const APP_REGISTRY_URL: &str =
+    "https://github.com/triple3h/Chassis/releases/download/app-latest/app-registry.json";
+pub const APP_RELEASE_TAG: &str = "app-latest";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppRegistry {
+    pub schema: u64,
+    #[serde(default)]
+    pub generated_at: Option<String>,
+    pub app: AppEntry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppEntry {
+    pub version: String,
+    /// 产物对应的壳自更新机制版本（诊断展示）
+    #[serde(default)]
+    pub shell_hot_version: Option<String>,
+    /// 客户端壳自更新机制低于此值 ⇒ 提示但不给「更新」按钮
+    #[serde(default)]
+    pub min_shell_hot_version: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub assets: Vec<RegistryAsset>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdate {
+    pub current: String,
+    pub latest: String,
+    pub notes: Option<String>,
+    pub shell_hot_version: Option<String>,
+    pub min_shell_hot_version: Option<String>,
+    /// 客户端壳自更新机制是否满足（不满足 ⇒ 界面不给「更新」，别装出一个换不上的包）
+    pub hot_ok: bool,
+    pub asset: RegistryAsset,
+}
+
+/// 应用更新包解压后的落点（`app` = 候选 `Chassis.app` 目录，交给壳的 `shell.applyUpdate`）。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppBundle {
+    pub app: PathBuf,
+}
+
+pub fn parse_app_registry(raw: &str) -> std::result::Result<AppRegistry, String> {
+    let registry: AppRegistry = serde_json::from_str(raw).map_err(|err| format!("app-registry.json 无法解析：{err}"))?;
+    if registry.schema != REGISTRY_SCHEMA {
+        return Err(format!(
+            "app-registry.json 的 schema 不受支持：{}（本客户端只认 {REGISTRY_SCHEMA}）",
+            registry.schema
+        ));
+    }
+    Ok(registry)
+}
+
+/// 挑出适配当前平台的应用产物（第一个命中的）。
+pub fn pick_app_asset<'a>(entry: &'a AppEntry, platform: &str, arch: &str) -> Option<&'a RegistryAsset> {
+    entry.assets.iter().find(|asset| matches(&asset.platforms, platform) && matches(&asset.arch, arch))
+}
+
+/// 「有没有应用可更新」：口径与内核 / 插件通道一致（非 semver / 版本不新 ⇒ `None`）。
+///
+/// 平台过滤天然把 Windows 挡在外面（索引里只有 macOS 产物）：Windows 上运行中的 exe 无法替换，
+/// 自更新只能在安装器里做，因此那条通道不存在「更新应用」这个动作。
+pub fn collect_app_update(
+    registry: &AppRegistry,
+    current: &str,
+    platform: &str,
+    arch: &str,
+    shell_hot: Option<&str>,
+) -> Option<AppUpdate> {
+    let entry = &registry.app;
+    if !is_newer(&entry.version, current) {
+        return None;
+    }
+    let asset = pick_app_asset(entry, platform, arch)?;
+    Some(AppUpdate {
+        current: current.to_string(),
+        latest: entry.version.clone(),
+        notes: entry.notes.clone(),
+        shell_hot_version: entry.shell_hot_version.clone(),
+        min_shell_hot_version: entry.min_shell_hot_version.clone(),
+        hot_ok: hot_satisfied(entry.min_shell_hot_version.as_deref(), shell_hot),
+        asset: asset.clone(),
+    })
+}
+
+/// 解压应用更新包（结构 = `Chassis.app/Contents/…`），并校验壳二进制与 `Info.plist` 都在。
+///
+/// 这里只做**结构与存在性**校验：候选包「能不能跑」由壳侧的 `--hot-probe` 自检回答
+/// （见 `apps/shell/src/update.rs`），那是唯一的权威判据。
+pub fn unzip_app_bundle(zip_path: &Path, target_dir: &Path) -> std::result::Result<AppBundle, String> {
+    extract_zip(zip_path, target_dir)?;
+    let app = find_app_dir(target_dir)?;
+    let binary = app.join("Contents").join("MacOS").join("launcher-shell");
+    if !binary.exists() {
+        return Err(format!(
+            "更新包里没有 Contents/MacOS/launcher-shell（结构应为 Chassis.app/Contents/…）：{}",
+            app.display()
+        ));
+    }
+    if !app.join("Contents").join("Info.plist").exists() {
+        return Err("更新包里缺少 Contents/Info.plist（不是完整的 .app）".to_string());
+    }
+    Ok(AppBundle { app })
+}
+
+/// 在解压结果里找唯一一个 `.app`（`ditto --keepParent` 出来的结构 = 最外层一个 `X.app/`）。
+fn find_app_dir(root: &Path) -> std::result::Result<PathBuf, String> {
+    let mut found: Option<PathBuf> = None;
+    for entry in std::fs::read_dir(root).map_err(|err| format!("读取解压目录失败：{err}"))?.flatten() {
+        let path = entry.path();
+        if path.is_dir() && path.extension().map(|ext| ext == "app").unwrap_or(false) {
+            if found.is_some() {
+                return Err("更新包里不止一个 .app（结构应为 Chassis.app/）".to_string());
+            }
+            found = Some(path);
+        }
+    }
+    found.ok_or_else(|| "更新包里没有 .app（结构应为 Chassis.app/Contents/…）".to_string())
 }
 
 pub fn current_platform() -> &'static str {
@@ -576,6 +711,102 @@ mod tests {
         write_bundle_zip(&evil, true, true);
         let err = unzip_kernel_bundle(&evil, &dir.join("out3")).expect_err("路径穿越必须拒绝");
         assert!(err.contains("路径穿越"), "错误信息要说明原因：{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn app_registry_raw(schema: u64) -> String {
+        format!(
+            r#"{{
+  "schema": {schema},
+  "generatedAt": "2026-09-19T00:00:00Z",
+  "app": {{
+    "version": "0.2.0",
+    "shellHotVersion": "0.1.0",
+    "minShellHotVersion": "0.1.0",
+    "notes": "截图下沉到壳",
+    "assets": [
+      {{ "platforms": ["macos"], "arch": ["arm64"], "url": "https://github.com/o/r/releases/download/app-latest/Chassis-0.2.0-macos-arm64.zip", "sha256": "aa", "bytes": 1 }},
+      {{ "platforms": ["macos"], "arch": ["x64"], "url": "https://github.com/o/r/releases/download/app-latest/Chassis-0.2.0-macos-x64.zip", "sha256": "bb", "bytes": 2 }}
+    ]
+  }}
+}}"#
+        )
+    }
+
+    /// 应用通道的门槛：版本 / 平台 / 机制版本三条都要过（Windows 永远没有产物 ⇒ 不提示）。
+    #[test]
+    fn app_registry_gates_by_version_platform_and_hot() {
+        let registry = parse_app_registry(&app_registry_raw(1)).unwrap();
+        let update = collect_app_update(&registry, "0.1.0", "macos", "arm64", Some("0.1.0")).expect("应有应用更新");
+        assert_eq!(update.current, "0.1.0");
+        assert_eq!(update.latest, "0.2.0");
+        assert_eq!(update.notes.as_deref(), Some("截图下沉到壳"));
+        assert!(update.hot_ok);
+        assert!(update.asset.url.ends_with("macos-arm64.zip"), "按平台挑产物");
+
+        assert!(collect_app_update(&registry, "0.2.0", "macos", "arm64", Some("0.1.0")).is_none(), "同版本不提示");
+        assert!(collect_app_update(&registry, "0.3.0", "macos", "arm64", Some("0.1.0")).is_none(), "索引更旧不提示");
+        assert!(
+            collect_app_update(&registry, "0.1.0", "windows", "x64", Some("0.1.0")).is_none(),
+            "Windows 没有产物 ⇒ 自更新通道不存在（运行中的 exe 换不了）"
+        );
+        assert!(parse_app_registry(&app_registry_raw(9)).is_err(), "未知 schema 拒绝");
+
+        let mut low = parse_app_registry(&app_registry_raw(1)).unwrap();
+        low.app.min_shell_hot_version = Some("9.9.9".to_string());
+        let gated = collect_app_update(&low, "0.1.0", "macos", "arm64", Some("0.1.0")).unwrap();
+        assert!(!gated.hot_ok, "壳自更新机制版本不够 ⇒ 界面不给「更新」");
+    }
+
+    fn write_app_zip(zip_path: &Path, with_binary: bool, with_plist: bool, traversal: bool) {
+        use std::io::Write;
+        let file = std::fs::File::create(zip_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let exec = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
+        let plain = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
+        if with_binary {
+            writer.start_file("Chassis.app/Contents/MacOS/launcher-shell", exec).unwrap();
+            writer.write_all(b"shell-bytes").unwrap();
+        }
+        if with_plist {
+            writer.start_file("Chassis.app/Contents/Info.plist", plain).unwrap();
+            writer.write_all(b"<plist/>").unwrap();
+        }
+        if traversal {
+            writer.start_file("../evil.txt", plain).unwrap();
+            writer.write_all(b"nope").unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    /// 应用包解压：结构校验 + 可执行位恢复（候选包自检要跑得起来）。
+    #[test]
+    fn unzip_app_bundle_keeps_exec_bit_and_rejects_junk() {
+        let dir = std::env::temp_dir().join(format!("app-bundle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip_path = dir.join("Chassis-0.2.0-macos-arm64.zip");
+        write_app_zip(&zip_path, true, true, false);
+
+        let out = dir.join("out");
+        let bundle = unzip_app_bundle(&zip_path, &out).expect("合法包应解压成功");
+        assert!(bundle.app.ends_with("Chassis.app"), "{:?}", bundle.app);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let binary = bundle.app.join("Contents").join("MacOS").join("launcher-shell");
+            let mode = std::fs::metadata(&binary).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111, "可执行位必须恢复（否则候选包自检跑不起来）");
+        }
+
+        let missing = dir.join("missing.zip");
+        write_app_zip(&missing, false, true, false);
+        assert!(unzip_app_bundle(&missing, &dir.join("out2")).is_err(), "缺壳二进制必须拒绝");
+
+        let evil = dir.join("evil.zip");
+        write_app_zip(&evil, true, true, true);
+        let err = unzip_app_bundle(&evil, &dir.join("out3")).expect_err("路径穿越必须拒绝");
+        assert!(err.contains("路径穿越"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

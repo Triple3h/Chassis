@@ -18,6 +18,13 @@ const ALLOWED_URL_PROTOCOLS: [&str; 3] = ["http:", "https:", "mailto:"];
 /// 别用默认 3s —— 那会把「用户正在截图」判成失败，截图完成时内核早已放弃。
 const SCREENSHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// 壳自身信息（版本 / 安装位置 / 能否自更新）：更新页进页面就问，别拖。
+const SHELL_INFO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// 应用自更新：壳要跑候选包自检（`--hot-probe`）+ 写台账 + 交 helper，之后才退出重启 ——
+/// 回执在退出**之前**发出，所以这里正常能收到；给足余量只是为了让慢机器上的自检不被误判成超时。
+const SHELL_UPDATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppUsage {
     pub rss: i64,
@@ -141,6 +148,27 @@ impl Primitives {
         .await
     }
 
+    /// 应用（壳）自更新：把候选 `.app` 交给壳 —— 校验、备份、替换、重启全在壳侧
+    /// （见 `apps/shell/src/update.rs`：helper 在壳完全退出后才动手）。
+    ///
+    /// `plugin_id` 只可能是 internal 插件：注入闸门（ADR-0003）让 `ctx.settings` 只对
+    /// `internal-` 插件开放，而这条动作只能由视图层经 `pluginAction` 发起。
+    pub async fn shell_apply_update(&self, plugin_id: &str, app_path: &str) -> Result<Value> {
+        audited(&self.audit, plugin_id, "ui", "ctx.settings.applyShellUpdate", "shell.update", Some(json!({ "appPath": app_path })), async {
+            assert_path(app_path)?;
+            let res = self
+                .link
+                .request_with_timeout("shell.applyUpdate", Some(json!({ "appPath": app_path })), SHELL_UPDATE_TIMEOUT)
+                .await?;
+            if res.get("ok").and_then(Value::as_bool) == Some(false) {
+                let reason = res.get("reason").and_then(Value::as_str).unwrap_or("壳拒绝了这次更新");
+                return Err(KernelError::new("UPDATE_FAILED", reason.to_string()));
+            }
+            Ok(res)
+        })
+        .await
+    }
+
     // ── 宿主内部（UI / 内核自己调用，不审计插件）────────────────
 
     /// 显示窗口，返回壳在**上屏之前**读到的前台选中文本（读不到就是 None）。
@@ -209,6 +237,17 @@ impl Primitives {
             return None;
         }
         Some(AppUsage { rss: rss as i64, cpu_ms: cpu_ms as i64 })
+    }
+
+    /// 壳自身信息（`app.info` 原语）：壳版本 / 安装位置 / 能否自更新。
+    ///
+    /// 壳未连接（或老版本壳不认这个字段）⇒ `None`：调用方显示「不可用」，
+    /// **不要**拿内核版本凑一个数 —— 那会让更新页拿错版本去比对。
+    pub async fn shell_info(&self) -> Option<Value> {
+        if !self.link.is_connected() {
+            return None;
+        }
+        self.link.request_with_timeout("app.info", None, SHELL_INFO_TIMEOUT).await.ok()
     }
 
     pub async fn register_hotkey(&self, accelerator: &str) -> HotkeyResult {

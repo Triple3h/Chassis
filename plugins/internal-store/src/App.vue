@@ -47,6 +47,28 @@ interface KernelUpdateItem {
   hotOk: boolean
 }
 
+/** 应用（壳）自身信息：壳是唯一知道自己版本与安装位置的角色 */
+interface ShellInfo {
+  available: boolean
+  version?: string
+  hotVersion?: string
+  platform?: string | null
+  arch?: string | null
+  bundlePath?: string | null
+  /** 打包态 + 安装位置可写才为 true（开发态 / 只读位置 ⇒ 不给「更新应用」） */
+  canSelfUpdate?: boolean
+}
+
+/** 应用（壳）更新（app-latest 通道；更新会重启整个应用） */
+interface AppUpdateItem {
+  current: string
+  latest: string
+  notes?: string | null
+  shellHotVersion?: string | null
+  minShellHotVersion?: string | null
+  hotOk: boolean
+}
+
 type Stage = 'idle' | 'checking' | 'error' | 'ready'
 
 const inHost = host.isLauncher()
@@ -60,6 +82,8 @@ const checkedAt = ref(0)
 const kernelVersion = ref('')
 const hotVersion = ref('')
 const kernelUpdate = ref<KernelUpdateItem | null>(null)
+const shellInfo = ref<ShellInfo | null>(null)
+const appUpdate = ref<AppUpdateItem | null>(null)
 
 const updatable = computed(() => updates.value.filter((item) => item.minKernelOk))
 
@@ -110,6 +134,7 @@ async function check(): Promise<void> {
     checkedAt.value = result.checkedAt ?? Date.now()
     stage.value = 'ready'
     await checkKernel()
+    await checkApp()
   } catch (err) {
     error.value = messageOf(err)
     stage.value = 'error'
@@ -128,6 +153,71 @@ async function checkKernel(): Promise<void> {
     kernelUpdate.value = result?.ok ? (result.update ?? null) : null
   } catch {
     kernelUpdate.value = null
+  }
+}
+
+/**
+ * 应用（壳）通道：先问壳自己的版本 / 安装位置（`pluginAction('shellInfo')`），再拉 app-latest 索引。
+ *
+ * 壳不在可自更新状态（开发态 / 只读安装位置）⇒ 不查也不显示「更新」：
+ * 查出来的更新也装不上（替换 `.app` 只能由壳在打包态做）。
+ */
+async function checkApp(): Promise<void> {
+  try {
+    const info = (await settings.pluginAction('shellInfo', {})) as ShellInfo | null
+    shellInfo.value = info?.available ? info : null
+    if (!shellInfo.value?.canSelfUpdate || !shellInfo.value.version) {
+      appUpdate.value = null
+      return
+    }
+    const result = (await exec.run({
+      command: 'update',
+      args: {
+        mode: 'check-app',
+        current: shellInfo.value.version,
+        shellHotVersion: shellInfo.value.hotVersion ?? '',
+      },
+      timeoutMs: 20000,
+    })) as { ok?: boolean; update?: AppUpdateItem | null }
+    appUpdate.value = result?.ok ? (result.update ?? null) : null
+  } catch {
+    // 壳信息拿不到（老壳 / 未连接）：这一块整体不显示，不影响插件与内核两条通道
+    shellInfo.value = null
+    appUpdate.value = null
+  }
+}
+
+/** 应用更新：下载在逻辑层 → 解压 → **本页发起** `applyShellUpdate`（壳校验候选包后整体重启） */
+async function updateApp(): Promise<void> {
+  const item = appUpdate.value
+  if (busy.value || !item || !item.hotOk || !shellInfo.value?.canSelfUpdate) return
+  busy.value = 'app'
+  error.value = ''
+  try {
+    notice.value = `正在下载应用 ${item.latest}…`
+    const downloaded = (await exec.run({
+      command: 'update',
+      args: {
+        mode: 'download-app',
+        current: item.current,
+        shellHotVersion: shellInfo.value.hotVersion ?? '',
+      },
+      timeoutMs: 180000,
+    })) as { ok?: boolean; error?: string; appPath?: string; version?: string }
+    if (!downloaded?.ok || !downloaded.appPath) {
+      error.value = downloaded?.error ?? '下载失败'
+      notice.value = ''
+      return
+    }
+    const version = downloaded.version ?? item.latest
+    notice.value = `正在应用 ${version}（应用会整体重启，稍等几秒）…`
+    await settings.pluginAction('applyShellUpdate', { appPath: downloaded.appPath, version })
+    notice.value = `应用已更新到 ${version}，正在重启…`
+  } catch (err) {
+    error.value = messageOf(err)
+    notice.value = ''
+  } finally {
+    busy.value = ''
   }
 }
 
@@ -238,8 +328,10 @@ onMounted(async () => {
           <h1 class="text-[13.5px] font-medium">更新</h1>
         </div>
         <div class="text-[11.5px] text-faint">
+          <span v-if="shellInfo">应用 v{{ shellInfo.version }}</span>
+          <span v-if="shellInfo && kernelVersion" class="mx-1">·</span>
           <span v-if="kernelVersion">内核 v{{ kernelVersion }}</span>
-          <span v-if="kernelVersion" class="mx-1">·</span>
+          <span v-if="shellInfo || kernelVersion" class="mx-1">·</span>
           {{ stage === 'checking' ? '检查中…' : checkedAt ? `检查于 ${formatTime(checkedAt)}` : '' }}
         </div>
       </header>
@@ -260,11 +352,49 @@ onMounted(async () => {
             </button>
           </div>
 
-          <p v-else-if="!updates.length && !overridden.length && !kernelUpdate" class="text-[12px] text-muted">
-            插件与内核都是最新版本。
+          <p v-else-if="!updates.length && !overridden.length && !kernelUpdate && !appUpdate" class="text-[12px] text-muted">
+            插件、内核与应用都是最新版本。
           </p>
 
           <template v-else>
+            <!-- 应用（壳）自身：第三块状态卡。更新会重启整个应用（含内核），所以按钮独立、不并进「全部更新」 -->
+            <section v-if="shellInfo" class="mb-3 rounded-lg border border-line bg-panel px-3 py-2.5">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <UiIcon name="refresh" :size="14" class="text-muted" />
+                    <span class="text-[13px]">应用</span>
+                  </div>
+                  <div class="mt-0.5 text-[11.5px] text-muted">
+                    <span>v{{ shellInfo.version }}</span>
+                    <template v-if="appUpdate">
+                      <span class="mx-1">→</span>
+                      <span class="text-fg">{{ appUpdate.latest }}</span>
+                    </template>
+                  </div>
+                  <p v-if="appUpdate?.notes" class="mt-1 text-[11.5px] text-faint">{{ appUpdate.notes }}</p>
+                  <p v-if="!shellInfo.canSelfUpdate" class="mt-1 text-[11px] text-faint">
+                    开发态或安装位置不可写：自更新只在打包安装的应用里生效
+                  </p>
+                  <p v-else-if="appUpdate && !appUpdate.hotOk" class="mt-1 text-[11.5px] text-danger">
+                    当前壳的自更新机制版本过低（需要 {{ appUpdate.minShellHotVersion ?? '—' }}），请手动换包
+                  </p>
+                  <p v-else-if="appUpdate" class="mt-1 text-[11px] text-faint">
+                    更新会重启整个应用（含内核）；发现新版本会自动下载并在空闲时自动换上，也可以现在更新。
+                  </p>
+                  <p v-else class="mt-1 text-[11px] text-faint">已是最新（发现新版本会自动下载并在空闲时换上）。</p>
+                </div>
+                <button
+                  v-if="appUpdate"
+                  class="shrink-0 rounded-md border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
+                  :disabled="!appUpdate.hotOk || !shellInfo.canSelfUpdate || !!busy"
+                  @click="updateApp"
+                >
+                  {{ busy === 'app' ? '更新中…' : '更新应用' }}
+                </button>
+              </div>
+            </section>
+
             <section v-if="kernelUpdate" class="mb-3 rounded-lg border border-line bg-panel px-3 py-2.5">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">

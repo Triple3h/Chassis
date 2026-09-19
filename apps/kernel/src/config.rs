@@ -61,6 +61,9 @@ pub struct Config {
     pub hide_on_blur: bool,
     /// 唤出时保留上次输入
     pub keep_query: bool,
+    /// 应用（壳）自更新：后台发现新版本就下载、空闲时自动重启换上（默认开）。
+    /// 只有 macOS 打包态会真的动作 —— 开发态与只读安装位置由壳侧的 `canSelfUpdate` 挡掉。
+    pub auto_update_app: bool,
     pub language: String,
     /// `system` | `light` | `dark`
     pub theme: String,
@@ -88,6 +91,7 @@ impl Default for Config {
             autostart: false,
             hide_on_blur: true,
             keep_query: false,
+            auto_update_app: true,
             language: "zh-CN".to_string(),
             theme: "system".to_string(),
             accent: "#4f8cff".to_string(),
@@ -117,6 +121,9 @@ pub fn migrate_config(raw: &Value) -> Config {
     }
     if let Some(value) = raw.get("hideOnBlur").and_then(Value::as_bool) {
         config.hide_on_blur = value;
+    }
+    if let Some(value) = raw.get("autoUpdateApp").and_then(Value::as_bool) {
+        config.auto_update_app = value;
     }
     if let Some(value) = raw.get("keepQuery").and_then(Value::as_bool) {
         config.keep_query = value;
