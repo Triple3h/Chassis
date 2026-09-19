@@ -10,7 +10,10 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use crate::{home_dir, map_limit, runtime, AppEntry, ScanResult};
+use crate::{home_dir, map_limit, AppEntry, ScanResult};
+// 只有下面的测试用到 runtime（非测试目标下未使用 ⇒ 单独门一下，消掉 workspace 测试里的 warning）
+#[cfg(test)]
+use crate::runtime;
 
 // ── 扫描面 ──────────────────────────────────────────────────────
 
