@@ -71,7 +71,12 @@ fs.writeFileSync(shardPath, `${JSON.stringify(shard, null, 2)}\n`)
 
 console.log(`✓ ${path.relative(repoRoot, zipPath)}（${(bytes.length / 1024 / 1024).toFixed(1)} MB）`)
 console.log(`✓ ${path.relative(repoRoot, shardPath)}（app ${version}，shellHotVersion ${hotVersion}）`)
-console.log(`  签名身份：${signingIdentity()}`)
+const identity = signingIdentity()
+console.log(`  签名身份：${identity}`)
+if (identity.startsWith('ad-hoc')) {
+  // 这是自更新用户 TCC 全部重弹的前兆：channels / secrets / 证书信任三处任一出问题都会落到这里
+  console.warn('  ⚠️ ad-hoc 签名：客户端每次自更新后都要重新授权（辅助功能 / 屏幕录制）——查 MACOS_SIGN_P12 secrets 与证书信任')
+}
 
 /** 壳版本（唯一源：tauri.conf.json） */
 function shellVersion() {
