@@ -12,6 +12,7 @@
     "test": "node scripts/run-tests.mjs",
     "test:unit": "node scripts/run-tests.mjs unit",
     "test:contract": "node scripts/run-tests.mjs contract",
+    "create:plugin": "node packages/plugin-cli/create.mjs",
     "build": "node scripts/build-all.mjs",
     "build:kernel": "node scripts/build-all.mjs kernel",
     "build:ui": "node scripts/build-all.mjs ui",

@@ -1,0 +1,13 @@
+{
+  "name": "@launcher/plugin-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chassis 插件脚手架：一条命令生成 view / script / full 插件工程骨架（pnpm create:plugin）",
+  "bin": {
+    "create-launcher-plugin": "./create.mjs"
+  },
+  "scripts": {
+    "test": "node ../../scripts/run-ts.mjs test/scaffold.test.ts"
+  }
+}
