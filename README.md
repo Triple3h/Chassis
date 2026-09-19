@@ -165,6 +165,7 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run）
 - **回滚**：新版本加载不起来会自动回到上一版；也可以手动「恢复出厂版本」，回到 App 自带的那份。
 - **数据不受影响**：只替换安装目录，插件设置 / 别名 / 历史 / 固定项都按插件 id 寻址。
 - **发版**：`plugins-release.yml`（手动触发或 tag `plugins/*`）在 macOS 与 Windows 上各自原生构建插件 → 打 `<id>-<版本>-<平台>-<架构>.zip` → 汇总 `registry.json` → 发到固定 tag。
+- **单独发某个插件**：`gh workflow run plugins-release.yml --ref main -f plugins="<id>"`（先 bump 该插件 `package.json` 的版本并合并 main）。发布时会自动取回上一版 `registry.json` 合并 —— 少了这步，索引里只剩本次打包的插件，其余插件会静默停止更新。
 
 ### 内核更新
 
@@ -177,6 +178,7 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链；cargo run）
   不触碰 App 的代码签名与系统授权。
 - **回滚**：替换前备份旧内核与旧 UI；新版本连续两次启动未就绪，下一次启动自动恢复备份。
 - **发版**：`kernel-release.yml`（手动触发或 tag `kernel/*`）双平台构建 → 打 `launcher-kernel-<版本>-<平台>-<架构>.zip` → 汇总 `kernel-registry.json` → 发到固定 tag。
+- **单独发内核**：`gh workflow run kernel-release.yml --ref main`（先 bump `apps/kernel/Cargo.toml` 的版本并合并 main）；内核包一发布就对所有装机客户端可见（无灰度），门闩是索引里的 `minHotVersion`。
 
 ## 示例
 

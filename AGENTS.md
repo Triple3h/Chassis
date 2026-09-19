@@ -28,6 +28,21 @@ Chassis is a plugin-based macOS launcher: Tauri 2 Rust shell (system primitives 
 - Windows cross-check from macOS: `cargo check --workspace --exclude launcher-plugin-translate --exclude launcher-plugin-internal-store --target x86_64-pc-windows-msvc`（被排除的两个依赖 `ring`，其 C 代码在 macOS 主机上交叉不到 msvc；真 Windows 上无此问题）。
   The shell (`apps/shell`) additionally needs a resource compiler for `tauri-build` — point `RC` at a stub script (its probe output must start with `OVERVIEW: LLVM Resource Converter`, then exit 0). Real Windows builds run in `.github/workflows/build-windows.yml`.
 
+## Release Channels & Independent Updates
+
+Three channels, each pinned to its own fixed tag; clients read plain `releases/download/<tag>/...` URLs (no GitHub API, no token). **CI never runs on `main` pushes** — `verify.yml` ignores `main`, and every publisher workflow is `workflow_dispatch` + its own tag prefix, so merging to `main` builds nothing. Releases are always explicit actions:
+
+| Channel | Trigger | Artifacts (fixed tag) | How clients get it |
+|---|---|---|---|
+| App (shell) | tag `v*` → `release.yml` | whole package (`.app` / portable zip) | user installs it manually (the shell can't replace itself) |
+| Kernel | `gh workflow run kernel-release.yml --ref main` (or tag `kernel/*`) | `kernel-registry.json` + `launcher-kernel-<ver>-<platform>-<arch>.zip` (kernel + `ui/`) → `kernel-latest` | 更新页 →「内核」→ 更新内核 (hot swap + graceful kernel restart) |
+| Plugins | `gh workflow run plugins-release.yml --ref main [-f plugins="<id>"]` (or tag `plugins/*`) | `<id>-<ver>-<platform>-<arch>.zip` + `registry.json` → `plugins-latest` | 更新页 → per-plugin update (hot reload) |
+
+- Kernel/plugin releases **never restart the App**: bump the version (`apps/kernel/Cargo.toml`, or the plugin's `package.json`), merge to `main`, then run the workflow — it builds the default branch, so code must land on `main` first.
+- **Publishing is instantly visible to every installed client** (source is a compile-time constant; no staged rollout). The only gates are `minHotVersion` (kernel package vs. client hot-update mechanism) and `minKernel` (plugin index vs. running kernel).
+- An App upgrade resets the baseline: the shell re-deploys the bundled kernel into `<dataRoot>/kernel/` (ledger `kernel.json` records `sourceAppVersion`), so kernel hot-updates lead only *between* App releases.
+- Partial plugin releases **must merge the previous `registry.json`** (`gen-plugin-registry.mjs --merge-registry`, done automatically by `plugins-release.yml`). Without it the index lists only the plugins packed in that run and every other plugin silently stops updating — guarded by `tests/unit/plugin-registry-merge.test.ts`.
+
 ## Coding Style & Naming Conventions
 
 TypeScript (view layer, UI, tooling): two-space indentation, single quotes, no semicolons, `strict` with `verbatimModuleSyntax` (type-only imports need `import type`). Rust (kernel + plugin logic): `rustfmt` defaults, 4-space indent. No linter/formatter is configured for TS — match existing style and rely on `pnpm typecheck`. Use kebab-case for plugin ids (`app-launcher`, `text-diff`), PascalCase for Vue components (`ResultGrid.vue`), camelCase for modules; no-view/script command names equal the artifact filename (`dist/<name>`). A kernel diff must never contain capability words (app/file/network) — those belong in plugins.

@@ -1,5 +1,5 @@
 ---
-description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、Rust 工程与协议（workspace 布局/camelCase 契约/读循环不许内联 await/日志只走 stderr）、窗口显隐/拖动/缩放与选区时机、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名/清单字段三处同步）、插件装载与平台过滤（platforms/arch，扫描期跳过、非法声明不静默吞）、数据迁移与样式同源
+description: 底座（apps/ 与 packages/）开发硬约束：三铁律职责边界、Rust 工程与协议（workspace 布局/camelCase 契约/读循环不许内联 await/日志只走 stderr）、窗口显隐/拖动/缩放与选区时机、配置写入收口、宿主↔插件边界（postMessage/主题/CSP/退出）、插件策略（essential/history/别名/清单字段三处同步）、插件装载与平台过滤（platforms/arch，扫描期跳过、非法声明不静默吞）、数据迁移、发布与更新通道（App v* / 内核 kernel-latest / 插件 plugins-latest 三条独立通道、单独发布必须合并索引、CI 不监控 main）与样式同源
 alwaysApply: true
 enabled: true
 provider:
@@ -91,6 +91,13 @@ provider:
 - 数据布局：`<dataRoot>/{config,history,pinned}.json`、`plugin-overrides.json`、`extensions/<id>/`、`plugins/<id>/`（插件唯一可写处）、`logs/audit-*.jsonl`（滚动 7 天）。
 - 插件 id 改名后老数据由内核接手：`PluginManager::adopt_legacy_data_dir()`（数据目录）+ `HistoryStore::migrate_plugin_ids()`（历史 / 固定项）。链在 `apps/kernel/src/legacy.rs`：`RENAME_CHAINS` = `[当前 id, ...历代旧 id]`；`legacy_data_dir_ids()` 给「新→旧」候选（逐个试），`legacy_id_to_current()` 是「旧→新」**单跳**查表（链断了会停在中间那一代）——**传错 = 把新条目改回旧 id**。
 - 壳启动 `adopt_legacy_data_dir()`（`apps/shell/src/sidecar.rs`）从 `Launcher/` 一次性复制接手（只复制不移动），必须排在 `logging::init()` 之前 —— 否则新目录已存在、迁移永不执行。
+
+## 发布与更新通道（App / 内核 / 插件）
+
+- **三条通道互不干扰**：App `v*`、内核 `kernel-latest`、插件 `plugins-latest`（各自 `releases/download/<tag>/…` 直链；客户端不调 GitHub API、无 token）。**CI 不监控 main**：`verify.yml` 的 push 忽略 main，发布工作流全是 `workflow_dispatch` + 自己的 tag 前缀 ⇒ 合并 main 不触发任何构建/部署，发版必须显式触发。
+- **单独发内核 / 插件不用动 App**：bump 版本（`apps/kernel/Cargo.toml` / 插件 `package.json`）→ 合并 main → `gh workflow run kernel-release.yml|plugins-release.yml --ref main`（workflow 取**默认分支**代码）。发布即对所有装机客户端可见（**无灰度**），门闩只有索引里的 `minHotVersion`（内核包 × 客户端机制版本）与 `minKernel`（插件 × 当前内核）。
+- **插件索引永远整份发布**：单独发某些插件时必须合并上一版 `registry.json`（`gen-plugin-registry.mjs --merge-registry`，`plugins-release.yml` 已自动做，取不到索引直接红）：没打包的插件整条沿用，打包的插件按平台替换资产，未重建平台的旧资产只在版本一致时保留。漏了这步 ⇒ 索引里只剩本次打包的插件，其余插件静默停止更新（守 `tests/unit/plugin-registry-merge.test.ts`）。
+- **App 升级 = 重置基准线**：壳把包内内核重投到 `<dataRoot>/kernel/`（台账 `kernel.json` 的 `sourceAppVersion`），内核热更新只是两次 App 发版之间的「领先」，不是替代。
 
 ## 样式
 

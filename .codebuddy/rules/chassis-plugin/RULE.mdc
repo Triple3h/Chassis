@@ -79,6 +79,7 @@ provider:
 
 ## 收尾
 
+- **发版（远程更新）**：改完要发更新就 bump `package.json` 的 `version`，合并 main 后 `gh workflow run plugins-release.yml --ref main -f plugins="<id>"`（通道细节见 skill `chassis-release`）。**essential 插件**（app-launcher / file-search / internal-settings）不参与远程更新，改它们只能随 App 发版；索引是整份发布的，单独发某个插件时工作流会自动合并上一版 `registry.json`（否则其余插件会从索引里消失）。
 - 改完**必须**跑：插件目录下 `npm run typecheck && npm run build && npm test`；有逻辑层的加 `npm run test:scripts`（或仓库根 `cargo test --workspace` 一把跑），再跑仓库根 `pnpm spec-check`。
 - 交付前**必须**用静态服务器打开 `dist/` 实机点一遍（生产构建的资源路径与 dev server 不同）。
 - 新增逻辑层命令时，同步更新 `package.json` 的 `commands`、Cargo 的 bin、根 `Cargo.toml` members 与 `build:scripts` / `test:scripts`，并跑 `pnpm spec-check`（产物必须是可执行文件）。

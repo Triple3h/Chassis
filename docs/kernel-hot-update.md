@@ -153,6 +153,20 @@ internal-store「内核更新」区
 **版本门槛**：索引里的 `minHotVersion` 与客户端 `host.info().hotVersion` 比对 —— 不满足时更新页提示但不给「更新」按钮
 （避免装上一个本客户端应用不了的内核）。
 
+**单独发内核（不动 App、不动插件）**：
+
+```bash
+# 版本号在 apps/kernel/Cargo.toml（只有机制变了才动 HOT_UPDATE_VERSION：spec 必须声明同值）
+gh workflow run kernel-release.yml --ref main -f notes="修复…" -f min_hot_version=0.1.0
+# 或推一次性 tag（名字必须新：同名 tag 不能重复推）
+git tag kernel/0.2.0 && git push origin kernel/0.2.0
+```
+
+- workflow 取的是**默认分支的代码**：先合并 main 再触发（main 推送不触发任何工作流，不存在「一合并就自动发版」）。
+- 内核通道只有一份产物 ⇒ 没有插件侧那个「索引要合并」的问题（插件侧的坑见 §7 之外的 `docs/plugin-spec.md` 附录 C）。
+- 更新源是编译期常量 ⇒ **发布即对所有装机客户端可见，没有灰度**：真要灰度得靠 `minHotVersion` 门槛或另开 tag 通道。
+- App 升级会把外置内核重投成包内版本（台账 `sourceAppVersion`）：内核热更新是「两次 App 发版之间的领先」，不是替代。
+
 ## 8. 壳侧配合（已实现）
 
 - `primitives::dispatch` 新增 `kernel/restarting`：记为**计划内重启**（`sidecar::note_hot_restart`），
