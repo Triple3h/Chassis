@@ -1,0 +1,95 @@
+{
+  "name": "process-manager",
+  "title": "进程与端口",
+  "author": "triple3h",
+  "description": "查端口被谁占用、看进程 CPU / 内存、安全终止进程；macOS 与 Windows 一致可用",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "apiVersion": "2",
+  "icon": "terminal",
+  "categories": [
+    "developer",
+    "tool"
+  ],
+  "platforms": [
+    "macos",
+    "windows"
+  ],
+  "capabilities": [
+    "hostUi",
+    "storage",
+    "exec.spawn",
+    "clipboard.write"
+  ],
+  "commands": [
+    {
+      "name": "panel",
+      "title": "进程与端口",
+      "subtitle": "端口被谁占用 / 进程 CPU 与内存 / 安全终止",
+      "mode": "view",
+      "searchable": true,
+      "placeholder": "输入端口号 / 进程名 / PID 过滤",
+      "keywords": [
+        "进程",
+        "端口",
+        "占用",
+        "port",
+        "process",
+        "kill",
+        "task",
+        "pid",
+        "谁在用"
+      ],
+      "icon": "terminal"
+    },
+    {
+      "name": "port-list",
+      "title": "端口占用列表（脚本）",
+      "mode": "script",
+      "icon": "server"
+    },
+    {
+      "name": "proc-list",
+      "title": "进程列表（脚本）",
+      "mode": "script",
+      "icon": "list-todo"
+    },
+    {
+      "name": "proc-detail",
+      "title": "进程详情（脚本）",
+      "mode": "script",
+      "icon": "info"
+    },
+    {
+      "name": "proc-kill",
+      "title": "终止进程（脚本）",
+      "mode": "script",
+      "icon": "x"
+    }
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run build:view && npm run build:scripts",
+    "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:scripts": "cargo build --release -p launcher-plugin-process-manager && node ../../scripts/build-plugin.mjs process-manager --copy-scripts --keep-dist",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-ts.mjs test/core.test.ts",
+    "test:scripts": "cargo test -p launcher-plugin-process-manager",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@launcher/api": "workspace:*",
+    "@launcher/ui": "workspace:*",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  }
+}

@@ -1,6 +1,6 @@
 # 出厂插件（plugins/）
 
-出厂**预装**的 14 个插件。内核一视同仁：同一份「出厂 bundle」、可禁用、可卸载
+出厂**预装**的 17 个插件。内核一视同仁：同一份「出厂 bundle」、可禁用、可卸载
 （只有 `internal-*` 属管理面不可卸载），产物形态与 `docs/plugin-spec.md` 完全一致。
 
 | 插件 | 命令 | 视图层 | 逻辑层 |
@@ -8,6 +8,8 @@
 | `app-launcher` | `search`（script，贡献型） + `refresh`（no-view） | esbuild | Rust |
 | `file-search` | `search`（script，贡献型） | esbuild | Rust |
 | `web-open` | `web`（script，贡献型） | esbuild | Rust |
+| `internal-store` | `updates`（view） + `update`（script） | Vite + Vue | Rust |
+| `clipboard-history`（Windows 专属） | `history`（view） + `search` / `record` / `clip-io`（script） | Vite + Vue | Rust |
 | `translate` | `panel`（view） + `translate`（script，贡献型） | Vite + Vue | Rust |
 | `internal-settings` | `settings` + `manage`（view） | esbuild | — |
 | `totp` | `totp`（view） + `read-image`（script） | Vite + Vue | Rust |
@@ -19,6 +21,7 @@
 | `markdown-notes` | `notes`（view） | Vite + Vue | — |
 | `todo` | `todo`（view） | Vite + Vue | — |
 | `screen-recorder`（macOS 专属） | `recorder`（view） + `rec-start` / `rec-stop` / `rec-status` / `rec-shot` / `rec-permission` / `rec-list`（script） | Vite + Vue | Rust |
+| `process-manager`（macOS / Windows） | `panel`（view） + `port-list` / `proc-list` / `proc-detail` / `proc-kill`（script） | Vite + Vue | Rust |
 
 ## 工程形态：视图层两套工具链，逻辑层统一 Rust
 

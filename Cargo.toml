@@ -17,6 +17,7 @@ members = [
     "plugins/file-search",
     "plugins/host-manager",
     "plugins/internal-store",
+    "plugins/process-manager",
     "plugins/screen-recorder",
     "plugins/totp",
     "plugins/translate",
