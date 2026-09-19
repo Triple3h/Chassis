@@ -355,6 +355,16 @@ fn main() {
 | `ctx.storage.*` | `storage.*` | 走 `rpc` 往返，语义不变 |
 | panic hook → `fail`（SDK 内建） | `onError()`（需显式调用） | |
 
+**网络与代理**
+
+逻辑层插件直接出网（子进程，无 CORS / CSP 限制，也不经过宿主），**代理要自己配** —— 系统代理与环境变量都不是 HTTP 客户端会自动读的。SDK 提供探测（`launcher_plugin_sdk::proxy::detect() -> Option<String>`，形如 `http://127.0.0.1:7897`）：
+
+- 推荐用法：**先直连、连接类失败再降级到代理**（HTTP 状态码说明直连已经通了，不算失败）—— 直连快时不惊动代理，被墙时又能自动救回来；直连阶段给较短的连接超时（如 5s；**有兜底才敢这么压**，没探测到代理时保持原样），同一次执行里直连一旦失败，后续请求直接走代理
+- 探测优先级：`HTTPS_PROXY` / `https_proxy` → `ALL_PROXY` / `all_proxy` → `HTTP_PROXY` / `http_proxy` → 系统设置（macOS `scutil --proxy`，HTTPS 代理优先、其次 HTTP；Windows 注册表 `Internet Settings`，`ProxyEnable` 为 1 时取 `ProxyServer`，支持 `http=…;https=…` 分列写法）
+- **只认 HTTP 代理**：SOCKS（需客户端专门支持）与 PAC（要执行脚本）视作「没探测到」⇒ 直连（与历史行为一致）
+- 平台限定逻辑（`scutil` / `reg query`）隔离在该模块内；其余平台只有环境变量一条路
+- 参考实现：`internal-store` 的 `update` 命令（GitHub 更新源被墙时靠它连上）
+
 **生命周期、超时与降级**
 
 | 场景 | 行为 |

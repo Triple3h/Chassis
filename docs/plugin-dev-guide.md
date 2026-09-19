@@ -568,6 +568,7 @@ fn main() {
 - `ctx.args::<T>()` 反序列化 `--launcher-context` 的 `args`；`ctx.settings_str("k")` 取生效设置。
 - 结束必须 `ctx.done(x)` / `ctx.fail(e)`；`run` 是唯一入口，闭包返回 `Result<(), E>`。
 - `ctx.storage.*` 走 RPC（`storage.get/set/remove/all/clear`）；`ctx.data_path()` 是唯一可写目录。
+- 要联网（访问 GitHub 这类被墙的源）：`launcher_plugin_sdk::proxy::detect()` 给出可用 HTTP 代理（环境变量 → 系统设置，探测不到 = 直连），**推荐「先直连、连不上再降级到代理」** —— 照抄 `internal-store` 的 `update`，细节见 plugin-spec §4.4「网络与代理」。
 - panic 由 SDK 转 `fail`；但**别依赖 panic**做业务错误，用 `ctx.fail(e)` 并写清日志。
 
 ### 7.3 构建与打包

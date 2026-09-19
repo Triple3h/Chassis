@@ -29,6 +29,8 @@ mod rpc;
 mod search;
 
 pub mod protocol;
+/// 出网代理探测（环境变量 → 系统设置）—— 联网插件用它给 HTTP 客户端配代理。
+pub mod proxy;
 
 pub use context::{Context, Mode, Storage};
 pub use protocol::Level;
