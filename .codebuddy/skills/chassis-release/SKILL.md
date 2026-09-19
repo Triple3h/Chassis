@@ -1,6 +1,6 @@
 ---
 name: chassis-release
-description: 打包自用版应用、发版（App / 内核 / 插件三条通道）、换图标、换包安装、应用改名时使用。触发场景：打包、出个新包、重新打包、发布、单独发内核、单独发插件、发个更新、app:local、换图标、图标不好看、更新 .app、安装新版本、Chassis.app 打不开、权限老是重弹。关键词：打包、发布、发版、kernel-latest、plugins-latest、plugins-release、kernel-release、gh workflow run、icon、icns、tray、代码签名、签名证书、ad-hoc 签名、TCC 授权、换包、dist-app。
+description: 打包自用版应用、发版（App / 应用自更新 / 内核 / 插件四条通道）、换图标、换包安装、应用改名时使用。触发场景：打包、出个新包、重新打包、发布、单独发内核、单独发插件、发个应用更新、自动更新、app:local、换图标、图标不好看、更新 .app、安装新版本、Chassis.app 打不开、权限老是重弹。关键词：打包、发布、发版、app-latest、app-release、kernel-latest、plugins-latest、plugins-release、kernel-release、gh workflow run、icon、icns、tray、代码签名、签名证书、MACOS_SIGN_P12、ad-hoc 签名、TCC 授权、换包、dist-app。
 allowed-tools:
 disable: false
 ---
@@ -78,19 +78,21 @@ pnpm app:local   # 2. 重新打包（tray.png 走 include_bytes! ⇒ 换图标�
 - `.app` **运行时零 Node**：内核与逻辑层插件都是随包内置的二进制（`Contents/Resources/kernel/launcher-kernel` + 各插件的 `dist/<命令名>`）；Node 只在**开发期**需要（pnpm / Vite 工具链）。未签名会被 macOS 杀掉 ⇒ 必须签名（固定证书优先，脚本已做）。
 - 缺 rsvg-convert 时 `pnpm icon` 会明确报错（`brew install librsvg`）。
 
-## 发布通道（App / 内核 / 插件，三条独立）
+## 发布通道（App / 应用自更新 / 内核 / 插件，四条独立）
 
-互不干扰：App `v*`、内核 `kernel-latest`、插件 `plugins-latest`（客户端走 `releases/download/<tag>/…` 直链，不调 GitHub API）。**CI 不监控 main**（`verify.yml` 的 push 忽略 main），发版一律显式触发；`workflow_dispatch` 取**默认分支代码** ⇒ 先合并 main 再触发。
+互不干扰：App `v*`、应用自更新 `app-latest`、内核 `kernel-latest`、插件 `plugins-latest`（客户端走 `releases/download/<tag>/…` 直链，不调 GitHub API）。**CI 不监控 main**（`verify.yml` 的 push 忽略 main），发版一律显式触发；`workflow_dispatch` 取**默认分支代码** ⇒ 先合并 main 再触发。
 
 | 只发什么 | 怎么做 | 客户端怎么拿到 |
 |---|---|---|
-| App（壳） | `git tag v0.2.0 && git push origin v0.2.0` → `release.yml` | 用户手动换包（壳不能自我替换） |
+| App（壳）手动换包 | `git tag v0.2.0 && git push origin v0.2.0` → `release.yml` | 用户手动换包（新机器 / 关掉自动更新时用） |
+| App（壳）自更新 | bump `apps/shell/tauri.conf.json` 的 version → `gh workflow run app-release.yml --ref main -f notes="…"`（或推 tag `app/*`） | **自动**：内核守护（启动 90s 后 / 每 6h）发现新版 → 下载 → 空闲时壳换掉 `.app` 并整体重启；也可在更新页「应用」区手动点。仅 macOS |
 | 内核 | bump `apps/kernel/Cargo.toml` 版本 → `gh workflow run kernel-release.yml --ref main -f notes="…" [-f min_hot_version=…]`（或推 tag `kernel/*`） | 更新页「内核」区 → 更新内核（热替换 + 优雅重启内核，不动 App） |
 | 插件 | bump 插件 `package.json` 版本 → `gh workflow run plugins-release.yml --ref main [-f plugins="<id>"]`（或推 tag `plugins/*`） | 更新页插件列表 → 更新（热重载，不动 App） |
 
-三条硬规矩：
+四条硬规矩：
 
-- **发布即对所有装机客户端可见**（更新源是编译期常量，无灰度通道）；门闩只有 `minHotVersion`（内核包 × 客户端机制版本）与 `minKernel`（插件 × 当前内核）。
+- **发布即对所有装机客户端可见**（更新源是编译期常量，无灰度通道）；门闩只有 `minHotVersion`（内核包 × 客户端机制版本）、`minShellHotVersion`（应用包 × 壳自更新机制）与 `minKernel`（插件 × 当前内核）。
+- **应用自更新必须同一签名身份**：`app-release.yml` 从 secrets `MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD` 导入本机固定证书（`node scripts/export-signing-cert.mjs` 一次性导出）；没配就回落 ad-hoc —— 包照发，但**每次更新后用户都要重新授权 TCC**（辅助功能 / 屏幕录制），日志里有 warning。
 - **插件索引必须整份**：单独发某些插件时工作流先取回上一版 `registry.json` 再合并（`--merge-registry`），取不到索引直接红 —— 不发残缺索引。本地手工重放同理，否则其余插件会从索引里消失、客户端静默不再提示更新（守 `tests/unit/plugin-registry-merge.test.ts`）。
 - **App 升级重置内核**：包内内核会被重投到 `<dataRoot>/kernel/`（台账 `sourceAppVersion`），内核热更新只是两次 App 发版之间的「领先」；同版本号重打包不会重投，本地想立刻生效要删 `<dataRoot>/kernel/`。
 

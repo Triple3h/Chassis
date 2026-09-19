@@ -474,6 +474,18 @@ active → crashed（页面崩溃 / 脚本连续失败）→ 可重试
 | 版本门槛 | 索引带 `minHotVersion`：客户端热更新机制低于它 ⇒ 界面提示但不给「更新」按钮 |
 | 打包版 | 内核从 `.app` 复制成**数据目录里的外置副本**后启动（壳负责，App 版本变化时重投），替换不触碰代码签名 |
 
+**应用（壳）自更新（`applyShellUpdate`，2026-09-19 起）**：壳（应用本体）的更新与内核同构，但替换对象是整个 `.app`：
+
+| 环节 | 规格 |
+|---|---|
+| 来源 | 固定 tag **`app-latest`** 的 Release：`app-registry.json` + `Chassis-<版本>-macos-<架构>.zip`（与 App 的 `v*` / `plugins-latest` / `kernel-latest` 四方独立） |
+| 包结构 | zip 根 = `Chassis.app/Contents/…`（整包；解压侧校验壳二进制与 `Info.plist`） |
+| 下载/校验/解压 | `internal-store` 的逻辑层命令（`check-app` / `download-app`）：sha256 + 防路径穿越 + 恢复可执行位 |
+| 应用 | view 调 `ctx.settings.pluginAction('applyShellUpdate', { appPath })`（仅 `internal-` 前缀可用）：壳跑 `--hot-probe` 自检 → 写台账 → 交独立 helper 替换 `.app` → **整个应用重启**（内核随之重启；连续两次启动未就绪自动回滚） |
+| 自动 | 内核守护在后台跑同一条链路（启动 90s 后 / 每 6h，`config.autoUpdateApp` 控制）；界面用 `pluginAction('shellInfo')` 拿壳版本与 `canSelfUpdate` |
+| 平台 | **仅 macOS**（Windows 的运行中 exe 无法替换 ⇒ 索引里没有 windows 资产，客户端不提示） |
+| 版本门槛 | 索引带 `minShellHotVersion`：壳自更新机制低于它 ⇒ 界面提示但不给「更新」按钮 |
+
 ---
 
 ## 7. 宿主 API（UI 侧）

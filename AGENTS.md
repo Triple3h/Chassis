@@ -34,13 +34,15 @@ Three channels, each pinned to its own fixed tag; clients read plain `releases/d
 
 | Channel | Trigger | Artifacts (fixed tag) | How clients get it |
 |---|---|---|---|
-| App (shell) | tag `v*` → `release.yml` | whole package (`.app` / portable zip) | user installs it manually (the shell can't replace itself) |
+| App (shell), manual | tag `v*` → `release.yml` | whole package (`.app` / portable zip) | user installs it manually (new machines / auto-update off) |
+| **App (shell), auto-update** | `gh workflow run app-release.yml --ref main` (or tag `app/*`) | `app-registry.json` + `Chassis-<ver>-macos-<arch>.zip` → `app-latest` | 更新页 →「应用」, or **automatically** — kernel watch checks 90s after boot and every 6h; shell swaps the `.app` via an out-of-process helper and relaunches (macOS only; `config.autoUpdateApp`) |
 | Kernel | `gh workflow run kernel-release.yml --ref main` (or tag `kernel/*`) | `kernel-registry.json` + `launcher-kernel-<ver>-<platform>-<arch>.zip` (kernel + `ui/`) → `kernel-latest` | 更新页 →「内核」→ 更新内核 (hot swap + graceful kernel restart) |
 | Plugins | `gh workflow run plugins-release.yml --ref main [-f plugins="<id>"]` (or tag `plugins/*`) | `<id>-<ver>-<platform>-<arch>.zip` + `registry.json` → `plugins-latest` | 更新页 → per-plugin update (hot reload) |
 
-- Kernel/plugin releases **never restart the App**: bump the version (`apps/kernel/Cargo.toml`, or the plugin's `package.json`), merge to `main`, then run the workflow — it builds the default branch, so code must land on `main` first.
-- **Publishing is instantly visible to every installed client** (source is a compile-time constant; no staged rollout). The only gates are `minHotVersion` (kernel package vs. client hot-update mechanism) and `minKernel` (plugin index vs. running kernel).
-- An App upgrade resets the baseline: the shell re-deploys the bundled kernel into `<dataRoot>/kernel/` (ledger `kernel.json` records `sourceAppVersion`), so kernel hot-updates lead only *between* App releases.
+- Kernel/plugin releases **never restart the App**: bump the version (`apps/kernel/Cargo.toml`, or the plugin's `package.json`), merge to `main`, then run the workflow — it builds the default branch, so code must land on `main` first. An **App (shell) release restarts the whole app** (kernel included) — that is the point of the auto-update channel; the shell version is the single source in `apps/shell/tauri.conf.json`.
+- **Publishing is instantly visible to every installed client** (source is a compile-time constant; no staged rollout). The only gates are `minHotVersion` (kernel package vs. client hot-update mechanism), `minShellHotVersion` (app package vs. client shell-update mechanism) and `minKernel` (plugin index vs. running kernel).
+- An App upgrade resets the baseline: the shell re-deploys the bundled kernel into `<dataRoot>/kernel/` (ledger `kernel.json` records `sourceAppVersion`), so kernel hot-updates lead only *between* App releases. The same applies to a **shell auto-update** (its version always changes) — expect the bundled kernel to be re-deployed right after.
+- App auto-update packages are signed in CI with the **same fixed certificate as local builds** (`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD` secrets; export via `node scripts/export-signing-cert.mjs`). Without those secrets the workflow falls back to ad-hoc and every update forces the user to re-grant TCC permissions (Accessibility / Screen Recording).
 - Partial plugin releases **must merge the previous `registry.json`** (`gen-plugin-registry.mjs --merge-registry`, done automatically by `plugins-release.yml`). Without it the index lists only the plugins packed in that run and every other plugin silently stops updating — guarded by `tests/unit/plugin-registry-merge.test.ts`.
 
 ## Coding Style & Naming Conventions

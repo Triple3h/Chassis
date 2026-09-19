@@ -330,7 +330,8 @@ launcher/
 | `open.reveal` | `{ path: string }` | `void` | 文件管理器中显示（macOS Finder / Windows 资源管理器） |
 | `app.quit` | — | `void` | |
 | `app.setAutostart` | `{ enabled: boolean }` | `void` | |
-| `app.info` | — | `{ version, platform, arch, dataRoot }` | |
+| `app.info` | — | `{ version, shellVersion, shellHotVersion, platform, arch, dataRoot, bundlePath?, canSelfUpdate }` | 壳自身信息。`version` / `shellVersion` 同源（`tauri.conf.json`，外置内核台账用的就是它）；`canSelfUpdate` = 打包态 + 安装位置可写（应用自更新的前置判断，开发态为 false） |
+| `shell.applyUpdate` | `{ appPath: string }` | `{ ok, restarting: true, from, to, target }` | 应用（壳）自更新：候选 `.app` 先跑 `--hot-probe` 自检（结构 / 版本自洽 / 能跑）→ 写 `hot/shell/pending.json` → 交独立 helper → **壳在回执后 400ms 退出重启**（内核随之停掉）。仅 macOS；开发态 / 不可写位置拒绝 |
 | `app.usage` | — | `{ ok: boolean; rss: number; cpuMs: number }` | 壳进程**自身**的常驻内存（bytes）与累计 CPU 时间（ms）—— 状态条要"启动台一共占多少"，内核算另一半（Windows 上含挂在壳下的 WebView2 进程组：它是系统托管的独立进程，不加会严重低估） |
 
 **壳主动通知内核**（无 `id`、不等应答，与请求同走 stdio JSON-RPC）：
@@ -557,6 +558,23 @@ interface AuditRecord {
 | 零能力 | 内核不联网：spec / 二进制由外部投递到本地路径（或请求体内联），内核只做校验与应用 |
 | 外置内核（打包版） | 壳把包内内核复制到数据目录（`<dataRoot>/kernel/launcher-kernel`）后启动；热更新只动数据目录，**不触碰 `.app` 签名与系统授权**。台账记「投放时的 App 版本」：版本变化（App 升级）⇒ 重投包内版本（热更新成果作废）。UI 同源外置（`<dataRoot>/kernel/ui/`），与内核一起投放 |
 | 分发与更新 | 内核与插件**各自独立**的 Release 通道：插件 `plugins-latest`、内核 **`kernel-latest`**（`kernel-registry.json` + `launcher-kernel-<版本>-<平台>-<架构>.zip`，**UI 与内核同包**）。检查 / 下载 / 解压由 `internal-store` 逻辑层命令做（`check-kernel` / `download-kernel`）；应用由 view 调 `pluginAction('applyKernelUpdate')` 发起（安装重启内核，命令进程会被收掉） |
+
+### 7.9 应用（壳）自更新（2026-09-19 立项，机制版本 0.1.0）
+
+目标：GitHub Action 发版后，**壳自动识别并更新自己**（人不需要手动换包）；替换失败自动回滚；全程留痕。
+机制与签名前提见 [`docs/shell-hot-update.md`](shell-hot-update.md)。
+
+| 面 | 规格 |
+|---|---|
+| 通道 | 固定 tag **`app-latest`**：`app-registry.json`（schema 1，含 sha256 与 `minShellHotVersion`）+ `Chassis-<版本>-macos-<架构>.zip`（整包 `.app`）。与 `v*`（给人下载的换包通道）/ `plugins-latest` / `kernel-latest` 三方独立 |
+| 角色分工 | 检查 / 下载 / 解压 = 内核侧编排 `internal-store` 命令（`check-app` / `download-app`，复用代理降级 + 域名白名单 + sha256）；**候选包自检 / 台账 / 替换 / 重启 = 壳**（`shell.applyUpdate` 原语 + 脱离壳进程树的 helper） |
+| 自动 | 内核守护：启动 90s 后检查一次，之后每 6h；发现新版 → 下载 → 等窗口收起（≤120s，给「正在输入」让路）→ 交壳替换重启。`config.autoUpdateApp`（默认 true）可关；关掉后仍可在更新页手动更新 |
+| 候选包自检 | 壳跑 `--hot-probe`：结构（`Contents/MacOS/launcher-shell` + `Info.plist`）→ **版本自洽**（plist 的 `CFBundleShortVersionString` 与二进制自报一致，不一致即拒 —— 抓包拼装事故）→ 自检能跑通。三道全过才写台账 |
+| 替换 | 写 `<dataRoot>/hot/shell/pending.json` → 生成 helper（`swap.sh`）→ 壳退出 → helper 等壳完全退出 → 备份旧 `.app`（同卷 rename）→ 落新包 → `xattr -dr` → `lsregister -f` → `open`。任一步失败都回到「原包在原位」 |
+| 回滚（三重） | ① helper 的 8 秒窗口：新实例没起来 ⇒ 自动换回备份再 open；② 启动守卫：台账 `attempts ≥2` ⇒ 交 helper `restore`；③ 台账版本校验：候选版本 ≠ 当前版本 ⇒ 视为过期台账丢弃；开发态（非 `.app`）完全不参与记账 |
+| 平台 | **仅 macOS**：运行中的 `.app` 可替换。Windows 的运行中 exe 被锁，只能走安装器 —— 索引里没有 windows 资产，客户端自然不提示「更新应用」 |
+| 签名 | 硬前提：新包须与当前包**同一签名身份**，否则每次自更新后 TCC 授权（辅助功能 / 屏幕录制 / 自动化 / 通知）失配重弹。CI 从 secrets（`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD`）导入本机固定证书；未配置时回落 ad-hoc 并在工作流日志打 warning |
+| 日志 | `<dataRoot>/hot/shell/swap.log`（每次替换 / 回滚一行）；内核日志记检查 / 下载 / 应用三个阶段各一行 |
 
 ---
 
@@ -879,6 +897,19 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 - 打包版 `.app` 内核默认拒绝替换（签名保护），`hot/status` 给出说明与强制开关
 - 更新页里**内核与插件各自独立**检查 / 更新（内核通道 = 固定 tag `kernel-latest`）：内核包（内核 + UI）下载后 sha256 校验、解压（恢复可执行位 / 防路径穿越 / 结构校验），再交内核原子替换
 - 打包版内核以**数据目录外置副本**运行：更新不触碰 `.app` 签名；App 升级后外置副本被包内版本重投（热更新成果作废）
+
+### M9 — 应用（壳）自更新（2026-09-19 立项，机制版本 0.1.0）
+**交付**：`app-latest` 通道（`app-release.yml` + `gen-app-registry.mjs` + `pack-app.mjs`，CI 用 secrets 里的固定证书签名）、
+`internal-store` 的 `check-app` / `download-app`、内核自动更新守护（`spawn_app_update_watch` + `config.autoUpdateApp`）、
+壳侧自更新（`--hot-probe` 自检 / `pending.json` / 启动守卫 / 独立 helper 替换与回滚 / `shell.applyUpdate` 原语）、
+更新页「应用」区块。
+**验收**：
+- CI 发 `app-latest` 后，客户端在守护轮次内**自动**发现新版本、下载、校验、空闲时自动重启换上（无人工介入）
+- 候选包不完整 / 版本自洽性不过 / 自检跑不起来 ⇒ 拒绝安装，当前版本一动不动
+- 新包启动失败：helper 8 秒内没看到实例 ⇒ 自动换回备份；连续两次未就绪 ⇒ 启动守卫回滚（台账清理，无需人工修）
+- 开发态（非 `.app`）与只读安装位置：不检查、不提示、不记账（`canSelfUpdate=false`）
+- Windows 版不出现「更新应用」（索引无 windows 资产），仍走安装包
+- CI 未配签名 secrets 时工作流打 warning 并回落 ad-hoc（包可用但 TCC 授权会重弹）
 
 ---
 
