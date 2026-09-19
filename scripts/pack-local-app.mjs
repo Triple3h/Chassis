@@ -32,6 +32,13 @@ const shellDir = path.join(repoRoot, 'apps', 'shell')
 const APP_NAME = 'Chassis'
 const outApp = path.join(repoRoot, 'dist-app', `${APP_NAME}.app`)
 
+/**
+ * 壳版本只有一个源：`apps/shell/tauri.conf.json` 的 `version`。
+ * 它同时是 `build.rs` 注入 `SHELL_VERSION`（`--hot-probe` 自报）与 `pack-app.mjs` 校验的来源 ——
+ * 分叉的后果是「客户端永远判不出新版本」或「更新到一个版本号对不上的包」。
+ */
+const shellVersion = readShellVersion()
+
 const skipBuild = process.argv.includes('--skip-build')
 
 function run(cmd, args, cwd) {
@@ -124,10 +131,23 @@ try {
 }
 
 line('')
-line(`✓ 打包完成：${path.relative(repoRoot, outApp)}`)
+line(`✓ 打包完成：${path.relative(repoRoot, outApp)}（v${shellVersion}）`)
 line(`  安装：把 ${APP_NAME}.app 拖进 /Applications，双击运行`)
 line('  权限（都按需弹，不用到就不会问）：辅助功能=读选中文本；屏幕录制=截图；')
 line('  自动化（"想控制此 Mac"）=只在 host-manager 写 hosts 时提权；通知=操作提示')
+line('  出可自更新的通道包：node scripts/pack-app.mjs（压 zip + 写分片，CI 汇总成 app-registry.json）')
+
+/** 壳版本（唯一源：tauri.conf.json） */
+function readShellVersion() {
+  try {
+    const conf = JSON.parse(fs.readFileSync(path.join(shellDir, 'tauri.conf.json'), 'utf8'))
+    if (!conf.version) throw new Error('缺少 version 字段')
+    return conf.version
+  } catch (err) {
+    line(`✗ 读不到壳版本（apps/shell/tauri.conf.json）：${err.message}`)
+    process.exit(1)
+  }
+}
 
 function infoPlist() {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -139,8 +159,8 @@ function infoPlist() {
   <key>CFBundleName</key><string>${APP_NAME}</string>
   <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>${shellVersion}</string>
+  <key>CFBundleVersion</key><string>${shellVersion}</string>
   <key>CFBundleIconFile</key><string>icon</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSUIElement</key><true/>

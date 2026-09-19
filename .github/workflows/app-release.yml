@@ -1,0 +1,119 @@
+# 应用（壳）自更新：把 `.app` 与 app-registry.json 发到固定 tag 的 Release。
+#
+# 与另外三条通道完全独立（四个 tag 各自 releases/download/<tag>/... 直链，互不顶替）：
+#   - App 换包（给人下载）：release.yml（tag v*）
+#   - 插件：plugins-release.yml（tag plugins-latest）
+#   - 内核：kernel-release.yml（tag kernel-latest）
+#   - 应用自更新（客户端内置源）：本工作流（tag app-latest）
+#
+# 签名：CI 从 secrets 导入**本机同一张固定证书**（MACOS_SIGN_P12 / MACOS_SIGN_P12_PASSWORD，
+# 由 `node scripts/export-signing-cert.mjs` 一次性导出）—— macOS 的 TCC 授权按签名身份记账，
+# 身份跨版本稳定，客户端自更新才不会每次重弹授权。没配 secrets 时回落 ad-hoc：
+# 包照样发得出去，但每次自更新后用户都要重新授权（日志里有 warning，别忽视）。
+name: app-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 更新说明（展示在更新页）
+        required: false
+        default: ''
+      min_shell_hot_version:
+        description: 要求的最低壳自更新机制版本（低于它的客户端不提示更新；留空 = 用产物自报）
+        required: false
+        default: ''
+  push:
+    tags: ['app/*']
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 导入固定签名证书（未配置 secrets 则回落 ad-hoc）
+        env:
+          P12_BASE64: ${{ secrets.MACOS_SIGN_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
+        run: |
+          if [ -z "$P12_BASE64" ]; then
+            echo "::warning::未配置 MACOS_SIGN_P12 —— 产物将是 ad-hoc 签名，客户端每次自更新后都要重新授权（辅助功能 / 屏幕录制）。导出方式见 scripts/export-signing-cert.mjs"
+            exit 0
+          fi
+          printf '%s' "$P12_BASE64" | openssl base64 -d -A -out /tmp/chassis-signing.p12
+          KEYCHAIN=/tmp/chassis-signing.keychain-db
+          security create-keychain -p actions "$KEYCHAIN"
+          security set-keychain-settings -lut 900 "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          security import /tmp/chassis-signing.p12 -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f /tmp/chassis-signing.p12
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - run: pnpm install --frozen-lockfile
+      # 与 release.yml 同一条组装路径（build-all → 资源就位 → cargo build 壳 → 组装 + 签名）；
+      # 差别只在：这里还会走 pack-app（压 zip + 写分片）并把产物发到 app-latest。
+      - run: node scripts/build-all.mjs
+      - run: node scripts/pack-local-app.mjs --skip-build
+      - run: node scripts/pack-app.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-macos
+          path: app/release/*
+          if-no-files-found: error
+
+  publish:
+    needs: [macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: app/release
+          merge-multiple: true
+
+      - name: 汇总生成 app-registry.json
+        env:
+          NOTES: ${{ inputs.notes }}
+          MIN_HOT: ${{ inputs.min_shell_hot_version }}
+        run: |
+          args=()
+          [ -n "$NOTES" ] && args+=(--notes "$NOTES")
+          [ -n "$MIN_HOT" ] && args+=(--min-shell-hot-version "$MIN_HOT")
+          node scripts/gen-app-registry.mjs "${args[@]}"
+          rm -f app/release/app-shard-*.json
+          ls -la app/release
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: app-latest
+          name: 应用更新源
+          files: app/release/*
+          allowUpdates: true
+          overwrite_files: true
+          # 不抢仓库的 Latest 徽标（保持 App 的 v* Release）
+          make_latest: false
+          body: |
+            应用（壳）自更新通道（客户端内置的固定源，一般不需要手动下载）。
+
+            - `app-registry.json`：索引（schema 1，含各平台产物的 sha256 与最低壳自更新机制版本）
+            - `Chassis-<版本>-macos-<架构>.zip`：完整 `.app`（解压结构 = `Chassis.app/Contents/…`）
+
+            安装由 `internal-store` 的「更新应用」发起：下载 → sha256 校验 → 解压 →
+            `pluginAction('applyShellUpdate')` → 壳校验候选包（`--hot-probe`）→ 备份 → 独立 helper 替换 →
+            重新打开；新版本连续两次启动未就绪会自动回滚。
