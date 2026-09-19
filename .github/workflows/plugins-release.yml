@@ -4,6 +4,10 @@
 # 为什么走固定 tag `plugins-latest`：`releases/latest` 会被 App 的 v* Release 抢走（插件索引 404），
 # 固定 tag 的直链 `releases/download/<tag>/<asset>` 长期稳定，客户端不需要 GitHub API、不需要 token。
 #
+# 单独发某个插件（`plugins` 输入非空）：publish 阶段**必须**把上一版 registry.json 取回来合并 ——
+# 否则新索引里只剩本次打包的那几个插件，其余插件从索引里消失（客户端静默不再提示更新）。
+# 取不到索引就是红，不发布（宁可这次不发，也不发一份残缺索引）。
+#
 # 零 secrets：v1 不上签名（信任模型 = 固定仓库 + HTTPS + sha256）。
 name: plugins-release
 
@@ -84,6 +88,19 @@ jobs:
           path: plugins/release
           merge-multiple: true
 
+      - name: 取回上一版索引（单独发布部分插件时，索引不能塌陷）
+        id: prev
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view plugins-latest >/dev/null 2>&1; then
+            mkdir -p prev
+            gh release download plugins-latest --pattern registry.json --dir prev --clobber
+            echo "have=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "首次发布：plugins-latest 尚不存在，按全新索引发布"
+          fi
+
       - name: 汇总生成 registry.json
         env:
           PLUGIN_NOTES: ${{ inputs.notes }}
@@ -92,6 +109,7 @@ jobs:
           args=()
           [ -n "$MIN_KERNEL" ] && args+=(--min-kernel "$MIN_KERNEL")
           [ -n "$PLUGIN_NOTES" ] && args+=(--notes "$PLUGIN_NOTES")
+          [ "${{ steps.prev.outputs.have }}" = "1" ] && args+=(--merge-registry prev/registry.json)
           node scripts/gen-plugin-registry.mjs "${args[@]}"
           rm -f plugins/release/shard-*.json
           ls -la plugins/release
