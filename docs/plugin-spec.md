@@ -739,7 +739,7 @@ pnpm test                       # 全量测试（含各插件的 core·view 用�
 - **dev 注册**：`pnpm dev:kernel` 起内核（本机 control 端口 + 一次性 token），插件 dev server 把 `devUrl` 挂上去，插件页直接指向 vite ⇒ 免重启热更新
 - **DevTools**：设置 → 插件 → 打开 DevTools（开发构建可用）
 - **调试日志**：`host.log('info', '...')` 会进审计日志，设置页可实时查看
-- **新建插件**：暂无脚手架包（`packages/plugin-cli` 是待办）—— **照抄现有插件**最快：Vue 工程看 `plugins/totp`（view + script + 对话框）与 `plugins/host-manager`（提权写系统文件、只改自己的托管区），配置模板见 `docs/plugin-dev-guide.md` §4 与 `.codebuddy/skills/chassis-plugin-dev/references/scaffold-templates.md`
+- **新建插件**：`pnpm create:plugin <id> [--mode view|script|full]` 一条命令生成工程骨架（`packages/plugin-cli`）——清单经 `@launcher/plugin-manifest` 真校验器把关，含逻辑层时自动登记根 `Cargo.toml` members。想手改就照抄现有插件：Vue 工程看 `plugins/totp`（view + script + 对话框）与 `plugins/host-manager`（提权写系统文件、只改自己的托管区），配置模板见 `docs/plugin-dev-guide.md` §4 与 `.codebuddy/skills/chassis-plugin-dev/references/scaffold-templates.md`
 
 ---
 

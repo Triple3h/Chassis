@@ -278,7 +278,7 @@ launcher/
 │   ├── plugin-sdk-rs/                # Rust 插件 SDK（launcher-plugin-sdk；取代 v1 的 plugin-api-node）
 │   ├── plugin-manifest/              # 清单 TS 类型 + 校验（视图层 / 工具链 / 测试夹具；内核侧为 Rust 实现）
 │   ├── ui/                           # npm: @launcher/ui（设计令牌 + AppShell / UiIcon / UiDialog + 前端工具）
-│   └── plugin-cli/                   # 脚手架 + 打包（待办，尚未实现）
+│   └── plugin-cli/                   # 插件脚手架（pnpm create:plugin：清单 / Vite / Cargo / bin 一次生成）
 ├── plugins/                          # 出厂 bundle（机制与第三方完全相同）
 │   ├── app-launcher/                 # 应用扫描 + 启动（第一个做）
 │   ├── file-search/
@@ -324,6 +324,7 @@ launcher/
 | `clipboard.readText` | — | `string` | |
 | `clipboard.writeText` | `{ text: string }` | `void` | 优先 `arboard`；失败回落 |
 | `clipboard.watch` | `{ enabled: boolean }` | `{ ok: boolean; reason?: string }` | 订阅系统剪贴板**变化事件**（不带内容）。Windows：`AddClipboardFormatListener` → `WM_CLIPBOARDUPDATE`（零轮询）；其余平台 `{ ok:false, reason:'unsupported' }`。变化时壳主动通知内核 `clipboard/changed`（见 §4.1 通知表） |
+| `screenshot.start` | — | `{ ok: boolean; reason?: string }` | 触发**区域截图**，结果进系统剪贴板（不返回图像数据）。macOS `screencapture -i -c`；Windows `explorer ms-screenclip:`（唤起即返回，`ok` = 成功唤起）；其余平台 `{ ok:false, reason:'unsupported' }`。等用户完成 / 取消才应答，内核侧超时给足（300s） |
 | `open.url` | `{ url: string }` | `void` | 只允许 http/https/mailto |
 | `open.path` | `{ path: string }` | `void` | 用系统默认程序打开 |
 | `open.reveal` | `{ path: string }` | `void` | 文件管理器中显示（macOS Finder / Windows 资源管理器） |
@@ -730,7 +731,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 - dev 注册：dev server 通过内核的本地 control 端口（仅 127.0.0.1 + 一次性 token）把 `devUrl` 挂上，内核把插件页指向 vite dev server ⇒ **热更新免重启**
 - 调试：设置里有"打开插件 DevTools"（macOS WKWebView 用 `isInspectable` + Safari 开发者菜单；开发构建可用）
 - 自测：`pnpm test`（含各插件 core·script 用例）+ `pnpm spec-check`（清单 / 产物 / 能力 / 数据目录）+ `tests/fixtures/echo-plugin` 的协议自检
-- 新建插件：暂无脚手架包（`packages/plugin-cli` 属待办），照抄 `plugins/totp` / `plugins/host-manager` 最快；配置模板见 `docs/plugin-dev-guide.md` §4
+- 新建插件：`pnpm create:plugin <id> [--mode view|script|full]`（`packages/plugin-cli`：清单经真校验器把关、含逻辑层自动登记根 Cargo.toml members）；也可照抄 `plugins/totp` / `plugins/host-manager`，配置模板见 `docs/plugin-dev-guide.md` §4
 
 ---
 

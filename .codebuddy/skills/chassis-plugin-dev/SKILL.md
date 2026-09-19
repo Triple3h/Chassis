@@ -24,7 +24,13 @@ disable: false
 
 ## 第 2 步：搭工程
 
-在 `plugins/<name>/` 下建独立 Vite 工程（pnpm workspace 成员，依赖由仓库根 `pnpm install` 统一装）。
+用仓库根的一条命令生成骨架（等价于下面的模板合集，推荐）：
+
+```bash
+pnpm create:plugin <name> [--mode view|script|full]   # packages/plugin-cli：清单 / Vite / Cargo / bin 一次到位
+```
+
+手写或对照时，在 `plugins/<name>/` 下建独立 Vite 工程（pnpm workspace 成员，依赖由仓库根 `pnpm install` 统一装）。
 所有需要复制的配置模板在 [`references/scaffold-templates.md`](references/scaffold-templates.md)，包含：
 
 - `package.json`（含 `commands` 清单、`build:view` / `build:scripts` 脚本、`@launcher/api` 依赖）

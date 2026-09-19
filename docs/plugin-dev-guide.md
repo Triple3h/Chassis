@@ -30,6 +30,7 @@
 
 ```bash
 pnpm install                    # 仓库根：插件是 pnpm workspace 成员，不单独 install
+pnpm create:plugin <id>         # 新建插件：生成工程骨架（--mode view|script|full；含逻辑层自动登记 Cargo members）
 pnpm --filter <name> dev        # 本地开发（浏览器可直接访问，宿主 API 走降级分支）
 pnpm build:plugins              # 构建全部插件；产物在各插件 dist/，那就是插件目录
 pnpm spec-check                 # 发布前自检（清单 / 产物 / 能力 / 数据目录 / 远程资源）
@@ -293,6 +294,9 @@ build: {
 ---
 
 ## 4. 本仓库脚手架约定
+
+> 新建插件先跑 `pnpm create:plugin <id> [--mode view|script|full]`（`packages/plugin-cli`）——
+> 下面这份结构就是生成物的形态；本节的模板用于手改与对照。
 
 ### 4.1 结构
 
