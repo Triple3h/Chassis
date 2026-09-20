@@ -8,10 +8,13 @@
  * 断言全部走对外路径（HTTP + SSE + 落盘文件）—— 装置里没有内核内部对象可用。
  */
 import fsp from 'node:fs/promises'
+import path from 'node:path'
 import { assert, assertEqual, run, test } from '../helpers/assert'
-import { createHarness } from '../helpers/harness'
+import { createHarness, repoRoot } from '../helpers/harness'
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+/** 内核版本读根 `version.json`（唯一维护点）—— 硬编码的话每次升级都假红一次 */
+const KERNEL_VERSION = JSON.parse(await fsp.readFile(path.join(repoRoot, 'version.json'), 'utf-8')).kernel as string
 
 interface HotStatus {
   hotVersion: string
@@ -211,7 +214,7 @@ test('二进制热替换：stage（真内核 probe）→ apply（备份+替换�
     json({ mode: 'stage', path: exe }),
   )
   assertEqual(staged.ok, true, `stage 成功：${JSON.stringify(staged)}`)
-  assertEqual(staged.probe.version, '0.1.0', '真内核 --hot-probe 自报版本')
+  assertEqual(staged.probe.version, KERNEL_VERSION, '真内核 --hot-probe 自报版本')
   assertEqual(staged.probe.hotVersion, HOT_VERSION, '自报热更新机制版本')
 
   const applied = await h.api<{
@@ -226,7 +229,7 @@ test('二进制热替换：stage（真内核 probe）→ apply（备份+替换�
     assert(Buffer.compare(backupBytes, original) === 0, '备份逐字节等于原二进制')
     const pending = (await status()).binary.pending
     assert(!!pending, 'pending 台账进 status')
-    assertEqual(pending!.toVersion, '0.1.0', '待验证版本')
+    assertEqual(pending!.toVersion, KERNEL_VERSION, '待验证版本')
   } finally {
     const rolled = await h.api<{ ok: boolean; rolledBack: boolean }>('/api/hot/binary/rollback', json({}))
     assertEqual(rolled.ok, true, '回滚成功')

@@ -7,10 +7,14 @@
  * 断言两条对外可见的事实：壳收到 `kernel/restarting`（带 reason / version / hotVersion），
  * 以及内核日志里出现重启记录（排空 → 收尾 → 退出）。
  */
+import fsp from 'node:fs/promises'
+import path from 'node:path'
 import { assert, assertEqual, run, test } from '../helpers/assert'
-import { createHarness } from '../helpers/harness'
+import { createHarness, repoRoot } from '../helpers/harness'
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+/** 内核版本读根 `version.json`（唯一维护点）—— 硬编码的话每次升级都假红一次 */
+const KERNEL_VERSION = JSON.parse(await fsp.readFile(path.join(repoRoot, 'version.json'), 'utf-8')).kernel as string
 const HOT_VERSION = '0.1.0'
 
 const h = await createHarness({ label: 'kernel-hot-restart', fakeShell: true })
@@ -30,7 +34,7 @@ test('hot/restart：壳收到 kernel/restarting，内核排空在途请求后退
   const call = shell.calls.find((item) => item.method === 'kernel/restarting')
   assert(!!call, '通知要带参数')
   assertEqual(call!.params.reason, 'contract-test', '重启原因')
-  assertEqual(call!.params.version, '0.1.0', '内核版本')
+  assertEqual(call!.params.version, KERNEL_VERSION, '内核版本')
   assertEqual(call!.params.hotVersion, HOT_VERSION, '热更新机制版本')
   assert(typeof call!.params.pid === 'number', '带 pid（壳排错用）')
 
