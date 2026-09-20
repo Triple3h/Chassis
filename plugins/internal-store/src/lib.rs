@@ -26,6 +26,24 @@ pub const KERNEL_RELEASE_TAG: &str = "kernel-latest";
 /// 索引 schema：未知版本**拒绝**（不猜测，避免按错的结构读出坏的下载地址）。
 pub const REGISTRY_SCHEMA: u64 = 1;
 
+/// 主源基址（索引里的每个资产 URL 都以它开头）。
+pub const PRIMARY_BASE: &str = "https://github.com/triple3h/Chassis";
+
+/// 国内镜像基址（Gitee 同名仓库 / 同名 tag / 同名文件名，由 CI 的 `scripts/sync-release-to-gitee.mjs` 同步）。
+/// 客户端**优先走镜像**，拿不到（连不上 / HTTP 错 / sha256 不符）再降级主源 —— 见 `bin/update.rs`。
+pub const MIRROR_BASE: &str = "https://gitee.com/triple3h/Chassis";
+
+/// 把主源 URL 换成镜像 URL；不是主源 URL（含将来可能出现的其它域）返回 `None`。
+/// 大小写不敏感：索引由 CI 用 `GITHUB_REPOSITORY` 拼出，owner 是 `Triple3h`，与这里的 `triple3h` 不同。
+pub fn mirror_url(url: &str) -> Option<String> {
+    let prefix = PRIMARY_BASE.to_lowercase();
+    if !url.to_lowercase().starts_with(&prefix) {
+        return None;
+    }
+    // prefix 全是 ASCII ⇒ 前 prefix.len() 字节必然是字符边界
+    Some(format!("{MIRROR_BASE}{}", &url[prefix.len()..]))
+}
+
 /// 下载大小上限：内核侧 zip 解压上限是 200MB / 单文件 50MB，这里卡在 60MB。
 pub const MAX_DOWNLOAD_BYTES: u64 = 60 * 1024 * 1024;
 
@@ -495,13 +513,17 @@ pub fn current_arch() -> &'static str {
     }
 }
 
-/// 传输面白名单：更新源是固定仓库，Release 附件会 302 到 `objects.githubusercontent.com`。
+/// 传输面白名单：更新源是固定仓库（主源 GitHub / 国内镜像 Gitee），附件会 302 到各自的 CDN。
 /// 命令**不接受 URL 入参**，这条只是最后一道兜底（防止索引被换成别的域）。
 pub fn is_allowed_host(url: &str) -> bool {
     let Some(host) = host_of(url) else {
         return false;
     };
-    host == "github.com" || host.ends_with(".github.com") || host.ends_with(".githubusercontent.com")
+    host == "github.com"
+        || host.ends_with(".github.com")
+        || host.ends_with(".githubusercontent.com")
+        || host == "gitee.com"
+        || host.ends_with(".gitee.com")
 }
 
 pub fn host_of(url: &str) -> Option<String> {
@@ -643,9 +665,29 @@ mod tests {
     fn only_fixed_domains_are_allowed() {
         assert!(is_allowed_host("https://github.com/o/r/releases/download/x/y.zip"));
         assert!(is_allowed_host("https://objects.githubusercontent.com/x"));
+        assert!(is_allowed_host("https://gitee.com/triple3h/Chassis/releases/download/app-latest/x.zip"));
+        assert!(is_allowed_host("https://foruda.gitee.com/attach_file/1/x.zip"));
         assert!(!is_allowed_host("https://evil.example.com/y.zip"));
+        assert!(!is_allowed_host("https://github.com.evil.example.com/y.zip"));
         assert!(!is_allowed_host("不是 URL"));
         assert_eq!(host_of("https://github.com:443/a").as_deref(), Some("github.com"));
+    }
+
+    /// 镜像 URL 由主源 URL 推导；索引里的 owner 大小写与常量可能不同（CI 用 `GITHUB_REPOSITORY`）。
+    #[test]
+    fn mirror_url_swaps_gitee_case_insensitively() {
+        assert_eq!(
+            mirror_url("https://github.com/Triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip").as_deref(),
+            Some("https://gitee.com/triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip")
+        );
+        assert_eq!(
+            mirror_url("https://github.com/triple3h/Chassis/releases/download/plugins-latest/registry.json").as_deref(),
+            Some("https://gitee.com/triple3h/Chassis/releases/download/plugins-latest/registry.json")
+        );
+        // 别的域（含 Gitee 自己）：不动，交给调用方只用原 URL
+        assert_eq!(mirror_url("https://gitee.com/triple3h/Chassis/x"), None);
+        assert_eq!(mirror_url("https://example.com/x.zip"), None);
+        assert_eq!(mirror_url("不是 URL"), None);
     }
 
     #[test]

@@ -21,8 +21,8 @@ use std::time::Duration;
 
 use launcher_plugin_internal_store::{
     collect_app_update, collect_kernel_update, collect_updates, current_arch, current_platform, download_name, host_of,
-    is_allowed_host, parse_app_registry, parse_kernel_registry, parse_registry, pick_asset, sha256_hex,
-    unzip_app_bundle, unzip_kernel_bundle, AppRegistry, InstalledPlugin, KernelRegistry, RegistryAsset,
+    is_allowed_host, mirror_url, parse_app_registry, parse_kernel_registry, parse_registry, pick_asset, sha256_hex,
+    unzip_app_bundle, unzip_kernel_bundle, AppRegistry, InstalledPlugin, KernelRegistry,
     APP_REGISTRY_URL, KERNEL_REGISTRY_URL, MAX_DOWNLOAD_BYTES, REGISTRY_URL,
 };
 use launcher_plugin_sdk::{json, proxy, Context, Level, Result, Value};
@@ -186,20 +186,8 @@ fn download(ctx: &Context, args: &Value) -> Result<()> {
     }
     let path = directory.join(download_name(id, &entry.version, current_platform(), current_arch()));
 
-    match fetch_asset(ctx, asset, &path) {
-        Ok(bytes) => {
-            let digest = match std::fs::read(&path) {
-                Ok(content) => sha256_hex(&content),
-                Err(err) => {
-                    return ctx.done(json!({ "ok": false, "stage": "io", "error": format!("读取已下载文件失败：{err}") }))
-                }
-            };
-            if !digest.eq_ignore_ascii_case(&asset.sha256) {
-                // 校验不通过的文件绝不留下：下一次安装不能用它，用户也不知道它坏
-                let _ = std::fs::remove_file(&path);
-                ctx.log(&format!("{id} 更新包校验失败（索引 {} / 实际 {}）", asset.sha256, digest), None, Level::Error)?;
-                return ctx.done(json!({ "ok": false, "stage": "verify", "error": "文件校验失败（已删除，请重试）" }));
-            }
+    match fetch_verified(ctx, &asset.url, &path, &asset.sha256) {
+        Ok((bytes, digest)) => {
             ctx.log(&format!("已下载 {id} {}（{} 字节）", entry.version, bytes), None, Level::Info)?;
             ctx.done(json!({
                 "ok": true, "id": id, "version": entry.version, "path": path, "sha256": digest, "bytes": bytes,
@@ -266,26 +254,14 @@ fn download_kernel(ctx: &Context, args: &Value) -> Result<()> {
     }
     let path = directory.join(format!("launcher-kernel-{}-{}-{}.zip", update.latest, current_platform(), current_arch()));
 
-    let bytes = match fetch_asset(ctx, &update.asset, &path) {
-        Ok(bytes) => bytes,
+    let (bytes, digest) = match fetch_verified(ctx, &update.asset.url, &path, &update.asset.sha256) {
+        Ok(value) => value,
         Err(message) => {
             let _ = std::fs::remove_file(&path);
             ctx.log(&format!("下载内核更新包失败：{message}"), None, Level::Warn)?;
             return ctx.done(json!({ "ok": false, "stage": "download", "error": message }));
         }
     };
-    let digest = match std::fs::read(&path) {
-        Ok(content) => sha256_hex(&content),
-        Err(err) => {
-            return ctx.done(json!({ "ok": false, "stage": "io", "error": format!("读取已下载文件失败：{err}") }))
-        }
-    };
-    if !digest.eq_ignore_ascii_case(&update.asset.sha256) {
-        // 校验不通过的文件绝不留下：坏包一旦被 apply 就是「内核替换失败」
-        let _ = std::fs::remove_file(&path);
-        ctx.log(&format!("内核更新包校验失败（索引 {} / 实际 {}）", update.asset.sha256, digest), None, Level::Error)?;
-        return ctx.done(json!({ "ok": false, "stage": "verify", "error": "文件校验失败（已删除，请重试）" }));
-    }
 
     let out_dir = directory.join(format!("kernel-{}", update.latest));
     match unzip_kernel_bundle(&path, &out_dir) {
@@ -366,26 +342,14 @@ fn download_app(ctx: &Context, args: &Value) -> Result<()> {
     }
     let path = directory.join(format!("Chassis-{}-{}-{}.zip", update.latest, current_platform(), current_arch()));
 
-    let bytes = match fetch_asset(ctx, &update.asset, &path) {
-        Ok(bytes) => bytes,
+    let (bytes, digest) = match fetch_verified(ctx, &update.asset.url, &path, &update.asset.sha256) {
+        Ok(value) => value,
         Err(message) => {
             let _ = std::fs::remove_file(&path);
             ctx.log(&format!("下载应用更新包失败：{message}"), None, Level::Warn)?;
             return ctx.done(json!({ "ok": false, "stage": "download", "error": message }));
         }
     };
-    let digest = match std::fs::read(&path) {
-        Ok(content) => sha256_hex(&content),
-        Err(err) => {
-            return ctx.done(json!({ "ok": false, "stage": "io", "error": format!("读取已下载文件失败：{err}") }))
-        }
-    };
-    if !digest.eq_ignore_ascii_case(&update.asset.sha256) {
-        // 校验不通过的文件绝不留下：坏包一旦被交给壳就是「整个应用被换坏」
-        let _ = std::fs::remove_file(&path);
-        ctx.log(&format!("应用更新包校验失败（索引 {} / 实际 {}）", update.asset.sha256, digest), None, Level::Error)?;
-        return ctx.done(json!({ "ok": false, "stage": "verify", "error": "文件校验失败（已删除，请重试）" }));
-    }
 
     let out_dir = directory.join(format!("app-{}", update.latest));
     match unzip_app_bundle(&path, &out_dir) {
@@ -422,16 +386,76 @@ fn fetch_index(ctx: &Context) -> std::result::Result<launcher_plugin_internal_st
     parse_registry(&raw)
 }
 
-fn fetch_text(ctx: &Context, url: &str, timeout: Duration) -> std::result::Result<String, String> {
-    if !is_allowed_host(url) {
-        return Err(format!("更新源域名不在白名单：{}", host_of(url).unwrap_or_default()));
+/// 候选地址：**镜像优先、主源兜底**（非主源 URL 只有它自己）。
+fn candidates(url: &str) -> Vec<String> {
+    match mirror_url(url) {
+        Some(mirror) => vec![mirror, url.to_string()],
+        None => vec![url.to_string()],
     }
-    get(ctx, url, timeout)?.into_string().map_err(|err| format!("读取响应失败：{err}"))
+}
+
+fn fetch_text(ctx: &Context, url: &str, timeout: Duration) -> std::result::Result<String, String> {
+    let mut failures: Vec<String> = Vec::new();
+    for candidate in candidates(url) {
+        if !is_allowed_host(&candidate) {
+            return Err(format!("更新源域名不在白名单：{}", host_of(&candidate).unwrap_or_default()));
+        }
+        match get(ctx, &candidate, timeout) {
+            Ok(response) => {
+                // 走的是镜像还是主源写进日志：真机上排查「国内下载源到底有没有生效」全靠这行
+                let host = host_of(&candidate).unwrap_or_default();
+                let note = if failures.is_empty() {
+                    (format!("索引来自 {host}"), Level::Info)
+                } else {
+                    (format!("镜像不可用，已退回主源 {host}"), Level::Warn)
+                };
+                let _ = ctx.log(&note.0, None, note.1);
+                return response.into_string().map_err(|err| format!("读取响应失败：{err}"));
+            }
+            Err(err) => failures.push(format!("{} {err}", host_of(&candidate).unwrap_or_default())),
+        }
+    }
+    Err(failures.join("；"))
+}
+
+/// 下载 + 校验：依次尝试候选地址（镜像 → 主源），**校验不过也换下一个** ——
+/// 镜像上的坏包与「拿不到」同等对待，绝不留给安装（也绝不留给下一个候选）。
+fn fetch_verified(
+    ctx: &Context,
+    url: &str,
+    path: &std::path::Path,
+    expected_sha256: &str,
+) -> std::result::Result<(u64, String), String> {
+    let mut failures: Vec<String> = Vec::new();
+    for candidate in candidates(url) {
+        let host = host_of(&candidate).unwrap_or_default();
+        match fetch_asset(ctx, &candidate, path) {
+            Ok(bytes) => match std::fs::read(path) {
+                Ok(content) => {
+                    let digest = sha256_hex(&content);
+                    if digest.eq_ignore_ascii_case(expected_sha256) {
+                        let note = if failures.is_empty() {
+                            (format!("更新包来自 {host}"), Level::Info)
+                        } else {
+                            (format!("镜像不可用，已退回主源 {host}"), Level::Warn)
+                        };
+                        let _ = ctx.log(&note.0, None, note.1);
+                        return Ok((bytes, digest));
+                    }
+                    failures.push(format!("{host} 校验失败（索引 {expected_sha256} / 实际 {digest}）"));
+                }
+                Err(err) => failures.push(format!("{host} 读取失败：{err}")),
+            },
+            Err(err) => failures.push(format!("{host} 下载失败：{err}")),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+    Err(failures.join("；"))
 }
 
 /// 流式落盘 + 大小上限：索引里的 `bytes` 只是参考值，实际以读到的字节数为准。
-fn fetch_asset(ctx: &Context, asset: &RegistryAsset, path: &std::path::Path) -> std::result::Result<u64, String> {
-    let response = get(ctx, &asset.url, TIMEOUT_ASSET)?;
+fn fetch_asset(ctx: &Context, url: &str, path: &std::path::Path) -> std::result::Result<u64, String> {
+    let response = get(ctx, url, TIMEOUT_ASSET)?;
     let mut reader = response.into_reader();
     let mut file = std::fs::File::create(path).map_err(|err| format!("无法写入文件：{err}"))?;
     let mut total: u64 = 0;
@@ -462,6 +486,20 @@ fn now_ms() -> u64 {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    /// 镜像优先、主源兜底；非主源 URL 不生成镜像候选。
+    #[test]
+    fn candidates_prefer_mirror_then_primary() {
+        let url = "https://github.com/Triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip";
+        assert_eq!(
+            candidates(url),
+            vec![
+                "https://gitee.com/triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip".to_string(),
+                url.to_string(),
+            ]
+        );
+        assert_eq!(candidates("https://example.com/x.zip"), vec!["https://example.com/x.zip".to_string()]);
+    }
 
     /// 降级只认「连不上」：HTTP 状态码说明直连已经通了，换代理重试没有意义。
     #[test]
