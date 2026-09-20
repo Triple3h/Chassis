@@ -1,4 +1,4 @@
-//! 内核换核的「壳执行」那一半（Windows 路线）：docs/win-hot-update-research.md §4.2 / §5.3-2。
+//! 内核换核的「壳执行」那一半（Windows 路线）：docs/kernel-hot-update.md §6 / docs/architecture.md §11。
 //!
 //! Windows 上运行中的 exe 写不了 ⇒ 内核只写台账（`<dataRoot>/hot/bin/pending.json`），
 //! 由壳在「内核已退出、尚未拉起」的窗口里照台账执行；连续两次启动未就绪时内核登记 `revert`，回滚同样由壳执行。

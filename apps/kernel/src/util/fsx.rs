@@ -48,7 +48,7 @@ pub fn list_dir_safe(dir: &Path) -> Vec<PathBuf> {
 
 // ── 重试策略（rename / 目录替换这类易被占用的操作） ─────────────────────────
 //
-// 平台差异（docs/win-hot-update-research.md §5.1-#1、§5.3-3）：
+// 平台差异（docs/architecture.md §11）：
 //  - Windows：杀软实时扫描、句柄释放滞后 ⇒ 「共享冲突 / 访问被拒」是**瞬时**态，值得退避重试；
 //  - unix：rename 罕见瞬时失败，`EACCES` / `EXDEV` 基本都是永久错误 ⇒ 立即上报，别让用户白等。
 // 所以「退避表」与「什么算瞬时」都按平台取，调用方只消费同一套判定。

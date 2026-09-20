@@ -14,9 +14,9 @@
  * 「Info.plist 与它一致」，把「版本源分叉」这类事故拦在发版之前
  * （否则客户端要么判不出新版本、要么装出对不上号的包）。
  *
- * 两条分支的差别只在「怎么打包」，都在同一个索引里 —— 但**自动替换目前只有 macOS**：
- * Windows 的运行中 exe 无法替换，安装路径待定（见 docs/win-hot-update-research.md §4.3），
- * 索引里有 Windows 产物是给「手动换包 / 将来接上 helper」留的稳定入口。
+ * 两条分支的差别只在「怎么打包」，都在同一个索引里，而且**两端都会自动替换**：
+ * macOS 换 `.app`、Windows 换绿色版目录（`Chassis.exe` + `resources/`，`swap.ps1` 在壳退出后整目录 rename）；
+ * 装到只读位置 / NSIS 安装版才降级为「提示手动更新」（边界见 docs/architecture.md §11）。
  *
  * 签名是 macOS 自更新的硬前提：新包必须与当前包**同一签名身份**，否则每次更新 TCC 授权（辅助功能 /
  * 屏幕录制…）都会失配重弹。CI 上用 secrets 导入同一张证书（见 .github/workflows/app-release.yml）。
@@ -76,7 +76,7 @@ function packMacos() {
  * Windows：把 `pack-win.mjs` 打好的绿色版 zip 搬进更新通道产物目录并算哈希。
  *
  * **不在这里重新压缩**：绿色版的组装与压缩只有 `scripts/pack-win.mjs` 一份（解压结构 = `Chassis.exe` + `resources/`）。
- * Authenticode 签名暂不参与 —— Windows 的自动安装路径尚未实现（见 docs/win-hot-update-research.md §4.3）。
+ * Authenticode 签名暂不参与 —— 整目录替换不涉签名身份（不像 macOS 的 TCC 按签名记账）。
  */
 function packWindows() {
   const version = manifestAppVersion()

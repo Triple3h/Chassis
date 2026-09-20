@@ -47,7 +47,7 @@ pub struct ProbeReport {
     pub path: String,
 }
 
-/// 谁来执行替换 **这个文件** —— 是能力判断，不是平台判断（docs/win-hot-update-research.md §5.3-4）：
+/// 谁来执行替换 **这个文件** —— 是能力判断，不是平台判断（docs/architecture.md §11）：
 ///  - `Kernel`：内核自己换（unix：运行中的映像允许被替换；也是老壳的回落路径）；
 ///  - `Shell`：内核**只写台账**，由壳在「内核已退出、尚未拉起」的窗口里换（Windows：映像被锁）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -465,7 +465,7 @@ pub fn boot_guard(hot_dir: &Path) -> Option<String> {
 
     if pending.attempts >= 2 {
         // 壳执行替换（Windows）：删自身 + rename 备份在自己进程里做不到 ⇒ **只登记回滚请求**，
-        // 由壳在下次启动前执行（docs/win-hot-update-research.md §4.2）；台账留给壳，换完它清。
+        // 由壳在下次启动前执行（docs/architecture.md §11）；台账留给壳，换完它清。
         if pending.swap_owner == SwapOwner::Shell {
             pending.revert = true;
             let _ = write_json_atomic(&pending_path, &pending);
@@ -606,7 +606,7 @@ fn keep_latest_backup(backup_dir: &Path) {
     }
 }
 
-/// rename 的重试收口在 `util::fsx`（策略与「什么算瞬时」都按平台取，docs/win-hot-update-research.md §5.1-#1）；
+/// rename 的重试收口在 `util::fsx`（策略与「什么算瞬时」都按平台取，docs/architecture.md §11）；
 /// 这里只把失败翻译成内核错误码。
 fn rename_with_retry(from: &Path, to: &Path) -> Result<()> {
     retry(RENAME_POLICY, || fs::rename(from, to)).map_err(|err| {

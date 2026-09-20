@@ -154,7 +154,7 @@ gh workflow run app-release.yml --ref main -f notes="…"     # 或推 app/* tag
 - **自动应用更新**：更新只**检查 + 提示**（托盘常驻入口 / 「关于」页），下载 / 替换 / 重启一律等用户确认 ——
   不做静默下载与无人值守替换（更新时机由用户自己决定）。
 - **Windows 的安装器（NSIS / MSIX）**：绿色版 + `swap.ps1` 已经够用（自用场景）；
-  要装到 `Program Files` 得另立安装器通道，见 `docs/win-hot-update-research.md` §4.3 的方案 B。
+  要装到 `Program Files` 得另立安装器通道（未做；Windows 的边界与不变量见 `docs/architecture.md` §11）。
 - **Windows 的 Authenticode 签名**：替换不涉及签名身份（不像 macOS 的 TCC 按签名记账），暂不接。
 - **增量包 / dmg / 公证**：整包替换足够（17 MB 级），公证与分发面的事随 `v*` 通道另议。
 - **多版本回退历史**：只留 1 份备份（与内核 / 插件热更新同口径）。

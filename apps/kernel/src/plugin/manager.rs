@@ -1414,7 +1414,7 @@ fn is_windows_absolute(name: &str) -> bool {
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
-/// rename 的重试：策略与「什么算瞬时」收口在 `util::fsx`（docs/win-hot-update-research.md §5.1-#1）——
+/// rename 的重试：策略与「什么算瞬时」收口在 `util::fsx`（docs/architecture.md §11）——
 /// Windows 上插件进程刚被杀、句柄释放滞后 / 杀软扫描都会让 rename 短暂失败，退避重试；
 /// 永久错误（unix 的 `EACCES`、跨卷 `EXDEV`…）立即返回，失败由调用方整体回滚，不做半替换。
 async fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {

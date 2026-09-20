@@ -151,8 +151,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | 文档 | 内容 |
 |---|---|
 | [`docs/launcher-requirements.md`](docs/launcher-requirements.md) | **唯一需求源**：产品定义、行为规格、里程碑（计划口径） |
-| [`docs/architecture.md`](docs/architecture.md) | 内核实现细节 + 与需求的差异清单 + 已知边界 + 测试与验收 |
-| [`docs/win-hot-update-research.md`](docs/win-hot-update-research.md) | Windows 三层热更新调研（未开工）：可行性预判、文件锁实验清单、风险与决策点 |
+| [`docs/architecture.md`](docs/architecture.md) | 内核实现细节 + 与需求的差异清单 + 已知边界 + 测试与验收 + **Windows 热更新的边界与不变量（§11）** |
 | [`AGENTS.md`](AGENTS.md) | 仓库指南（给 AI 与新贡献者）：结构、命令、风格、提交规范 |
 
 **历史与合规**：[`docs/decisions/`](docs/decisions)（ADR-0001~0006）｜ [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) ｜ [`LICENSE`](LICENSE)

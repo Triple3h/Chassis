@@ -871,6 +871,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 **验收**（Windows 10/11 实机）：
 - 双击安装 / 解压即用；首次运行无 Node 依赖报错；热键唤出、搜索（应用 / 文件 / 网页）、启动应用、选中文本带入
 - hosts 插件 UAC 提权读写、区外字节不动；托盘 / 状态条 / 设置生效；退出无残留进程
+- 三层远程更新实机跑通：壳 `swap.ps1` 整目录替换与回滚、内核「重启间隙替换」台账路径、插件 `install_prepared` 的 rename 退避（边界与不变量见 `docs/architecture.md` §11）
 - 交付给使用 Windows 的同事日常使用
 
 **进度（2026-09-18）**：上述交付物**代码已全部落地**，
@@ -916,7 +917,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 - 候选包不完整 / 版本自洽性不过 / 自检跑不起来 ⇒ 拒绝安装，当前版本一动不动
 - 新包启动失败：helper 8 秒内没看到实例 ⇒ 自动换回备份；连续两次未就绪 ⇒ 启动守卫回滚（台账清理，无需人工修）
 - 开发态（非 `.app`）与只读安装位置：不检查、不提示、不记账（`canSelfUpdate=false`）
-- Windows 版不出现「更新应用」（索引无 windows 资产），仍走安装包
+- Windows **绿色版**可自更新：索引含 `win-x64` 资产，`swap.ps1` 在壳完全退出后整目录替换（只读位置 / NSIS 安装版不在该通道，仍走安装包。尚未在 Windows 真机验收）
 - CI 未配签名 secrets 时工作流打 warning 并回落 ad-hoc（包可用但 TCC 授权会重弹）
 
 ---

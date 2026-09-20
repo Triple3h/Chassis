@@ -125,7 +125,7 @@ curl -X POST http://127.0.0.1:<kernelPort>/api/hot/rollback -d '{}' -H 'Content-
   （`swapOwner: "shell"`，连同候选路径与备份路径），壳在「内核已退出、尚未拉起」的窗口里照台账替换 / 回滚；
   壳把回执写进 `<dataRoot>/hot/bin/swap-result.json`，内核启动时读后即删并记进热更新日志。
   壳用 `app.info.kernelSwap` 声明这个能力：**老壳不报 ⇒ 内核退回自换并给出明确错误**（绝不写一份没人执行的台账）。
-  调研、风险与实验清单见 `docs/win-hot-update-research.md`。
+  Windows 路线（谁执行替换、回滚、还欠什么）见 `docs/architecture.md` §11。
 - `--hot-probe` 是自检入口：**最先**处理、不初始化任何东西，只输出
   `{"version":"…","hotVersion":"0.1.0"}`（这个短命进程的 stdout 是它自己的，与内核协议无关）。
 
@@ -222,5 +222,5 @@ node scripts/pack-kernel.mjs && node scripts/gen-kernel-registry.mjs   # 本地�
 - 内核自身不校验候选二进制的哈希 / 签名（`/api/hot/binary` 的信任模型 = 本地路径 + `--hot-probe` 自检）；
   分发链路（`internal-store`）对**下载**的内核包做 sha256 校验 —— 两道防线分工不同，v1 不引入签名；
 - 不做多版本历史（只留 1 份备份 / 1 个上一稳定代，与插件热更新同口径）；
-- Windows 的「重启间隙替换」已落地（2026-09-20，见 §6 / §8）；机制、风险与待做的真机实验见
-  `docs/win-hot-update-research.md`。
+- Windows 的「重启间隙替换」已落地（2026-09-20，见 §6 / §8）；谁执行替换、回滚与还欠什么见
+  `docs/architecture.md` §11。

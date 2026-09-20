@@ -710,7 +710,7 @@ async fn hot_binary(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>
     );
 
     let current_version = kernel.version();
-    // 执行者按**壳自报的能力**定，而不是按平台猜（docs/win-hot-update-research.md §5.3-4）：
+    // 执行者按**壳自报的能力**定，而不是按平台猜（docs/architecture.md §11）：
     // 老壳不认识替换台账 ⇒ 退回内核自换（Windows 上会明确报错），绝不写一份没人执行的台账。
     let owner = crate::hot::binary::swap_owner_for(kernel.shell_can_swap().await);
     match crate::hot::binary::apply(&dir, &staged, &current_version, &report.version, ui_path.as_deref(), owner) {

@@ -296,5 +296,35 @@ node scripts/smoke-first-batch.mjs   # 四个 Vue 插件端到端（HTTP 驱动�
 | 验收 | `tests/smoke/` | §1.3 口径：零插件可启动可搜索、装插件后立刻可搜、执行写历史、固定项持久化、禁用后命令消失而历史置灰、卸载后目录消失 |
 | 插件用例 | `plugins/*/test/`、`packages/*` | 各插件视图层的 core 纯函数；`packages/ui` 等公共库（`pnpm test` 一并收集）。逻辑层用例在各插件 crate 的 `cargo test` |
 
+---
+
+## 11. Windows 热更新：边界与不变量（精简）
+
+> Windows 三层远程更新**均已落地**（2026-09-20）。本节只留「做 Windows 时不能破坏什么」与「还欠什么」——
+> 调研过程、文件锁实验清单（E1–E8）属计划口径，不入库。
+
+**谁来执行替换 —— 能力判断，不是平台判断**：
+
+| 层 | macOS / Linux | Windows |
+|---|---|---|
+| 插件 | `install_prepared` 自己换（rename + 备份 + 失败回滚） | 同上（win-x64 产物已在 `plugins-latest`） |
+| 内核 | 内核**自己**换（运行中的映像允许被替换） | 内核**只写台账**（`hot/bin/pending.json`），由壳在「内核已退出、尚未拉起」的窗口里换（`apps/shell/src/kernel_swap.rs`） |
+| 应用（壳） | `swap.sh`：整个 `.app` rename | `swap.ps1`：整个绿色版目录 rename（`Chassis.exe` + `resources/`） |
+
+壳在 `app.info.kernelSwap` 声明能换核 ⇒ 内核写台账；老壳不报 ⇒ **退回内核自换并明确报错**（绝不写一份没人执行的台账）。
+`hot/status` 用 `swapOwner` 把这个选择外化，UI 与测试只读状态、不做平台判断。
+
+**三条 macOS 不变量（做 Windows 不许退步）**：① 内核换核仍由内核自己完成（defer 换核**不是**默认路径）；
+② `.app` 内仍拒绝（`SIGNED_BUNDLE` 不放开）；③「连续 2 次启动未就绪 ⇒ 自动回滚」的语义与字段不变。
+
+**平台差异只活在实现里**：`fsx::replace_file` / `proc::adopt` 式收口 + `#[cfg] mod imp`（沿用 `selection.rs` / `usage.rs` 的 house pattern），
+**调用点不写 `#[cfg]`**；跨进程分工用台账（数据化）表达，便于在 macOS 上构造 Windows 台账做测试；
+重试策略参数化（`util::fsx::RENAME_POLICY`）且只重试瞬时错误（Windows 共享 / 锁冲突，unix `EBUSY` / `ETXTBSY`）。
+
+**还欠的（Windows 真机验收）**：`swap.ps1` 与内核「重启间隙替换」实跑（含回滚、断电 / 强杀）；
+插件 `install_prepared` 实机（句柄释放滞后、杀软实时扫描、孙进程握锁 ⇒ **Job Object 进程树收口未做**）；
+下载包剥离 MOTW（`Zone.Identifier`）；arm64 与企业管控（AppLocker / WDAC / 受控文件夹访问）列为「不保证」场景，
+探测到安装位不可写则降级为「提示手动更新」；Authenticode（替换不涉签名身份，暂不接）与 NSIS 安装器（装 `Program Files` 才需要）。
+
 **人工验收（自动化覆盖不到的部分）**：自动化已覆盖「会话能开、生产资源可达、桥与脚本正确、能力越权被拒、数据落点正确」；
 下面这些在发版/大改后仍需人点一遍：粘贴→格式化→树视图（json-tools）、footer 按键与 `Esc` 分级退出、截图→粘贴导入（totp）、host-manager 的块开关与提权写入回读校验、拖拽重排后的固定顺序落库。
