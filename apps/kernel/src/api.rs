@@ -16,7 +16,7 @@ use axum::Router;
 use serde_json::{json, Value};
 
 use crate::bridge::BridgeCall;
-use crate::config::{MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
+use crate::config::{MAX_WINDOW_HEIGHT, MAX_WINDOW_POS, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
 use crate::contract::{ItemSnapshot, ResultItem};
 use crate::error::KernelError;
 use crate::events::names;
@@ -68,8 +68,9 @@ pub fn builtin_routes() -> Vec<(&'static str, MethodRouter<Arc<Kernel>>)> {
         ("/api/window/hide", post(window_hide)),
         ("/api/window/hidden", post(window_hidden)),
         ("/api/window/visible", get(window_visible)),
+        ("/api/window/bounds", get(window_bounds)),
+        ("/api/window/setBounds", post(window_set_bounds)),
         ("/api/window/setHeight", post(window_set_height)),
-        ("/api/window/setSize", post(window_set_size)),
         ("/api/window/startDrag", post(window_start_drag)),
         ("/api/window/startResize", post(window_start_resize)),
         ("/api/system/stats", get(system_stats)),
@@ -452,21 +453,61 @@ async fn window_set_height(State(kernel): State<Arc<Kernel>>, body: Option<Json<
     ok_json(json!({ "ok": true }))
 }
 
-async fn window_set_size(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>) -> Response {
+/// 当前窗口几何（UI 落盘「窗口几何记忆」时读它）：`bounds` 为 `null` = 问不到壳（standalone / 未连接）——
+/// 与 `window_visible` 同一条规矩，「问不到」不等于「没有」。
+async fn window_bounds(State(kernel): State<Arc<Kernel>>) -> Response {
+    let bounds = kernel.primitives.window_bounds().await;
+    ok_json(json!({ "ok": true, "bounds": bounds }))
+}
+
+/// 应用用户记忆的窗口几何（唤出 / 切换窗口态时）：位置与尺寸各自成对，至少给一对。
+/// 钳制与旧的 `window.setSize` 同款（尺寸 480–2000 / 240–1400，位置 ±50000）——
+/// 壳拿到的永远是合法值，UI 算错最多是「看起来不对」，不会是「窗口跑到屏幕外」。
+async fn window_set_bounds(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>) -> Response {
     let body = body_of(body);
-    let (Some(width), Some(height)) = (body.get("width").and_then(Value::as_f64), body.get("height").and_then(Value::as_f64))
-    else {
-        return error_json(KernelError::bad_args("width / height 必须是数字"));
+    let position = match numeric_pair(&body, "x", "y") {
+        Ok(value) => value,
+        Err(err) => return error_json(err),
     };
-    if !width.is_finite() || !height.is_finite() {
-        return error_json(KernelError::bad_args("width / height 必须是数字"));
+    let size = match numeric_pair(&body, "width", "height") {
+        Ok(value) => value,
+        Err(err) => return error_json(err),
+    };
+    if position.is_none() && size.is_none() {
+        return error_json(KernelError::bad_args("至少要给一对：x/y 或 width/height"));
     }
-    let safe_width = clamp(width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH);
-    let safe_height = clamp(height, MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT);
-    if let Err(err) = kernel.primitives.set_size(safe_width as f64, safe_height as f64).await {
-        return error_json(err);
+    let (x, y) = position
+        .map(|(x, y)| {
+            (
+                (x.round() as i64).clamp(-MAX_WINDOW_POS, MAX_WINDOW_POS),
+                (y.round() as i64).clamp(-MAX_WINDOW_POS, MAX_WINDOW_POS),
+            )
+        })
+        .map_or((None, None), |(x, y)| (Some(x), Some(y)));
+    let (width, height) = size
+        .map(|(width, height)| {
+            (
+                clamp(width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH) as i64,
+                clamp(height, MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT) as i64,
+            )
+        })
+        .map_or((None, None), |(width, height)| (Some(width), Some(height)));
+    match kernel.primitives.set_bounds(x, y, width, height).await {
+        Ok(bounds) => ok_json(json!({ "ok": true, "bounds": bounds })),
+        Err(err) => error_json(err),
     }
-    ok_json(json!({ "ok": true, "width": safe_width, "height": safe_height }))
+}
+
+/// 取一对数字：都缺席 ⇒ `None`；只给一个 / 非数 ⇒ `BAD_ARGS`。
+/// 半份几何一定会把窗口挪到诡异位置（比如只给 x 不给 y = 沿用旧的 y），宁可在入口拒绝。
+fn numeric_pair(body: &Value, first: &str, second: &str) -> std::result::Result<Option<(f64, f64)>, KernelError> {
+    let left = body.get(first).and_then(Value::as_f64);
+    let right = body.get(second).and_then(Value::as_f64);
+    match (left, right) {
+        (None, None) if body.get(first).is_none() && body.get(second).is_none() => Ok(None),
+        (Some(left), Some(right)) if left.is_finite() && right.is_finite() => Ok(Some((left, right))),
+        _ => Err(KernelError::bad_args(format!("{first} / {second} 必须成对给出数字"))),
+    }
 }
 
 async fn window_start_drag(State(kernel): State<Arc<Kernel>>) -> Response {

@@ -4,7 +4,7 @@
 //! - **宽容清洗**：任何脏值（类型不对 / 越界 / 非法枚举）都回落默认，绝不把脏值写回去
 //! - **浅合并 patch**：`{...cache, ...patch}`（与 v1 一致；调用方要整体替换某个键就把整个对象给全）
 //! - **原子写**：临时文件 + rename（`util::fsx::write_json_atomic`）
-//! - `sanitize_window_sizes` 是「什么算合法尺寸记忆」的唯一定义处（UI 提交 / 落盘 / 广播都过它）
+//! - `sanitize_window_bounds` 是「什么算合法窗口几何记忆」的唯一定义处（UI 提交 / 落盘 / 广播都过它）
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -22,6 +22,9 @@ pub const MIN_WINDOW_WIDTH: i64 = 480;
 pub const MIN_WINDOW_HEIGHT: i64 = 240;
 pub const MAX_WINDOW_WIDTH: i64 = 2000;
 pub const MAX_WINDOW_HEIGHT: i64 = 1400;
+/// 窗口位置（屏幕物理坐标）的夹取范围：多屏时副屏在主屏左侧 / 上方 ⇒ 坐标可以是负数，
+/// 但 ±5 万足够表达任何真实布局，更大的值一律当脏数据（防手改的 config 把窗口丢到屏幕外）
+pub const MAX_WINDOW_POS: i64 = 50_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,10 +49,21 @@ impl Default for HotkeyConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WindowSize {
-    pub width: i64,
-    pub height: i64,
+/// 一个「窗口态」记下的几何：位置（屏幕物理坐标）+ 尺寸（逻辑像素，与壳 `window.setBounds` 同口径）。
+///
+/// 两半可各自缺省：只拖过窗口 ⇒ 只有位置；从没改过尺寸 ⇒ 没有尺寸（内容自适应）。
+/// 位置成对（x、y）、尺寸也成对（width、height）—— 半个一定是脏数据。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowBounds {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,8 +94,8 @@ pub struct Config {
     pub denied: HashMap<String, Vec<String>>,
     /// 开发模式插件：pluginId → devUrl
     pub dev_plugins: HashMap<String, String>,
-    /// 用户调过的窗口尺寸（按模式：`host` / `plugin`）
-    pub window_sizes: HashMap<String, WindowSize>,
+    /// 用户调过的窗口几何（按窗口态：`host` / `plugin` / `plugin:<插件id>`；`plugin` 是兜底）
+    pub window_bounds: HashMap<String, WindowBounds>,
 }
 
 impl Default for Config {
@@ -102,7 +116,7 @@ impl Default for Config {
             disabled: Vec::new(),
             denied: HashMap::new(),
             dev_plugins: HashMap::new(),
-            window_sizes: HashMap::new(),
+            window_bounds: HashMap::new(),
         }
     }
 }
@@ -178,7 +192,12 @@ pub fn migrate_config(raw: &Value) -> Config {
                 .collect()
         })
         .unwrap_or_default();
-    config.window_sizes = sanitize_window_sizes(raw.get("windowSizes"));
+    config.window_bounds = sanitize_window_bounds(raw.get("windowBounds"));
+    if config.window_bounds.is_empty() {
+        // ≤0.1.5 的旧键：只有尺寸、按 `host` / `plugin` 两档（`windowSizes.host` / `.plugin`）。
+        // 形状兼容（缺位置照收），而且 `.plugin` 在新模型里正好是「所有插件页的兜底」—— 语义不变
+        config.window_bounds = sanitize_window_bounds(raw.get("windowSizes"));
+    }
 
     sanitize_config(config)
 }
@@ -203,34 +222,51 @@ pub fn sanitize_config(config: Config) -> Config {
     out
 }
 
-/// 尺寸记忆清洗：只认「两个模式之一 + 一对落在允许区间里的完整数字」。
-///
-/// 半个尺寸（只有宽没有高）/ 非数 / 越界 → 丢掉那一项，让窗口回落默认形态。
-pub fn sanitize_window_sizes(raw: Option<&Value>) -> HashMap<String, WindowSize> {
+/// 窗口几何记忆清洗：键只认 `host` / `plugin` / `plugin:<插件id>`；
+/// 位置（x、y）与尺寸（width、height）各自成对才有意义 —— 半个 / 非数一律丢掉那一半
+/// （位置丢只影响「恢复到哪」，尺寸丢只影响「多大」，没有理由整项连坐）；
+/// 尺寸小于最小值那一半丢弃、超过上限夹住；两半都丢光的项不落盘。
+pub fn sanitize_window_bounds(raw: Option<&Value>) -> HashMap<String, WindowBounds> {
     let mut out = HashMap::new();
     let Some(Value::Object(map)) = raw else { return out };
-    for mode in ["host", "plugin"] {
-        let Some(entry) = map.get(mode).and_then(Value::as_object) else { continue };
-        let width = entry.get("width").and_then(number_like);
-        let height = entry.get("height").and_then(number_like);
-        let (Some(width), Some(height)) = (width, height) else { continue };
-        if !width.is_finite() || !height.is_finite() {
+    for (key, entry) in map {
+        if !is_valid_bounds_key(key) {
             continue;
         }
-        let width = width.round() as i64;
-        let height = height.round() as i64;
-        if width < MIN_WINDOW_WIDTH || height < MIN_WINDOW_HEIGHT {
-            continue;
+        let Some(entry) = entry.as_object() else { continue };
+        let mut bounds = WindowBounds::default();
+        if let (Some(x), Some(y)) = (entry.get("x").and_then(number_like), entry.get("y").and_then(number_like)) {
+            if x.is_finite() && y.is_finite() {
+                bounds.x = Some((x.round() as i64).clamp(-MAX_WINDOW_POS, MAX_WINDOW_POS));
+                bounds.y = Some((y.round() as i64).clamp(-MAX_WINDOW_POS, MAX_WINDOW_POS));
+            }
         }
-        out.insert(
-            mode.to_string(),
-            WindowSize {
-                width: width.clamp(MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH),
-                height: height.clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT),
-            },
-        );
+        if let (Some(width), Some(height)) = (
+            entry.get("width").and_then(number_like),
+            entry.get("height").and_then(number_like),
+        ) {
+            if width.is_finite() && height.is_finite() {
+                let (width, height) = (width.round() as i64, height.round() as i64);
+                if width >= MIN_WINDOW_WIDTH && height >= MIN_WINDOW_HEIGHT {
+                    bounds.width = Some(width.min(MAX_WINDOW_WIDTH));
+                    bounds.height = Some(height.min(MAX_WINDOW_HEIGHT));
+                }
+            }
+        }
+        if bounds.x.is_some() || bounds.width.is_some() {
+            out.insert(key.clone(), bounds);
+        }
     }
     out
+}
+
+/// 几何记忆的键：`host` = 搜索态、`plugin` = 所有插件页的兜底、`plugin:<id>` = 某个插件页。
+fn is_valid_bounds_key(key: &str) -> bool {
+    if key == "host" || key == "plugin" {
+        return true;
+    }
+    let Some(id) = key.strip_prefix("plugin:") else { return false };
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
 /// 配置存储：内存缓存 + 原子落盘（与 v1 `ConfigStore` 等价；写是同步的，调用方在 async 里按需 spawn_blocking）。
@@ -338,7 +374,7 @@ mod tests {
         assert_eq!(config.density, "comfortable");
         assert_eq!(config.history_limit, 500);
         assert!(config.history_in_search);
-        assert!(config.disabled.is_empty() && config.window_sizes.is_empty());
+        assert!(config.disabled.is_empty() && config.window_bounds.is_empty());
         assert!(config.auto_update_check, "默认自动检查更新（只提示，不自动更新）");
     }
 
@@ -382,20 +418,48 @@ mod tests {
     }
 
     #[test]
-    fn window_sizes_drop_partial_and_clamp_out_of_range() {
+    fn window_bounds_drop_partial_and_clamp_out_of_range() {
         let raw = json!({
-            "host": { "width": 900, "height": 620 },
-            "plugin": { "width": 3000, "height": 100 },
-            "ghost": { "width": 100, "height": 100 }
+            "host": { "x": 120, "y": -40, "width": 900, "height": 620 },
+            "plugin:demo": { "x": 10, "y": 20 },
+            "plugin:half": { "x": 10, "width": 800, "height": 600 },
+            "plugin:big": { "width": 3000, "height": 5000 },
+            "plugin:tiny": { "width": 100, "height": 600 },
+            "ghost": { "width": 800, "height": 600 }
         });
-        let sizes = sanitize_window_sizes(Some(&raw));
-        assert_eq!(sizes.len(), 1, "半个尺寸 / 越界值必须整项丢弃");
-        assert_eq!(sizes.get("host").unwrap().width, 900);
-        assert_eq!(sizes.get("host").unwrap().height, 620);
+        let bounds = sanitize_window_bounds(Some(&raw));
+        assert_eq!(bounds.get("host").unwrap().x, Some(120));
+        assert_eq!(bounds.get("host").unwrap().y, Some(-40), "副屏坐标可以是负数");
+        assert_eq!(bounds.get("host").unwrap().width, Some(900));
+        assert_eq!(bounds.get("plugin:demo").unwrap().width, None, "只记位置（只拖过窗口）也合法");
+        assert_eq!(bounds.get("plugin:half").unwrap().x, None, "半个位置必须整半丢掉");
+        assert_eq!(bounds.get("plugin:half").unwrap().width, Some(800), "位置丢不该连坐尺寸");
+        assert_eq!(bounds.get("plugin:big").unwrap().width, Some(MAX_WINDOW_WIDTH));
+        assert_eq!(bounds.get("plugin:big").unwrap().height, Some(MAX_WINDOW_HEIGHT));
+        assert!(!bounds.contains_key("plugin:tiny"), "尺寸不合法又没有位置 ⇒ 整项丢");
+        assert!(!bounds.contains_key("ghost"), "只认 host / plugin / plugin:<id>");
 
-        let clamped = sanitize_window_sizes(Some(&json!({ "host": { "width": 3000, "height": 5000 } })));
-        assert_eq!(clamped.get("host").unwrap().width, MAX_WINDOW_WIDTH);
-        assert_eq!(clamped.get("host").unwrap().height, MAX_WINDOW_HEIGHT);
+        let clamped_pos = sanitize_window_bounds(Some(&json!({ "host": { "x": 999999, "y": -999999 } })));
+        assert_eq!(clamped_pos.get("host").unwrap().x, Some(MAX_WINDOW_POS));
+        assert_eq!(clamped_pos.get("host").unwrap().y, Some(-MAX_WINDOW_POS));
+    }
+
+    /// ≤0.1.5 的 `windowSizes`（只有尺寸）继续有效：`host` 沿用、`plugin` 成为插件页的兜底；
+    /// 新键 `windowBounds` 一旦存在就以它为准（不合并，避免半新半旧两份记忆打架）。
+    #[test]
+    fn window_bounds_migrate_from_legacy_sizes_key() {
+        let legacy = migrate_config(&json!({
+            "windowSizes": { "host": { "width": 900, "height": 620 }, "plugin": { "width": 1000, "height": 800 } }
+        }));
+        assert_eq!(legacy.window_bounds.get("host").unwrap().width, Some(900));
+        assert_eq!(legacy.window_bounds.get("plugin").unwrap().width, Some(1000), "旧 plugin = 新兜底");
+
+        let both = migrate_config(&json!({
+            "windowSizes": { "host": { "width": 500, "height": 500 } },
+            "windowBounds": { "host": { "x": 12, "y": 34, "width": 900, "height": 620 } }
+        }));
+        assert_eq!(both.window_bounds.get("host").unwrap().width, Some(900), "新键优先");
+        assert_eq!(both.window_bounds.get("host").unwrap().x, Some(12));
     }
 
     #[test]
@@ -413,11 +477,11 @@ mod tests {
         let reloaded = ConfigStore::new(&dir);
         assert_eq!(reloaded.load().history_limit, 800, "落盘后重载必须读回新值");
 
-        // 浅合并：patch 整个 windowSizes 必须给全（少一个键 = 另一个模式的记忆丢）
-        store.patch(&json!({ "windowSizes": { "host": { "width": 900, "height": 620 } } })).unwrap();
+        // 浅合并：patch 整个 windowBounds 必须给全（少一个键 = 别的窗口态的记忆丢）
+        store.patch(&json!({ "windowBounds": { "host": { "width": 900, "height": 620 } } })).unwrap();
         let config = store.get();
-        assert_eq!(config.window_sizes.get("host").unwrap().width, 900);
-        assert!(!config.window_sizes.contains_key("plugin"));
+        assert_eq!(config.window_bounds.get("host").unwrap().width, Some(900));
+        assert!(!config.window_bounds.contains_key("plugin"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

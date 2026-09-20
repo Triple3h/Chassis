@@ -785,6 +785,13 @@ impl Kernel {
         // 状态条第一次被读到时就能给出有意义的差分（否则首个 CPU 读数只能是 0）
         self.stats.warmup().await;
 
+        // 跨重启的窗口几何恢复：把**宿主态**（启动后 UI 的第一步就是它）的记忆推给壳。
+        // 壳只在窗口隐藏时应用 —— 内核热更新后的重新推送可能撞上用户正开着的插件页，
+        // 那种时候不能把他的窗口挪走（见壳 `window.restoreBounds`）
+        if let Some(bounds) = config.window_bounds.get("host") {
+            self.primitives.restore_window_bounds(bounds);
+        }
+
         self.log("info", &format!("内核就绪：UI http://127.0.0.1:{}，数据目录 {}", self.ui_port(), self.data_root()));
 
         // 应用（壳）更新的检查守护：启动 90s 后查一次，之后每 6h 一轮。

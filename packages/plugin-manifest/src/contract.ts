@@ -103,6 +103,16 @@ export interface AuditRecord {
   truncatedArgs?: string
 }
 
+/** 一个窗口态记下的几何：位置（屏幕物理坐标）+ 尺寸（逻辑像素）；两半可各自缺省 */
+export interface WindowBoundsEntry {
+  /** 屏幕物理坐标（多屏时副屏可为负） */
+  x?: number
+  y?: number
+  /** 逻辑像素（= CSS px，与 `window.setBounds` 的口径一致） */
+  width?: number
+  height?: number
+}
+
 /** 宿主配置（内核持久化于 `<dataRoot>/config.json`；UI 只读展示 + patch） */
 export interface Config {
   version: number
@@ -125,11 +135,14 @@ export interface Config {
   /** 开发模式插件：pluginId → devUrl */
   devPlugins: Record<string, string>
   /**
-   * 用户调过（拖过把手）的窗口尺寸，**按模式分别记忆**：
-   * `host` = 启动台搜索态、`plugin` = 插件页；缺省 ⇒ 内容自适应 / 默认高度。
-   * 由启动台 UI 读写（`Kernel.patchConfig` 收口），内核只做钳制。
+   * 用户调过的**窗口几何**（位置 + 尺寸），**按窗口态分别记忆**：
+   * `host` = 启动台搜索态、`plugin:<插件id>` = 某个插件的页面（设置页也是插件页）、
+   * `plugin` = 所有插件页的兜底（≤0.1.5 的旧数据沿用）。
+   * 位置是屏幕物理坐标（px，多屏可为负）、尺寸是逻辑像素（= CSS px）；两半可各自缺省
+   * （只拖过窗口 ⇒ 只有位置；从没改过 ⇒ 整项没有）。
+   * 由启动台 UI 读写（`Kernel.patchConfig` 收口），内核只做清洗 / 钳制。
    */
-  windowSizes: Partial<Record<'host' | 'plugin', { width: number; height: number }>>
+  windowBounds: Record<string, WindowBoundsEntry>
 }
 
 export interface HostInfo {

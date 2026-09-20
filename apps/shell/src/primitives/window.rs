@@ -15,12 +15,8 @@ pub const DEFAULT_WIDTH: f64 = 720.0;
 pub const MIN_HEIGHT: f64 = 320.0;
 pub const MAX_HEIGHT: f64 = 640.0;
 
-/// **用户记忆尺寸**的钳制（`window.setSize`）：与内容自适应那套分开 ——
-/// 自适应是"紧凑弹窗"，记忆尺寸是"用户想拉多大"，区间宽得多（requirements §6.2 最小 480×240）
-pub const USER_MIN_WIDTH: f64 = 480.0;
-pub const USER_MAX_WIDTH: f64 = 2000.0;
-pub const USER_MIN_HEIGHT: f64 = 240.0;
-pub const USER_MAX_HEIGHT: f64 = 1400.0;
+// 注：用户记忆几何（`window.setBounds`）的钳制在**内核**（`config.rs` 的
+// MIN/MAX_WINDOW_* 与 MAX_WINDOW_POS）—— 壳只收到已经合法的值，不再自己夹一遍。
 
 /// 唤出后的"防抖窗口"：这段时间内的失焦一律忽略。
 /// 原因：窗口从隐藏变可见时会先收到一次 `Focused(false)`（此时 set_focus 还没生效），
@@ -41,6 +37,12 @@ static LAST_SHOWN_MS: AtomicU64 = AtomicU64::new(0);
 static HAS_FOCUSED: AtomicBool = AtomicBool::new(false);
 /// 排队的隐藏计划落地时间（ms 时间戳；0 = 没有排队的隐藏）
 static HIDE_AT_MS: AtomicU64 = AtomicU64::new(0);
+/// 窗口位置是否已被「确立」：显示并在用户眼前待过，或被跨重启恢复过。
+///
+/// 语义（见 `place_on_show`）：确立过 ⇒ 唤出时**保持原位**（窗口几何记忆的落点），
+/// 只有窗口中心已经不在鼠标所在屏时才居中；从没确立过（App 刚起来的第一次唤出）⇒ 直接居中，
+/// 免得把系统给的默认摆放当成用户的选择。
+static BOUNDS_ESTABLISHED: AtomicBool = AtomicBool::new(false);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -66,6 +68,11 @@ pub fn in_show_grace() -> bool {
 
 pub fn has_focused_since_show() -> bool {
     HAS_FOCUSED.load(Ordering::Relaxed)
+}
+
+/// 窗口位置已确立（显示过 / 被跨重启恢复过）：从这一刻起唤出不再无条件居中
+fn mark_bounds_established() {
+    BOUNDS_ESTABLISHED.store(true, Ordering::Relaxed);
 }
 
 pub fn main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -98,13 +105,41 @@ pub fn center_on_cursor_screen(app: &AppHandle, window: &WebviewWindow) {
     let _ = window.set_position(Position::Physical(PhysicalPosition::new(x.round() as i32, y.round() as i32)));
 }
 
+/// 窗口中心是否还在「鼠标所在显示器」里（任何一步问不到都按「不在」处理 —— 那就去居中，
+/// 与旧行为一致，绝不会因为读不到鼠标而把窗口留在别的屏幕上）。
+fn window_center_on_cursor_screen(app: &AppHandle, window: &WebviewWindow) -> bool {
+    let Ok(cursor) = app.cursor_position() else { return false };
+    let Some(monitor) = app.monitor_from_point(cursor.x, cursor.y).ok().flatten() else { return false };
+    let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else { return false };
+    let center_x = position.x as f64 + size.width as f64 / 2.0;
+    let center_y = position.y as f64 + size.height as f64 / 2.0;
+    let monitor_position = monitor.position();
+    let monitor_size = monitor.size();
+    center_x >= monitor_position.x as f64
+        && center_x < monitor_position.x as f64 + monitor_size.width as f64
+        && center_y >= monitor_position.y as f64
+        && center_y < monitor_position.y as f64 + monitor_size.height as f64
+}
+
+/// 唤出前把窗口放到位（requirements §3.1「窗口几何记忆」）。
+///
+/// 位置确立过（显示过 / 拖动过 / 跨重启恢复过）而窗口中心仍在鼠标所在屏 ⇒ **保持原位**；
+/// 否则（App 起来后的第一次唤出、或用户换到别的屏按了热键）⇒ 居中 ——
+/// 「热键一按窗口就在眼前」这条体验不能丢，跨屏了还赖在旧屏上。
+fn place_on_show(app: &AppHandle, window: &WebviewWindow) {
+    if BOUNDS_ESTABLISHED.load(Ordering::Relaxed) && window_center_on_cursor_screen(app, window) {
+        return;
+    }
+    center_on_cursor_screen(app, window);
+}
+
 pub fn show(app: &AppHandle, params: &Value) -> Result<Value, String> {
     let window = main_window(app)?;
     let focus = params.get("focus").and_then(|v| v.as_bool()).unwrap_or(true);
     mark_shown();
     // 唤出要把还排在队里的那次隐藏作废（热键连按不能被上一次隐藏偷走窗口）
     cancel_pending_hide();
-    center_on_cursor_screen(app, &window);
+    place_on_show(app, &window);
     // 选中文本**必须在窗口上屏之前**读：窗口一显示，前台 App 就成了自己（见 selection.rs）
     let selection = crate::primitives::selection::read_for_show(app);
     window.show().map_err(|err| err.to_string())?;
@@ -168,6 +203,8 @@ pub fn hide(app: &AppHandle) -> Result<Value, String> {
     // 落地了就没有「排队中的隐藏」了：不清的话，热键下一次按会被当成「取消隐藏」
     // （而窗口其实早藏了），表现是「按了热键没反应」。
     cancel_pending_hide();
+    // 窗口在用户眼前待过：这个位置从此刻起算「用户的位置」，下次唤出不再无条件居中
+    mark_bounds_established();
     Ok(json!(null))
 }
 
@@ -205,6 +242,7 @@ pub fn arm_hide_fallback(app: &AppHandle) {
         log("[window] 隐藏兜底到点（没等到回执），直接落地");
         if let Some(window) = handle.get_webview_window("main") {
             let _ = window.hide();
+            mark_bounds_established();
         }
     });
 }
@@ -274,26 +312,69 @@ pub fn is_visible(app: &AppHandle) -> Result<Value, String> {
     Ok(json!(window.is_visible().unwrap_or(false)))
 }
 
-/// 用户记忆的窗口尺寸（requirements §6.1 `window.setSize`）：宽高一起给。
+/// 当前窗口几何（requirements §6.1 `window.bounds`）：位置 = 屏幕物理像素、尺寸 = 逻辑像素。
+/// 隐藏状态下也能读（窗口 frame 一直在）—— UI 的「窗口几何记忆」就是在离场前读它落盘的。
+pub fn bounds(app: &AppHandle) -> Result<Value, String> {
+    let window = main_window(app)?;
+    let position = window.outer_position().map_err(|err| err.to_string())?;
+    let size = window.inner_size().map_err(|err| err.to_string())?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let (width, height) = if scale > 0.0 {
+        (size.width as f64 / scale, size.height as f64 / scale)
+    } else {
+        (size.width as f64, size.height as f64)
+    };
+    Ok(json!({
+        "x": position.x,
+        "y": position.y,
+        "width": width.round(),
+        "height": height.round(),
+    }))
+}
+
+/// 应用用户记忆的窗口几何（requirements §6.1 `window.setBounds`）：位置 / 尺寸各自成对、可只给一半。
 /// 内容自适应那条路仍走 `set_height`（宽度固定回 `DEFAULT_WIDTH`），两者别混用 ——
 /// 否则"恢复默认大小"会被一次内容变化又拉回 720 宽。
-pub fn set_size(app: &AppHandle, params: &Value) -> Result<Value, String> {
+pub fn set_bounds(app: &AppHandle, params: &Value) -> Result<Value, String> {
     let window = main_window(app)?;
-    let width = params
-        .get("width")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(DEFAULT_WIDTH)
-        .clamp(USER_MIN_WIDTH, USER_MAX_WIDTH);
-    let height = params
-        .get("height")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(MIN_HEIGHT)
-        .clamp(USER_MIN_HEIGHT, USER_MAX_HEIGHT);
-    window
-        .set_size(Size::Logical(LogicalSize::new(width, height)))
-        .map_err(|err| err.to_string())?;
-    log(&format!("[window] set_size {width:.0}x{height:.0}（用户记忆尺寸）"));
-    Ok(json!({ "width": width, "height": height }))
+    let number = |key: &str| {
+        params
+            .get(key)
+            .and_then(Value::as_f64)
+            .filter(|value| value.is_finite())
+            .map(|value| value.round())
+    };
+    if let (Some(x), Some(y)) = (number("x"), number("y")) {
+        window
+            .set_position(Position::Physical(PhysicalPosition::new(x as i32, y as i32)))
+            .map_err(|err| err.to_string())?;
+    }
+    if let (Some(width), Some(height)) = (number("width"), number("height")) {
+        if width > 0.0 && height > 0.0 {
+            window
+                .set_size(Size::Logical(LogicalSize::new(width, height)))
+                .map_err(|err| err.to_string())?;
+        }
+    }
+    log(&format!("[window] set_bounds {params}（用户记忆几何）"));
+    bounds(app)
+}
+
+/// 跨重启的几何恢复（内核启动时的 `window.restoreBounds` 通知，无应答）。
+///
+/// **只在窗口隐藏时应用**：可见时多半是内核热更新后的重新推送，用户正开着插件页 ——
+/// 那种时候把他的窗口挪到宿主态记忆的位置是最糟的打扰。
+pub fn restore_bounds(app: &AppHandle, params: &Value) -> Result<Value, String> {
+    let window = main_window(app)?;
+    // 问不到可见性时按「可见」处理（保守：宁可不恢复，也别挪用户正看的窗口）
+    if window.is_visible().unwrap_or(true) {
+        log("[window] restore_bounds 跳过（窗口可见，不打扰用户）");
+        return Ok(json!({ "applied": false }));
+    }
+    set_bounds(app, params)?;
+    mark_bounds_established();
+    log("[window] restore_bounds 已应用（跨重启恢复窗口几何）");
+    Ok(json!({ "applied": true }))
 }
 
 pub fn set_height(app: &AppHandle, params: &Value) -> Result<Value, String> {

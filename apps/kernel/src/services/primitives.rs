@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use crate::audit::AuditLog;
+use crate::config::WindowBounds;
 use crate::error::{KernelError, Result};
 use crate::link::ShellLink;
 use crate::services::audited;
@@ -29,6 +30,28 @@ const SHELL_UPDATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 pub struct AppUsage {
     pub rss: i64,
     pub cpu_ms: i64,
+}
+
+/// 壳报回的**完整**窗口几何（位置 = 屏幕物理像素、尺寸 = 逻辑像素）；
+/// 只认「四个数字都在」的形状 —— 缺一个就当问不到。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct WindowGeometry {
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
+}
+
+impl WindowGeometry {
+    fn parse(value: &Value) -> Option<Self> {
+        let number = |key: &str| value.get(key).and_then(Value::as_f64).filter(|item| item.is_finite());
+        Some(Self {
+            x: number("x")?.round() as i64,
+            y: number("y")?.round() as i64,
+            width: number("width")?.round() as i64,
+            height: number("height")?.round() as i64,
+        })
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -211,9 +234,66 @@ impl Primitives {
         Ok(())
     }
 
-    pub async fn set_size(&self, width: f64, height: f64) -> Result<()> {
-        self.link.request("window.setSize", Some(json!({ "width": width, "height": height }))).await?;
-        Ok(())
+    /// 窗口当前几何（UI 落盘「窗口几何记忆」时读它）。**问不到就返回 `None`** ——
+    /// 半份几何绝不能拿去落盘 / 恢复（会把窗口设到诡异的位置或大小）。
+    pub async fn window_bounds(&self) -> Option<WindowGeometry> {
+        if !self.link.is_connected() {
+            return None;
+        }
+        let value = self.link.request("window.bounds", None).await.ok()?;
+        WindowGeometry::parse(&value)
+    }
+
+    /// 应用用户记忆的窗口几何（唤出 / 切换窗口态）：位置与尺寸各自可缺（只动给到的那一半）。
+    /// 与 `set_height` 的「内容自适应」是两条路，别混用。
+    pub async fn set_bounds(
+        &self,
+        x: Option<i64>,
+        y: Option<i64>,
+        width: Option<i64>,
+        height: Option<i64>,
+    ) -> Result<Value> {
+        let mut params = serde_json::Map::new();
+        if let Some(value) = x {
+            params.insert("x".to_string(), json!(value));
+        }
+        if let Some(value) = y {
+            params.insert("y".to_string(), json!(value));
+        }
+        if let Some(value) = width {
+            params.insert("width".to_string(), json!(value));
+        }
+        if let Some(value) = height {
+            params.insert("height".to_string(), json!(value));
+        }
+        if params.is_empty() {
+            return Err(KernelError::bad_args("至少要给一对几何参数：x/y 或 width/height"));
+        }
+        self.link.request("window.setBounds", Some(Value::Object(params))).await
+    }
+
+    /// 跨重启的几何恢复：把某个窗口态的记忆推给壳（**通知**，不等应答）。
+    ///
+    /// 壳只在窗口**隐藏**时应用 —— 可见时多半是内核热更新后的重新推送，
+    /// 用户正开着插件页，那种时候不能挪走他的窗口。
+    pub fn restore_window_bounds(&self, bounds: &WindowBounds) {
+        let mut params = serde_json::Map::new();
+        if let Some(value) = bounds.x {
+            params.insert("x".to_string(), json!(value));
+        }
+        if let Some(value) = bounds.y {
+            params.insert("y".to_string(), json!(value));
+        }
+        if let Some(value) = bounds.width {
+            params.insert("width".to_string(), json!(value));
+        }
+        if let Some(value) = bounds.height {
+            params.insert("height".to_string(), json!(value));
+        }
+        if params.is_empty() {
+            return;
+        }
+        self.link.notify("window.restoreBounds", Some(Value::Object(params)));
     }
 
     /// 壳进程自身的占用（常驻内存 + 累计 CPU 毫秒）。

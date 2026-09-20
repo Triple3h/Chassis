@@ -146,11 +146,20 @@ export const api = {
   setWindowHeight: (height: number) =>
     request<{ ok: boolean }>('/api/window/setHeight', { method: 'POST', body: JSON.stringify({ height }) }),
   /**
-   * 用户记忆的窗口尺寸（requirements §3.1「尺寸记忆」）：唤出 / 进插件页时还原用。
+   * 当前窗口几何（位置 = 屏幕物理像素、尺寸 = 逻辑像素）：
+   * 「窗口几何记忆」（requirements §3.1）关闭前 / 切换窗口态时读它落盘。
+   * `bounds: null` = 问不到壳（standalone / 未连接）—— 当「没记过」处理，别编默认值。
+   */
+  windowBounds: () =>
+    request<{ ok: boolean; bounds: { x: number; y: number; width: number; height: number } | null }>(
+      '/api/window/bounds',
+    ),
+  /**
+   * 应用用户记忆的窗口几何（唤出 / 切换窗口态时还原）：x/y 与 width/height 各自成对、至少给一对。
    * 与 `setWindowHeight`（内容自适应）是两条路，别混用。
    */
-  setWindowSize: (width: number, height: number) =>
-    request<{ ok: boolean }>('/api/window/setSize', { method: 'POST', body: JSON.stringify({ width, height }) }),
+  setWindowBounds: (bounds: { x?: number; y?: number; width?: number; height?: number }) =>
+    request<{ ok: boolean }>('/api/window/setBounds', { method: 'POST', body: JSON.stringify(bounds) }),
   /**
    * 无边框窗口的拖动：拖拽区 mousedown 时调一次即可 —— 系统接管后的移动
    * 不会再经过这里（不是每帧请求，也不会跟动画抢频）。

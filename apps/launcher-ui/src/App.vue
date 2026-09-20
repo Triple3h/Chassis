@@ -45,20 +45,42 @@ const containerWidth = ref(720)
 let disposeEvents: (() => void) | null = null
 
 /**
- * 窗口尺寸由用户说了算（requirements §3.1「尺寸记忆」）。
+ * 窗口几何（位置 + 尺寸）由用户说了算（requirements §3.1「窗口几何记忆」）。
  *
- * 拖过缩放把手就置位：内容高度不再改窗口（否则下一次搜索会立刻把手动调的尺寸顶回去）。
- * 同时把尺寸**按模式**记进 config（`windowSizes.host` / `.plugin`），
- * 下次唤出 / 进入插件页时还原；只有「恢复默认大小」会清掉它。
+ * 拖过缩放把手 / 挪过窗口就置位：内容高度不再改窗口（否则下一次搜索会立刻把手动调的尺寸顶回去）。
+ * 几何**按窗口态分别记**进 config（`windowBounds`）：`host` = 搜索态、`plugin:<插件id>` = 各插件页
+ * （设置页也是插件页）、`plugin` = 所有插件页的兜底（≤0.1.5 的旧数据）。
+ * 关闭（隐藏）前 / 切换窗口态时落盘，唤出 / 进入插件页时还原；只有「恢复默认大小」会清掉尺寸记忆。
  */
 const manualResized = ref(false)
-/** 尺寸记忆的键：宿主搜索态与插件页各记一份，互不影响 */
-const sizeMode = computed<'host' | 'plugin'>(() => (ui.inPluginView ? 'plugin' : 'host'))
-const savedSize = computed(() => data.config?.windowSizes?.[sizeMode.value] ?? null)
-/** 「恢复默认大小」只在当前模式确实被改过时露出（刚拖完还没落盘的那一瞬也算） */
+/** 几何记忆的键：宿主搜索态与每个插件页各记一份，互不影响 */
+const geometryKey = computed(() => {
+  const view = ui.pluginView
+  return view ? `plugin:${view.pluginId}` : 'host'
+})
+/** 当前窗口态的几何（专属记忆优先；插件页没记过专属的用 `plugin` 兜底） */
+const savedGeometry = computed(() => lookupGeometry(geometryKey.value))
+/** 尺寸那一半；位置那一半由壳在唤出时裁决，UI 只在切换窗口态时应用 */
+const savedSize = computed(() => {
+  const geometry = savedGeometry.value
+  return geometry?.width && geometry?.height ? { width: geometry.width, height: geometry.height } : null
+})
+/** 「恢复默认大小」只在当前窗口态的尺寸确实被改过时露出（刚拖完还没落盘的那一瞬也算） */
 const canResetSize = computed(() => manualResized.value || savedSize.value !== null)
-/** 尺寸落盘的防抖定时器：拖动过程中 resize 事件是连续的，松手后 400ms 才认为定稿 */
+/** 几何落盘的防抖定时器：拖动过程中 resize 事件是连续的，松手后 400ms 才认为定稿 */
 let sizeSaveTimer = 0
+/** 切换窗口态的令牌：快速往返时只让最后一次的「先落盘旧态、再应用新态」跑完 */
+let geometryToken = 0
+
+type BoundsEntry = { x?: number; y?: number; width?: number; height?: number }
+
+function lookupGeometry(key: string): BoundsEntry | null {
+  const map = data.config?.windowBounds
+  const own = map?.[key]
+  if (own) return own
+  // 插件页没记过专属几何时回落到 `plugin` 兜底（旧模型「所有插件页共用一份」的沿用）
+  return key.startsWith('plugin:') ? (map?.plugin ?? null) : null
+}
 
 /**
  * 窗口是否已被壳藏起来 —— 整个「弹窗动效」的总开关。
@@ -103,9 +125,9 @@ function setWindowVisible(visible: boolean): void {
   if (!visible) {
     windowHidden.value = true
     hiddenAtMs = performance.now()
-    // 离场前把"用户刚拖出来的尺寸"立刻落盘：防抖窗口里的那次保存不该随着窗口隐藏被推迟 ——
+    // 离场前把"用户刚拖出来的几何"立刻落盘：防抖窗口里的那次保存不该随着窗口隐藏被推迟 ——
     // 而窗口藏起来之后再读 innerWidth/innerHeight 未必准（下一次唤出会按错的尺寸还原）。
-    void flushSizeSave()
+    void flushGeometry(geometryKey.value)
     armExitAck(token)
     return
   }
@@ -122,8 +144,9 @@ function setWindowVisible(visible: boolean): void {
     void waitForPaint().then(() => {
       if (token !== visibilityToken) return
       windowHidden.value = false
-      // 唤出 = 回到"这个模式该有的尺寸"：有记忆就用记忆，没有就内容自适应
-      applyModeSize()
+      // 唤出 = 回到"这个窗口态该有的尺寸"：有记忆就用记忆，没有就内容自适应。
+      // 位置不在这里应用 —— 壳已经裁决过了（窗口中心还在鼠标所在屏就保持原位、换屏了才居中）
+      applyGeometry(geometryKey.value, false)
     })
   }
   if (document.visibilityState === 'hidden') {
@@ -269,8 +292,9 @@ onMounted(async () => {
   window.addEventListener('focus', clearHiddenByFocus)
   measure()
   // 挂载时也应用一次：UI 可能刚重载（内核重启 / 手动刷新），而窗口尺寸还停在上一次的模式上
-  // （`inPluginView` 此刻必然是空的，所以这里应用的就是宿主态该有的尺寸）
-  applyModeSize()
+  // （`inPluginView` 此刻必然是空的，所以这里应用的就是宿主态该有的尺寸）。
+  // 位置不应用 —— 窗口已经显示着（或由壳放在用户上次的位置），别把它挪走
+  applyGeometry(geometryKey.value, false)
   searchBox.value?.focus()
   // 触发点可能是「壳在 UI 加载完之前就显示过窗口」：只有问内核才知道当前该不该播入场动画。
   // 只在**明确**回答 false 时收起界面 —— null 表示内核问不到壳（standalone / `pnpm dev`），
@@ -298,23 +322,27 @@ function measure(): void {
   viewportHeight.value = Math.max(120, window.innerHeight - SEARCH_BAR_HEIGHT - FOOTER_HEIGHT - 18)
 }
 
-/** 窗口尺寸变了：重算可视区，并（在用户改过的模式里）把新尺寸记下来 */
+/** 窗口几何变了：重算可视区，并把用户接管过的尺寸记下来（位置由离场 / 切换窗口态时的 flush 兜） */
 function onWindowResize(): void {
   measure()
-  scheduleSizeSave()
+  scheduleGeometrySave()
 }
 
-/** 内容高度 → 窗口高度；尺寸被用户接管（拖过 or 当前模式有记忆）时不动窗口 */
+/** 内容高度 → 窗口高度；尺寸被用户接管（拖过 or 当前窗口态有记忆）时不动窗口 */
 watch(desiredHeight, (height) => {
   if (manualResized.value || savedSize.value) return
   setWindowHeight(height)
 })
 
-/** 切 宿主 ⇄ 插件页：各自回到自己记着的尺寸（没记过就是各自的默认形态） */
-watch(
-  () => ui.inPluginView,
-  () => applyModeSize(),
-)
+/** 切窗口态（宿主 ⇄ 插件页）：旧态先落盘（此刻读到的还是切换前的几何），新态再应用（含位置） */
+watch(geometryKey, (now, previous) => {
+  const token = ++geometryToken
+  void (async () => {
+    await flushGeometry(previous || 'host')
+    if (token !== geometryToken) return
+    applyGeometry(now, true)
+  })()
+})
 
 /** 缩放把手按下：从这一刻起窗口尺寸由用户说了算 */
 function onResizeStart(): void {
@@ -322,46 +350,77 @@ function onResizeStart(): void {
 }
 
 /** 拖完尺寸后落盘（防抖 400ms：拖动过程中 resize 事件是连续的，松手才算定稿） */
-function scheduleSizeSave(): void {
+function scheduleGeometrySave(): void {
   if (!manualResized.value) return
   window.clearTimeout(sizeSaveTimer)
-  sizeSaveTimer = window.setTimeout(() => void flushSizeSave(), 400)
+  sizeSaveTimer = window.setTimeout(() => void flushGeometry(geometryKey.value), 400)
 }
 
-/** 立即把当前窗口尺寸记进 config（防抖到点 / 离场前调用；值没变就不写） */
-async function flushSizeSave(): Promise<void> {
+/**
+ * 立即把 `key` 这个窗口态的几何记进 config（防抖到点 / 离场前 / 切换窗口态前调用；值没变就不写）。
+ *
+ * 位置总是记（壳报什么记什么）；尺寸只在**用户接管过**时记 —— 否则会把「内容自适应」
+ * 的当前高度误记成用户尺寸，从此这个窗口再也不会自适应。
+ */
+async function flushGeometry(key: string): Promise<void> {
   window.clearTimeout(sizeSaveTimer)
   sizeSaveTimer = 0
-  if (!manualResized.value) return
-  const width = Math.round(window.innerWidth)
-  const height = Math.round(window.innerHeight)
-  if (width <= 0 || height <= 0) return
-  const mode = sizeMode.value
-  const known = data.config?.windowSizes
-  if (known?.[mode]?.width === width && known?.[mode]?.height === height) return
+  let position: { x: number; y: number } | null = null
   try {
-    // 整个 `windowSizes` 一起写回：patchConfig 是浅合并，只给一个键会把另一个模式抹掉
-    await api.patchConfig({ windowSizes: { ...(known ?? {}), [mode]: { width, height } } })
+    const res = await api.windowBounds()
+    // bounds 为 null = 问不到壳（standalone / 未连接）：静默 —— 下次还会再试一次
+    if (res.bounds) position = { x: Math.round(res.bounds.x), y: Math.round(res.bounds.y) }
   } catch {
-    // 内核没连上（standalone / 退出中）：静默 —— 下次拖还会再试一次
+    return
+  }
+  if (!position) return
+  const known = data.config?.windowBounds ?? {}
+  const previous = known[key] ?? {}
+  const next: BoundsEntry = { ...position }
+  if (manualResized.value) {
+    next.width = Math.round(window.innerWidth)
+    next.height = Math.round(window.innerHeight)
+  } else if (previous.width && previous.height) {
+    // 尺寸不归这次 flush 管：原样保留（别把自适应的当前高度写成用户尺寸）
+    next.width = previous.width
+    next.height = previous.height
+  }
+  if (
+    previous.x === next.x &&
+    previous.y === next.y &&
+    previous.width === next.width &&
+    previous.height === next.height
+  ) {
+    return
+  }
+  try {
+    // 整个 `windowBounds` 一起写回：patchConfig 是浅合并，只给一个键会把别的窗口态抹掉
+    await api.patchConfig({ windowBounds: { ...known, [key]: next } })
+  } catch {
+    // 内核没连上（standalone / 退出中）：静默
   }
 }
 
 /**
- * 应用当前模式该有的尺寸。
- *  - 有记忆 ⇒ 用 `setSize`（宽高一起）并保持"用户接管"状态；
- *  - 没记忆 ⇒ 清掉接管状态、用 `setHeight` 回到内容自适应。
+ * 应用某个窗口态该有的几何。
+ *  - 有尺寸记忆 ⇒ 用 `setWindowBounds`（宽高一起）并保持"用户接管"状态；
+ *  - 没尺寸记忆 ⇒ 清掉接管状态、用 `setHeight` 回到内容自适应。
  *
- * `force` 是必需的：窗口被拉过之后 `setWindowHeight` 内部记的 `latest` 和真实尺寸
- * 早就对不上了，不强制发一次就回不到默认形态。
+ * `includePosition` 只在**切换窗口态**时为 true：唤出时位置由壳裁决（窗口中心还在鼠标所在屏
+ * 就保持原位、换屏了才居中）—— UI 此刻再设一次位置会把壳的裁决覆盖掉（跨屏唤出又跳回旧位置）。
  */
-function applyModeSize(): void {
-  const size = savedSize.value
-  if (size) {
+function applyGeometry(key: string, includePosition: boolean): void {
+  const geometry = lookupGeometry(key)
+  const position =
+    includePosition && geometry?.x != null && geometry?.y != null ? { x: geometry.x, y: geometry.y } : null
+  if (geometry?.width && geometry?.height) {
     manualResized.value = true
-    void api.setWindowSize(size.width, size.height).catch(() => undefined)
+    void api
+      .setWindowBounds({ ...(position ?? {}), width: geometry.width, height: geometry.height })
+      .catch(() => undefined)
     return
   }
+  if (position) void api.setWindowBounds(position).catch(() => undefined)
   // 本来就在自适应轨道上（没记忆、也没人手动改过）：交给 `desiredHeight` 的 watch 就好，
   // 这里再 force 一次只会让窗口在唤出那一刻被无谓地设两遍尺寸
   if (!manualResized.value) return
@@ -369,16 +428,32 @@ function applyModeSize(): void {
   setWindowHeight(desiredHeight.value, { immediate: true, force: true })
 }
 
-/** 「恢复默认大小」：忘掉当前模式的记忆尺寸，回到默认形态 */
+/** 当前窗口态**自己的**尺寸记忆（不含 `plugin` 兜底）——「恢复默认大小」要清的那一份 */
+function ownSizeKey(): string | null {
+  const map = data.config?.windowBounds
+  const key = geometryKey.value
+  const own = map?.[key]
+  if (own?.width || own?.height) return key
+  // 插件页只有兜底那份：清兜底 = 所有插件页一起回默认（旧数据下这是唯一能清的目标）
+  if (key.startsWith('plugin:') && (map?.plugin?.width || map.plugin?.height)) return 'plugin'
+  return null
+}
+
+/** 「恢复默认大小」：忘掉当前窗口态的尺寸记忆（位置保留），回到默认形态 */
 async function resetWindowSize(): Promise<void> {
   manualResized.value = false
   window.clearTimeout(sizeSaveTimer)
   sizeSaveTimer = 0
-  const mode = sizeMode.value
-  const known = { ...(data.config?.windowSizes ?? {}) }
-  if (known[mode]) {
-    delete known[mode]
-    await api.patchConfig({ windowSizes: known }).catch(() => undefined)
+  const key = ownSizeKey()
+  if (key) {
+    const known = { ...(data.config?.windowBounds ?? {}) }
+    const entry: BoundsEntry = { ...(known[key] ?? {}) }
+    delete entry.width
+    delete entry.height
+    // 位置也空 ⇒ 整项没有存在意义，删掉（内核清洗也不会收空对象）
+    if (entry.x == null && entry.y == null) delete known[key]
+    else known[key] = entry
+    await api.patchConfig({ windowBounds: known }).catch(() => undefined)
   }
   setWindowHeight(desiredHeight.value, { immediate: true, force: true })
 }

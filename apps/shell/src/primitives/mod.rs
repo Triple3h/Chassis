@@ -24,8 +24,11 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Outcome {
         "window.show" => Outcome::Now(window::show(app, params)),
         "window.hide" => Outcome::Now(window::hide(app)),
         "window.isVisible" => Outcome::Now(window::is_visible(app)),
+        "window.bounds" => Outcome::Now(window::bounds(app)),
+        "window.setBounds" => Outcome::Now(window::set_bounds(app, params)),
+        // 内核启动时的跨重启恢复（**通知**：无 id、无应答）：壳只在窗口隐藏时应用
+        "window.restoreBounds" => Outcome::Now(window::restore_bounds(app, params)),
         "window.setHeight" => Outcome::Now(window::set_height(app, params)),
-        "window.setSize" => Outcome::Now(window::set_size(app, params)),
         "window.startDragging" => Outcome::Now(window::start_dragging(app)),
         "window.startResizeDragging" => Outcome::Now(window::start_resize_dragging(app, params)),
 

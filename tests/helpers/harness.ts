@@ -55,6 +55,11 @@ export interface HarnessOptions {
    * 用于「插件安装目录里带旧数据」这类场景 —— 迁移必须在装配期发生。
    */
   seed?: (dataRoot: string) => Promise<void>
+  /**
+   * 从内核**启动**（而非就绪）就开记壳侧调用：装配期的推送（如 `window.restoreBounds`）
+   * 也要断言时用。默认关 —— 装配期的 tray.setMenu / hotkey.register 不该混进断言。
+   */
+  recordFromBoot?: boolean
 }
 
 /**
@@ -76,6 +81,8 @@ export interface FakeShell {
   showSelection: string | null
   /** 假壳对 `app.usage` 的回答（状态条要拼"启动台一共占多少"的壳那一半） */
   usage: { rss: number; cpuMs: number }
+  /** 假壳认为的「当前窗口几何」：`window.bounds` 读它、`window.setBounds` / `window.restoreBounds` 改它 */
+  bounds: { x: number; y: number; width: number; height: number }
   /** 断开假壳（= 关掉内核的 stdin，内核会自己收尾退出） */
   close: () => void
 }
@@ -92,9 +99,12 @@ export interface PluginInfo {
   [key: string]: unknown
 }
 
-export interface WindowSizes {
-  host?: { width: number; height: number }
-  plugin?: { width: number; height: number }
+/** 一个窗口态记下的几何：位置（屏幕物理坐标）+ 尺寸（逻辑像素），两半可各自缺省 */
+export interface WindowBoundsEntry {
+  x?: number
+  y?: number
+  width?: number
+  height?: number
 }
 
 export interface KernelConfig {
@@ -105,7 +115,7 @@ export interface KernelConfig {
   density: string
   historyLimit: number
   hotkey: { accelerator: string; [key: string]: unknown }
-  windowSizes: WindowSizes
+  windowBounds: Record<string, WindowBoundsEntry>
   [key: string]: unknown
 }
 
@@ -220,8 +230,27 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
   const calls: Array<{ method: string; params: Record<string, unknown> }> = []
   const usage = { rss: 96 * 1024 * 1024, cpuMs: 1234 }
   let showSelection: string | null = null
-  let recordShell = false
+  let recordShell = options.recordFromBoot === true
   let stdoutBuffer = ''
+
+  // 假壳的「当前窗口几何」：内核的窗口几何记忆要读它 / 写它
+  const shellBounds = { x: 240, y: 180, width: 720, height: 480 }
+  const applyBounds = (params: Record<string, unknown>): { x: number; y: number; width: number; height: number } => {
+    const number = (key: string): number | undefined => (typeof params[key] === 'number' ? (params[key] as number) : undefined)
+    const x = number('x')
+    const y = number('y')
+    const width = number('width')
+    const height = number('height')
+    if (x !== undefined && y !== undefined) {
+      shellBounds.x = x
+      shellBounds.y = y
+    }
+    if (width !== undefined && height !== undefined) {
+      shellBounds.width = width
+      shellBounds.height = height
+    }
+    return { ...shellBounds }
+  }
 
   stdout.setEncoding('utf8')
   stdout.on('data', (chunk: string) => {
@@ -245,13 +274,19 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
         sent.push(message.method)
         calls.push({ method: message.method, params: message.params ?? {} })
       }
+      // 内核启动时的跨重启恢复是**通知**（无 id）：假壳照做 —— 当成新的「当前几何」
+      if (message.method === 'window.restoreBounds') applyBounds(message.params ?? {})
       // 壳必须应答，否则内核要等满超时；返回值够测试用即可
       if (message.id !== undefined) {
         const result =
           message.method === 'window.isVisible'
             ? true
-            : message.method === 'window.show'
-              ? { selection: showSelection }
+            : message.method === 'window.bounds'
+              ? { ...shellBounds }
+              : message.method === 'window.setBounds'
+                ? applyBounds(message.params ?? {})
+                : message.method === 'window.show'
+                  ? { selection: showSelection }
               : message.method === 'app.usage'
                 ? { ok: true, rss: usage.rss, cpuMs: usage.cpuMs }
                 // 剪贴板监听：假壳按「支持」应答（真壳在 Windows 上开线程监听，其余平台返回 unsupported）
@@ -310,6 +345,15 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
         sent,
         calls,
         usage,
+        get bounds() {
+          return { ...shellBounds }
+        },
+        set bounds(value) {
+          shellBounds.x = value.x
+          shellBounds.y = value.y
+          shellBounds.width = value.width
+          shellBounds.height = value.height
+        },
         get showSelection() {
           return showSelection
         },
