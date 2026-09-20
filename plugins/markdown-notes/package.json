@@ -3,7 +3,7 @@
   "title": "Markdown 笔记",
   "author": "triple3h",
   "description": "Markdown 笔记：边写边预览、自动保存、可导出 Markdown / HTML",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "apiVersion": "2",
@@ -14,7 +14,8 @@
   "capabilities": [
     "hostUi",
     "storage",
-    "clipboard.write"
+    "clipboard.write",
+    "shell.open"
   ],
   "commands": [
     {
@@ -41,7 +42,7 @@
     "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "build:view": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "node ../../scripts/run-ts.mjs test/markdown.test.ts && node ../../scripts/run-ts.mjs test/notes.test.ts",
+    "test": "node ../../scripts/run-ts.mjs test/highlight.test.ts && node ../../scripts/run-ts.mjs test/markdown.test.ts && node ../../scripts/run-ts.mjs test/notes.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

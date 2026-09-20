@@ -13,15 +13,71 @@
   tab-size: 2;
 }
 
-/* ── 预览区排版（渲染器输出的 html 走这里）──────────────────────── */
+/* ── 预览区配色（只在本插件内生效，主题跟随宿主 data-theme）────────
+   高亮取 GitHub 的亮色 / 暗色两套 token：读者对这套配色最熟，
+   和「渲染得专业」的直觉一致。 */
+:root {
+  --md-code-bg: #f5f6f8;
+  --md-code-head: rgba(0, 0, 0, 0.025);
+  --md-quote-bar: rgba(0, 0, 0, 0.2);
+  --md-quote-bg: rgba(0, 0, 0, 0.028);
+  --md-row-alt: rgba(0, 0, 0, 0.022);
+
+  --md-hl-key: #0550ae;
+  --md-hl-kw: #cf222e;
+  --md-hl-str: #0a3069;
+  --md-hl-num: #953800;
+  --md-hl-fn: #8250df;
+  --md-hl-com: #6e7781;
+  --md-hl-pun: #24292f;
+  --md-hl-tag: #116329;
+  --md-hl-add: #1a7f37;
+  --md-hl-add-bg: rgba(26, 127, 55, 0.12);
+  --md-hl-del: #cf222e;
+  --md-hl-del-bg: rgba(207, 34, 46, 0.1);
+  --md-hl-meta: #8250df;
+}
+
+[data-theme="dark"] {
+  --md-code-bg: #1e1e21;
+  --md-code-head: rgba(255, 255, 255, 0.025);
+  --md-quote-bar: rgba(255, 255, 255, 0.22);
+  --md-quote-bg: rgba(255, 255, 255, 0.03);
+  --md-row-alt: rgba(255, 255, 255, 0.025);
+
+  --md-hl-key: #79c0ff;
+  --md-hl-kw: #ff7b72;
+  --md-hl-str: #a5d6ff;
+  --md-hl-num: #ffa657;
+  --md-hl-fn: #d2a8ff;
+  --md-hl-com: #8b949e;
+  --md-hl-pun: #c9d1d9;
+  --md-hl-tag: #7ee787;
+  --md-hl-add: #7ee787;
+  --md-hl-add-bg: rgba(126, 231, 135, 0.14);
+  --md-hl-del: #ffa198;
+  --md-hl-del-bg: rgba(255, 129, 130, 0.14);
+  --md-hl-meta: #d2a8ff;
+}
+
+/* ── 预览区排版（渲染器输出的 html 走这里）────────────────────────
+   基调对齐 GitHub / VS Code 的 Markdown 预览：明确的标题层级、
+   卡片式代码块与表格、克制的留白。字号由 App.vue 通过 --md-font-size 控制。 */
 .md-body {
-  font-size: 13px;
-  line-height: 1.75;
-  word-break: break-word;
+  font-size: var(--md-font-size, 13.5px);
+  line-height: 1.72;
+  color: var(--launcher-fg);
+  /* 只断放不下的长串（URL）；用 anywhere 会让表格列宽塌缩、单词被切成两截 */
+  overflow-wrap: break-word;
 }
 .md-body > :first-child {
   margin-top: 0;
 }
+.md-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* 标题 */
 .md-body h1,
 .md-body h2,
 .md-body h3,
@@ -29,104 +85,278 @@
 .md-body h5,
 .md-body h6 {
   font-weight: 600;
-  line-height: 1.35;
-  margin: 16px 0 8px;
+  line-height: 1.3;
+  margin: 1.6em 0 0.75em;
 }
 .md-body h1 {
-  font-size: 20px;
+  font-size: 1.6em;
+  padding-bottom: 0.3em;
   border-bottom: 1px solid var(--launcher-line);
-  padding-bottom: 4px;
 }
 .md-body h2 {
-  font-size: 17px;
+  font-size: 1.33em;
+  padding-bottom: 0.28em;
+  border-bottom: 1px solid var(--launcher-line);
 }
 .md-body h3 {
-  font-size: 15px;
+  font-size: 1.16em;
 }
-.md-body h4,
+.md-body h4 {
+  font-size: 1.03em;
+}
 .md-body h5,
 .md-body h6 {
-  font-size: 13.5px;
+  font-size: 0.92em;
   color: var(--launcher-muted);
 }
+
+/* 段落与列表 */
 .md-body p {
-  margin: 8px 0;
+  margin: 0.8em 0;
 }
 .md-body ul,
 .md-body ol {
-  margin: 8px 0;
-  padding-left: 22px;
+  margin: 0.7em 0;
+  padding-left: 1.5em;
 }
 .md-body ul {
   list-style: disc;
+}
+.md-body ul ul {
+  list-style: circle;
+}
+.md-body ul ul ul {
+  list-style: square;
 }
 .md-body ol {
   list-style: decimal;
 }
 .md-body li {
-  margin: 2px 0;
+  margin: 0.3em 0;
 }
+.md-body li > ul,
+.md-body li > ol {
+  margin: 0.3em 0;
+}
+.md-body li::marker {
+  color: var(--launcher-faint);
+}
+.md-body ol > li::marker {
+  color: var(--launcher-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 任务清单 */
 .md-body li.md-task {
   list-style: none;
-  margin-left: -18px;
+  margin-left: -1.35em;
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: 0.5em;
 }
+.md-body li.md-task > input {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0.36em 0 0;
+  accent-color: var(--launcher-accent);
+}
+.md-body li.md-task > span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 行内码 */
 .md-body code {
   font-family: var(--font-mono);
-  font-size: 12px;
-  background: var(--launcher-panel-2);
-  border-radius: 4px;
-  padding: 1px 4px;
-}
-.md-body pre.md-pre {
+  font-size: 0.87em;
   background: var(--launcher-panel-2);
   border: 1px solid var(--launcher-line);
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin: 8px 0;
+  border-radius: 5px;
+  padding: 0.08em 0.34em;
+}
+
+/* 代码块 */
+.md-body .md-code {
+  margin: 0.9em 0;
+  border: 1px solid var(--launcher-line);
+  border-radius: 10px;
+  background: var(--md-code-bg);
+  overflow: hidden;
+}
+.md-body .md-code-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--launcher-line);
+  background: var(--md-code-head);
+}
+.md-body .md-code-lang {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--launcher-faint);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+.md-body .md-code-copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--launcher-faint);
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--launcher-motion-instant) var(--launcher-ease-move),
+    background var(--launcher-motion-instant) var(--launcher-ease-move),
+    color var(--launcher-motion-instant) var(--launcher-ease-move);
+}
+.md-body .md-code:hover .md-code-copy,
+.md-body .md-code-copy:focus-visible {
+  opacity: 1;
+}
+.md-body .md-code-copy:hover {
+  background: var(--launcher-hover);
+  color: var(--launcher-fg);
+}
+.md-body .md-code pre {
+  margin: 0;
+  padding: 10px 12px;
   overflow: auto;
 }
-.md-body pre.md-pre code {
-  background: transparent;
+.md-body .md-code code {
+  display: block;
+  background: none;
+  border: 0;
+  border-radius: 0;
   padding: 0;
-  font-size: 12px;
-  line-height: 19px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre;
 }
+
+/* 语法高亮 */
+.md-body .md-hl-key {
+  color: var(--md-hl-key);
+}
+.md-body .md-hl-kw {
+  color: var(--md-hl-kw);
+}
+.md-body .md-hl-str {
+  color: var(--md-hl-str);
+}
+.md-body .md-hl-num {
+  color: var(--md-hl-num);
+}
+.md-body .md-hl-fn {
+  color: var(--md-hl-fn);
+}
+.md-body .md-hl-com {
+  color: var(--md-hl-com);
+  font-style: italic;
+}
+.md-body .md-hl-pun {
+  color: var(--md-hl-pun);
+}
+.md-body .md-hl-tag {
+  color: var(--md-hl-tag);
+}
+.md-body .md-hl-meta {
+  color: var(--md-hl-meta);
+}
+.md-body .md-hl-add {
+  color: var(--md-hl-add);
+  background: var(--md-hl-add-bg);
+}
+.md-body .md-hl-del {
+  color: var(--md-hl-del);
+  background: var(--md-hl-del-bg);
+}
+
+/* 引用 */
 .md-body blockquote {
-  border-left: 3px solid var(--launcher-line-strong);
-  padding-left: 10px;
-  margin: 8px 0;
+  margin: 0.9em 0;
+  padding: 0.55em 0.95em;
+  border-left: 3px solid var(--md-quote-bar);
+  border-radius: 0 8px 8px 0;
+  background: var(--md-quote-bg);
   color: var(--launcher-muted);
 }
-.md-body a {
-  color: var(--launcher-accent);
-  text-decoration: underline;
+.md-body blockquote > :first-child {
+  margin-top: 0;
 }
-.md-body hr {
-  border: none;
-  border-top: 1px solid var(--launcher-line);
-  margin: 14px 0;
+.md-body blockquote > :last-child {
+  margin-bottom: 0;
+}
+.md-body blockquote strong {
+  color: var(--launcher-fg);
+}
+
+/* 表格 */
+.md-body .md-table-wrap {
+  margin: 0.9em 0;
+  overflow-x: auto;
+  border: 1px solid var(--launcher-line);
+  border-radius: 10px;
 }
 .md-body table {
   border-collapse: collapse;
-  margin: 8px 0;
-  font-size: 12.5px;
+  width: 100%;
+  font-size: 0.95em;
 }
 .md-body th,
 .md-body td {
-  border: 1px solid var(--launcher-line);
-  padding: 4px 8px;
+  padding: 6px 10px;
   text-align: left;
+  border-bottom: 1px solid var(--launcher-line);
 }
 .md-body th {
   background: var(--launcher-panel-2);
   font-weight: 600;
+  white-space: nowrap;
+}
+.md-body tbody tr:last-child td {
+  border-bottom: 0;
+}
+.md-body tbody tr:nth-child(2n) {
+  background: var(--md-row-alt);
+}
+.md-body .md-al-center {
+  text-align: center;
+}
+.md-body .md-al-right {
+  text-align: right;
+}
+
+/* 链接 / 图片 / 分割线 */
+.md-body a {
+  color: var(--launcher-accent);
+  text-decoration: none;
+}
+.md-body a:hover {
+  text-decoration: underline;
 }
 .md-body img {
   max-width: 100%;
-  border-radius: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--launcher-line);
+  vertical-align: top;
+}
+.md-body hr {
+  height: 2px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--launcher-line);
+  margin: 1.5em 0;
 }
 .md-body del {
   color: var(--launcher-faint);

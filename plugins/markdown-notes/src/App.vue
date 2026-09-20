@@ -6,7 +6,7 @@ import { useToast } from '@launcher/ui/toast'
 import { isTypingTarget, matchKey, modLabel } from '@launcher/ui/keys'
 import { useVirtualList } from '@launcher/ui/virtual'
 import { copyText, downloadBlob, pickFile } from '@launcher/ui/clipboard'
-import { clipboard, host, hostUi } from '@launcher/api'
+import { clipboard, host, hostUi, shell } from '@launcher/api'
 import type { Note } from './core/notes'
 import {
   applyContent,
@@ -20,7 +20,17 @@ import {
   renameNote,
 } from './core/notes'
 import { renderMarkdown } from './core/markdown'
-import { loadCurrentId, loadNotes, saveCurrentId, saveNotes } from './core/store'
+import {
+  DEFAULT_FONT_SIZE,
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
+  loadCurrentId,
+  loadNotes,
+  loadPrefs,
+  saveCurrentId,
+  saveNotes,
+  savePrefs,
+} from './core/store'
 
 type ViewMode = 'edit' | 'split' | 'preview'
 
@@ -36,6 +46,8 @@ const savedAt = ref(0)
 const saving = ref(false)
 const titleDraft = ref('')
 const now = ref(Date.now())
+/** 预览区字号（px）：阅读长文档时唯一的可调项，落盘在插件 storage */
+const fontSize = ref(DEFAULT_FONT_SIZE)
 const listEl = ref<HTMLElement | null>(null)
 const editorEl = ref<HTMLTextAreaElement | null>(null)
 const toast = useToast()
@@ -156,6 +168,59 @@ async function commitTitle(): Promise<void> {
   notes.value = notes.value.map((item) => (item.id === next.id ? next : item))
   titleDraft.value = next.title
   await saveNotes(notes.value)
+}
+
+/* ------------------------------------------------------------- 预览区交互 */
+
+/**
+ * 预览区里的链接：不能让它们按默认行为走 —— 相对路径会在 iframe 里跳到 404
+ * （整页被替换，笔记看起来「没了」），外链在 WebView 里也默认点不动。
+ * 统一拦下来：http(s)/mailto 交给系统浏览器，其余（相对路径、锚点）复制链接。
+ */
+async function openLink(href: string): Promise<void> {
+  if (/^(https?:|mailto:)/i.test(href)) {
+    try {
+      await shell.openUrl(href)
+      return
+    } catch {
+      /* 宿主没给 shell.open（或非启动台环境）→ 退到复制 */
+    }
+  }
+  const ok = await writeClipboard(href)
+  toast[ok ? 'ok' : 'err'](ok ? `已复制链接：${href}` : '链接打不开，也没能复制')
+}
+
+/** 代码块的复制按钮 / 链接（预览是 v-html，事件只能委托到容器上） */
+function onPreviewClick(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null
+  if (!target) return
+
+  const button = target.closest('.md-code-copy') as HTMLButtonElement | null
+  if (button) {
+    const code = button.closest('.md-code')?.querySelector('code')?.textContent ?? ''
+    if (!code) return
+    void writeClipboard(code).then((ok) => {
+      button.textContent = ok ? '已复制' : '复制失败'
+      window.setTimeout(() => {
+        button.textContent = '复制'
+      }, 1200)
+    })
+    return
+  }
+
+  const link = target.closest('a[href]') as HTMLAnchorElement | null
+  if (link) {
+    event.preventDefault()
+    void openLink(link.getAttribute('href') ?? '')
+  }
+}
+
+/** 预览字号：12~20px 步进 1，落盘在插件 storage（值变了才写） */
+function stepFont(delta: number): void {
+  const next = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, fontSize.value + delta))
+  if (next === fontSize.value) return
+  fontSize.value = next
+  void savePrefs({ fontSize: next })
 }
 
 /* ------------------------------------------------------------- 复制 / 导出 */
@@ -330,6 +395,8 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   clock = window.setInterval(() => (now.value = Date.now()), 30_000)
   await load()
+  const prefs = await loadPrefs()
+  fontSize.value = prefs.fontSize
   void syncFooter()
   // 插件页打开时宿主已经卸载了搜索框，只能读一次初值
   const search = (await hostUi.getSearchContent().catch(() => '')).trim()
@@ -430,6 +497,22 @@ function useSeed(): void {
           />
           <div class="flex shrink-0 items-center gap-1">
             <button
+              v-if="mode !== 'edit'"
+              class="launcher-btn ghost px-1.5 text-[11px] text-muted"
+              :title="`预览字号 ${fontSize}px（当前）`"
+              @click="stepFont(-1)"
+            >
+              A-
+            </button>
+            <button
+              v-if="mode !== 'edit'"
+              class="launcher-btn ghost px-1.5 text-[11px] text-muted"
+              :title="`预览字号 ${fontSize}px（当前）`"
+              @click="stepFont(1)"
+            >
+              A+
+            </button>
+            <button
               v-for="tab in MODE_TABS"
               :key="tab.value"
               class="launcher-btn ghost"
@@ -461,9 +544,11 @@ function useSeed(): void {
           <!-- 渲染器已把源码整体转义，这里输出的是自己拼的标签 -->
           <div
             v-if="mode !== 'edit'"
-            class="launcher-scroll md-body min-h-0 flex-1 px-3 py-2"
+            class="launcher-scroll md-body min-h-0 flex-1 px-4 py-3"
             :class="mode === 'split' ? 'w-1/2' : 'w-full'"
+            :style="{ '--md-font-size': `${fontSize}px` }"
             v-html="previewHtml"
+            @click="onPreviewClick"
           />
         </div>
 
