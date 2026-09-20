@@ -2,7 +2,7 @@
 # 用途：pack-kernel 打包命名与分片 / 更新页「内核 v…」（host_info 上报）/ 内核热更新比对。
 [package]
 name = "launcher-kernel"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Chassis 内核（Rust）：协议层 / 插件运行时 / 搜索调度 / 热更新"
 license = "MIT"
