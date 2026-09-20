@@ -9,7 +9,7 @@
  * 用法：
  *   node scripts/version.mjs check              # 校验位点与清单一致（CI / 发版前）
  *   node scripts/version.mjs sync               # 清单 → 位点文件
- *   node scripts/version.mjs set app 0.1.4      # 改清单 + 自动 sync（应用/壳版本）
+ *   node scripts/version.mjs set app 0.1.5      # 改清单 + 自动 sync（应用/壳版本）
  *   node scripts/version.mjs set kernel 0.1.1   # 改清单 + 自动 sync（内核版本）
  *   [--root <dir>]                              # 指定仓库根（默认脚本上级目录；测试用）
  *

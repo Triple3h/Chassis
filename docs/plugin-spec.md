@@ -488,7 +488,7 @@ active → crashed（页面崩溃 / 脚本连续失败）→ 可重试
 | 下载/校验/解压 | `internal-store` 的逻辑层命令（`check-app` / `download-app`）：sha256 + 防路径穿越 + 恢复可执行位 |
 | 应用 | view 调 `ctx.settings.pluginAction('applyShellUpdate', { appPath })`（仅 `internal-` 前缀可用）：壳跑 `--hot-probe` 自检 → 写台账 → 交独立 helper 替换 `.app` → **整个应用重启**（内核随之重启；连续两次启动未就绪自动回滚） |
 | 检查与提示 | 内核守护只跑「检查」一段（启动 90s 后 / 每 6h，`config.autoUpdateCheck` 控制）：新版本进托盘菜单与「关于」页提示；下载 / 替换 / 重启由用户确认后触发（`pluginAction('applyAppUpdate')`）。界面用 `pluginAction('shellInfo')` 拿壳版本与 `canSelfUpdate` |
-| 平台 | **仅 macOS**（Windows 的运行中 exe 无法替换 ⇒ 索引里没有 windows 资产，客户端不提示） |
+| 平台 | **macOS 与 Windows 都支持**：macOS = 候选 `X.app`、Windows = 绿色版目录（`Chassis.exe` + `resources/`），替换都由独立 helper 在进程完全退出后执行（`swap.sh` / `swap.ps1`）；形态与校验口径见 `docs/shell-hot-update.md` §1 |
 | 版本门槛 | 索引带 `minShellHotVersion`：壳自更新机制低于它 ⇒ 界面提示但不给「更新」按钮 |
 
 **资产保留策略（三条固定 tag 通道共同）**：发布收尾**只保留索引指向的最新资产** —— CI 在

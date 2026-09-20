@@ -29,7 +29,7 @@ use crate::plugin_settings::{effective_settings, sanitize_setting_values, Plugin
 use crate::registry::{CommandRegistry, RegisteredCommand};
 use crate::session::SessionManager;
 use crate::types::{Disposer, SessionCloseReason};
-use crate::util::fsx::{ensure_dir, path_exists, plugin_data_path};
+use crate::util::fsx::{ensure_dir, path_exists, plugin_data_path, retry_async, RENAME_POLICY};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginState {
@@ -1414,23 +1414,11 @@ fn is_windows_absolute(name: &str) -> bool {
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
-/// rename 的重试次数 / 间隔：Windows 上插件进程刚被杀，句柄释放会滞后一点
-/// （`disable()` 已经回收过，但杀进程是异步的）；失败就整体回滚，不做半替换。
-const RENAME_ATTEMPTS: usize = 5;
-const RENAME_RETRY_MS: u64 = 200;
-
+/// rename 的重试：策略与「什么算瞬时」收口在 `util::fsx`（docs/win-hot-update-research.md §5.1-#1）——
+/// Windows 上插件进程刚被杀、句柄释放滞后 / 杀软扫描都会让 rename 短暂失败，退避重试；
+/// 永久错误（unix 的 `EACCES`、跨卷 `EXDEV`…）立即返回，失败由调用方整体回滚，不做半替换。
 async fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
-    let mut last: Option<std::io::Error> = None;
-    for _ in 0..RENAME_ATTEMPTS {
-        match std::fs::rename(from, to) {
-            Ok(()) => return Ok(()),
-            Err(err) => {
-                last = Some(err);
-                tokio::time::sleep(Duration::from_millis(RENAME_RETRY_MS)).await;
-            }
-        }
-    }
-    Err(last.unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "rename 失败")))
+    retry_async(RENAME_POLICY, || std::fs::rename(from, to)).await
 }
 
 fn rollback_hint(rolled_back: bool, no_backup: bool) -> &'static str {

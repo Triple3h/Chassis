@@ -22,13 +22,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::{KernelError, Result};
-use crate::util::fsx::write_json_atomic;
+use crate::util::fsx::{retry, write_json_atomic, RENAME_POLICY};
 use crate::util::now_ms;
 
 pub const BIN_DIR: &str = "bin";
 pub const STAGING_DIR: &str = "staging";
 pub const BACKUP_DIR: &str = "backup";
 pub const PENDING_FILE: &str = "pending.json";
+/// 壳执行替换后的回执（壳写、内核读后即删；见 `take_swap_result`）
+pub const SWAP_RESULT_FILE: &str = "swap-result.json";
 /// 与内核同包的 UI 目录名（壳侧同名常量；内核托管 UI，两边必须一致）
 pub const EXTERNAL_UI_DIR: &str = "ui";
 /// 允许替换 `.app` bundle 内二进制（默认拒绝：破坏代码签名）
@@ -43,6 +45,35 @@ pub struct ProbeReport {
     pub version: String,
     pub hot_version: String,
     pub path: String,
+}
+
+/// 谁来执行替换 **这个文件** —— 是能力判断，不是平台判断（docs/win-hot-update-research.md §5.3-4）：
+///  - `Kernel`：内核自己换（unix：运行中的映像允许被替换；也是老壳的回落路径）；
+///  - `Shell`：内核**只写台账**，由壳在「内核已退出、尚未拉起」的窗口里换（Windows：映像被锁）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SwapOwner {
+    #[default]
+    Kernel,
+    Shell,
+}
+
+/// 平台倾向的执行者（Windows = 壳、其余 = 内核）；**用不用 Shell 还要看壳报没报能力**。
+pub fn preferred_swap_owner() -> SwapOwner {
+    if cfg!(windows) {
+        SwapOwner::Shell
+    } else {
+        SwapOwner::Kernel
+    }
+}
+
+/// 结合壳能力后的最终执行者：平台倾向 Shell **且** 壳声明了 `kernelSwap` 才交给壳 ——
+/// 老壳（不认识台账）配新内核时必须退回内核自换：让它给出明确错误，而不是写一份没人执行的台账。
+pub fn swap_owner_for(shell_can_swap: bool) -> SwapOwner {
+    match preferred_swap_owner() {
+        SwapOwner::Shell if shell_can_swap => SwapOwner::Shell,
+        _ => SwapOwner::Kernel,
+    }
 }
 
 /// 待验证的二进制更新（`pending.json`）。
@@ -64,6 +95,40 @@ pub struct PendingUpdate {
     /// 旧 UI 的备份（回滚用）
     #[serde(default)]
     pub ui_backup: Option<String>,
+    /// 谁来执行替换（缺省 = 内核自己：老台账读得进来、老壳也不会看到 Shell）
+    #[serde(default)]
+    pub swap_owner: SwapOwner,
+    /// 候选二进制（`swap_owner = Shell` 时由壳搬进 `target`）；
+    /// **它还在 = 还没换过** —— 壳据此幂等，回滚请求也据此判断「换过没有」
+    #[serde(default)]
+    pub staged: Option<String>,
+    /// 候选 UI 目录（与内核同包；同上，还在 = 还没换过）
+    #[serde(default)]
+    pub ui_staged: Option<String>,
+    /// 需要壳把备份换回来（连续两次启动未就绪时由启动守卫登记；壳换完会清台账）
+    #[serde(default)]
+    pub revert: bool,
+}
+
+/// 壳执行替换后的回执（壳写、内核读后即删；`<hot>/bin/swap-result.json`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwapResult {
+    /// `applied` | `reverted` | `failed`
+    pub result: String,
+    pub detail: String,
+    pub at: i64,
+}
+
+/// 取走壳的替换回执（读后即删）：内核启动时把它写进热更新日志 ——
+/// 替换发生在壳里，不回执的话「这次更新到底成没成」在 `hot/log` 里是一段空白。
+pub fn take_swap_result(hot_dir: &Path) -> Option<SwapResult> {
+    let path = bin_dir(hot_dir).join(SWAP_RESULT_FILE);
+    let result: Option<SwapResult> = crate::util::fsx::read_json(&path, None);
+    if path.exists() {
+        let _ = fs::remove_file(&path);
+    }
+    result
 }
 
 pub fn bin_dir(hot_dir: &Path) -> PathBuf {
@@ -175,16 +240,19 @@ pub fn stage(hot_dir: &Path, source: &Path, to_version: &str) -> Result<(PathBuf
 
 /// 原子替换：备份当前二进制 → 写入新二进制 →（可选的 UI 同包）→ 记 pending。
 /// 任何一步失败都不留下半替换状态。
+///
+/// `owner = Kernel` 走上面这条；`owner = Shell` 只写台账（Windows 上写不了运行中的自身映像）。
 pub fn apply(
     hot_dir: &Path,
     staged: &Path,
     from_version: &str,
     to_version: &str,
     ui: Option<&Path>,
+    owner: SwapOwner,
 ) -> Result<PendingUpdate> {
     let target = std::env::current_exe()
         .map_err(|err| KernelError::internal(format!("无法定位当前内核二进制：{err}")))?;
-    apply_to(hot_dir, staged, &target, from_version, to_version, ui)
+    apply_to(hot_dir, staged, &target, from_version, to_version, ui, owner)
 }
 
 /// `apply` 的可测版本（target 可注入）。
@@ -195,6 +263,7 @@ pub fn apply_to(
     from_version: &str,
     to_version: &str,
     ui: Option<&Path>,
+    owner: SwapOwner,
 ) -> Result<PendingUpdate> {
     if !staged.exists() {
         return Err(KernelError::bad_args(format!("staged 二进制不存在：{}", staged.display())));
@@ -211,6 +280,9 @@ pub fn apply_to(
                 target.display()
             ),
         ));
+    }
+    if owner == SwapOwner::Shell {
+        return plan_shell_swap(hot_dir, staged, target, from_version, to_version, ui);
     }
 
     let backup_dir = bin_dir(hot_dir).join(BACKUP_DIR);
@@ -261,6 +333,10 @@ pub fn apply_to(
         requested_at: now_ms(),
         ui_target: ui_target.clone(),
         ui_backup: ui_backup.clone(),
+        swap_owner: SwapOwner::Kernel,
+        staged: None,
+        ui_staged: None,
+        revert: false,
     };
     if let Err(err) = write_json_atomic(&bin_dir(hot_dir).join(PENDING_FILE), &pending) {
         let _ = fs::remove_file(target);
@@ -270,6 +346,46 @@ pub fn apply_to(
         }
         return Err(KernelError::new("UPDATE_FAILED", format!("写入 pending 台账失败（已回滚）：{err}")));
     }
+    Ok(pending)
+}
+
+/// 只登记、不动文件的那条路（`swap_owner = Shell`）。
+///
+/// 备份路径**先算好写进台账**（壳照它建备份），此刻并不创建；候选二进制与候选 UI 留在 staging，
+/// 壳搬走它们 —— **「候选还在不在」就是壳判定「换过没有」的幂等标记**（壳侧同款约定）。
+fn plan_shell_swap(
+    hot_dir: &Path,
+    staged: &Path,
+    target: &Path,
+    from_version: &str,
+    to_version: &str,
+    ui: Option<&Path>,
+) -> Result<PendingUpdate> {
+    if let Some(staged_ui) = ui {
+        if !staged_ui.join("index.html").exists() {
+            return Err(KernelError::bad_args(format!("UI 目录缺少 index.html：{}", staged_ui.display())));
+        }
+    }
+    let bin_root = bin_dir(hot_dir);
+    let backup = bin_root.join(BACKUP_DIR).join(format!("launcher-kernel-{from_version}-{}", now_ms()));
+    let ui_target = ui.and_then(|_| target.parent().map(|parent| parent.join(EXTERNAL_UI_DIR)));
+    let ui_backup = ui.map(|_| bin_root.join(BACKUP_DIR).join(format!("ui-{}", now_ms())));
+    let pending = PendingUpdate {
+        from_version: from_version.to_string(),
+        to_version: to_version.to_string(),
+        target: target.display().to_string(),
+        backup: backup.display().to_string(),
+        attempts: 0,
+        requested_at: now_ms(),
+        ui_target: ui_target.map(|path| path.display().to_string()),
+        ui_backup: ui_backup.map(|path| path.display().to_string()),
+        swap_owner: SwapOwner::Shell,
+        staged: Some(staged.display().to_string()),
+        ui_staged: ui.map(|path| path.display().to_string()),
+        revert: false,
+    };
+    write_json_atomic(&bin_dir(hot_dir).join(PENDING_FILE), &pending)
+        .map_err(|err| KernelError::new("UPDATE_FAILED", format!("写入 pending 台账失败：{err}")))?;
     Ok(pending)
 }
 
@@ -348,6 +464,16 @@ pub fn boot_guard(hot_dir: &Path) -> Option<String> {
     let _ = write_json_atomic(&pending_path, &pending);
 
     if pending.attempts >= 2 {
+        // 壳执行替换（Windows）：删自身 + rename 备份在自己进程里做不到 ⇒ **只登记回滚请求**，
+        // 由壳在下次启动前执行（docs/win-hot-update-research.md §4.2）；台账留给壳，换完它清。
+        if pending.swap_owner == SwapOwner::Shell {
+            pending.revert = true;
+            let _ = write_json_atomic(&pending_path, &pending);
+            return Some(format!(
+                "新内核 v{} 连续 {} 次启动未就绪：已登记回滚到 v{}，交给壳在下次启动前换回",
+                pending.to_version, pending.attempts, pending.from_version
+            ));
+        }
         let backup = PathBuf::from(&pending.backup);
         let target = PathBuf::from(&pending.target);
         let mut detail = format!(
@@ -405,6 +531,29 @@ pub fn rollback(hot_dir: &Path) -> Result<Option<String>> {
     }
     let pending: PendingUpdate = crate::util::fsx::read_json(&pending_path, None)
         .ok_or_else(|| KernelError::internal("pending 台账损坏（先修好它再回滚）"))?;
+    if pending.swap_owner == SwapOwner::Shell {
+        // 壳换过没有，看候选还在不在（与壳侧同一条判据）
+        let swapped = pending.staged.as_deref().map(|path| !Path::new(path).exists()).unwrap_or(false);
+        if !swapped {
+            // 还没换过 ⇒ 直接取消这次更新（删台账 + 清候选），没有备份要回滚
+            let _ = fs::remove_file(&pending_path);
+            if let Some(staged) = pending.staged.as_deref() {
+                let _ = fs::remove_file(staged);
+            }
+            return Ok(Some(format!(
+                "已取消未生效的内核更新 v{} → v{}（壳尚未替换）",
+                pending.from_version, pending.to_version
+            )));
+        }
+        let mut updated = pending.clone();
+        updated.revert = true;
+        write_json_atomic(&pending_path, &updated)
+            .map_err(|err| KernelError::internal(format!("写入回滚请求失败：{err}")))?;
+        return Ok(Some(format!(
+            "已登记回滚 v{} → v{}（壳在下次启动前换回；本次仍跑当前版本）",
+            pending.to_version, pending.from_version
+        )));
+    }
     let backup = PathBuf::from(&pending.backup);
     if !backup.exists() {
         return Err(KernelError::new("NOT_FOUND", format!("备份不存在：{}", pending.backup)));
@@ -457,18 +606,12 @@ fn keep_latest_backup(backup_dir: &Path) {
     }
 }
 
+/// rename 的重试收口在 `util::fsx`（策略与「什么算瞬时」都按平台取，docs/win-hot-update-research.md §5.1-#1）；
+/// 这里只把失败翻译成内核错误码。
 fn rename_with_retry(from: &Path, to: &Path) -> Result<()> {
-    let mut last = String::new();
-    for _ in 0..5 {
-        match fs::rename(from, to) {
-            Ok(()) => return Ok(()),
-            Err(err) => {
-                last = err.to_string();
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
-    Err(KernelError::new("UPDATE_FAILED", format!("rename 失败（{} → {}）：{last}", from.display(), to.display())))
+    retry(RENAME_POLICY, || fs::rename(from, to)).map_err(|err| {
+        KernelError::new("UPDATE_FAILED", format!("rename 失败（{} → {}）：{err}", from.display(), to.display()))
+    })
 }
 
 fn set_executable(path: &Path) -> Result<()> {
@@ -491,8 +634,12 @@ fn set_executable(path: &Path) -> Result<()> {
 /// 二进制热更新的展示载荷（`hot/status` 里的 `binary` 字段）。
 pub fn status_payload(hot_dir: &Path, version: &str) -> serde_json::Value {
     let pending = pending_of(hot_dir);
+    // 有台账就报台账里的执行者，否则报平台倾向（Windows = 壳；用不用得上还看壳报没报 `kernelSwap`）
+    let swap_owner = pending.as_ref().map(|value| value.swap_owner).unwrap_or_else(preferred_swap_owner);
     json!({
-        "supported": cfg!(target_os = "macos") || cfg!(target_os = "linux"),
+        // Windows 也算支持了：本进程不换，由壳在重启间隙换（老壳配新内核时会退回内核自换并明确报错）
+        "supported": cfg!(target_os = "macos") || cfg!(target_os = "linux") || cfg!(target_os = "windows"),
+        "swapOwner": swap_owner,
         "currentVersion": version,
         "currentExe": std::env::current_exe().ok().map(|path| path.display().to_string()),
         "bundleSwapAllowed": allow_bundle_swap(),
@@ -531,7 +678,7 @@ mod tests {
         fs::write(&target, b"old-binary").unwrap();
         fs::write(&staged, b"new-binary").unwrap();
 
-        let pending = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", None).expect("替换应成功");
+        let pending = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", None, SwapOwner::Kernel).expect("替换应成功");
         assert_eq!(fs::read(&target).unwrap(), b"new-binary", "目标已换新");
         assert_eq!(fs::read(&pending.backup).unwrap(), b"old-binary", "备份保留旧版本");
         assert!(bin_dir(&dir).join(PENDING_FILE).exists(), "pending 台账已写");
@@ -562,6 +709,10 @@ mod tests {
             requested_at: now_ms(),
             ui_target: None,
             ui_backup: None,
+            swap_owner: SwapOwner::Kernel,
+            staged: None,
+            ui_staged: None,
+            revert: false,
         };
         write_json_atomic(&bin_dir(&dir).join(PENDING_FILE), &pending).unwrap();
 
@@ -591,7 +742,7 @@ mod tests {
         fs::write(&target, b"old").unwrap();
         fs::write(&staged, b"new").unwrap();
 
-        let err = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", None).expect_err("打包内二进制必须被拒绝");
+        let err = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", None, SwapOwner::Kernel).expect_err("打包内二进制必须被拒绝");
         assert_eq!(err.code, "SIGNED_BUNDLE");
         assert_eq!(fs::read(&target).unwrap(), b"old", "拒绝时目标不动");
         let _ = fs::remove_dir_all(&dir);
@@ -613,7 +764,7 @@ mod tests {
         fs::write(&staged, b"new-binary").unwrap();
         fs::write(staged_ui.join("index.html"), b"new-ui").unwrap();
 
-        let pending = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", Some(&staged_ui)).expect("换核 + 换 UI 应成功");
+        let pending = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", Some(&staged_ui), SwapOwner::Kernel).expect("换核 + 换 UI 应成功");
         assert_eq!(fs::read(&target).unwrap(), b"new-binary");
         assert_eq!(fs::read(target_ui.join("index.html")).unwrap(), b"new-ui");
         assert!(pending.ui_target.is_some() && pending.ui_backup.is_some(), "台账要带 UI 目标与备份");
@@ -637,7 +788,7 @@ mod tests {
         fs::write(&target, b"old-binary").unwrap();
         fs::write(&staged, b"new-binary").unwrap();
 
-        let err = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", Some(&bad_ui)).expect_err("缺 index.html 必须拒绝");
+        let err = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", Some(&bad_ui), SwapOwner::Kernel).expect_err("缺 index.html 必须拒绝");
         assert_eq!(err.code, "BAD_ARGS");
         assert_eq!(fs::read(&target).unwrap(), b"old-binary", "拒绝时内核回到旧版本");
         assert!(!bin_dir(&dir).join(PENDING_FILE).exists(), "拒绝不写台账");
@@ -654,6 +805,130 @@ mod tests {
         let files = crate::util::fsx::list_dir_safe(&dir);
         assert_eq!(files.len(), 1, "只保留最近一份备份：{files:?}");
         assert!(files[0].to_string_lossy().contains("200"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 壳侧台账的最小构造（测试用）
+    fn shell_pending(target: &Path, staged: &Path, backup: &Path) -> PendingUpdate {
+        PendingUpdate {
+            from_version: "0.1.0".to_string(),
+            to_version: "0.2.0".to_string(),
+            target: target.display().to_string(),
+            backup: backup.display().to_string(),
+            attempts: 0,
+            requested_at: now_ms(),
+            ui_target: None,
+            ui_backup: None,
+            swap_owner: SwapOwner::Shell,
+            staged: Some(staged.display().to_string()),
+            ui_staged: None,
+            revert: false,
+        }
+    }
+
+    /// Windows 路线：内核**只登记、不动文件**（运行中的映像写不了）——
+    /// 目标一个字节都不能变，候选留在原地等壳来搬，备份只是先把路径算好。
+    #[test]
+    fn shell_owner_registers_swap_without_touching_files() {
+        let dir = temp_dir("shell-plan");
+        let target = dir.join("launcher-kernel");
+        let staged_dir = dir.join("download");
+        let staged = staged_dir.join("launcher-kernel");
+        let staged_ui = staged_dir.join(EXTERNAL_UI_DIR);
+        fs::create_dir_all(&staged_ui).unwrap();
+        fs::write(&target, b"old-binary").unwrap();
+        fs::write(&staged, b"new-binary").unwrap();
+        fs::write(staged_ui.join("index.html"), b"new-ui").unwrap();
+
+        let pending = apply_to(&dir, &staged, &target, "0.1.0", "0.2.0", Some(&staged_ui), SwapOwner::Shell)
+            .expect("登记应成功");
+        assert_eq!(pending.swap_owner, SwapOwner::Shell);
+        let staged_text = staged.display().to_string();
+        assert_eq!(pending.staged.as_deref(), Some(staged_text.as_str()));
+        assert!(pending.ui_staged.is_some() && pending.ui_target.is_some(), "UI 要一起登记（同进同退）");
+        assert!(!pending.revert);
+        assert_eq!(fs::read(&target).unwrap(), b"old-binary", "目标一个字节都不能动");
+        assert_eq!(fs::read(&staged).unwrap(), b"new-binary", "候选留在原地等壳来搬");
+        assert!(!Path::new(&pending.backup).exists(), "备份路径只是先算好，此刻不创建");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 壳换过之后（候选不在了）连续两次启动仍未就绪 ⇒ **登记回滚请求**，
+    /// 而不是在自身进程里恢复（Windows 上删不掉运行中的自己）。
+    #[test]
+    fn shell_owner_boot_guard_requests_revert_instead_of_restoring() {
+        let dir = temp_dir("shell-guard");
+        let target = dir.join("launcher-kernel");
+        let backup = dir.join("backup-kernel");
+        let staged = dir.join("already-consumed"); // 不存在 = 壳已换过
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&target, b"new-binary").unwrap();
+        fs::write(&backup, b"old-binary").unwrap();
+        write_json_atomic(&bin_dir(&dir).join(PENDING_FILE), &shell_pending(&target, &staged, &backup)).unwrap();
+
+        let first = boot_guard(&dir).expect("第一次启动要记账");
+        assert!(first.contains("第 1 次启动"), "{first}");
+        let second = boot_guard(&dir).expect("第二次要登记回滚");
+        assert!(second.contains("交给壳"), "{second}");
+        let after = pending_of(&dir).expect("台账留给壳执行");
+        assert!(after.revert, "回滚请求要落进台账");
+        assert_eq!(fs::read(&target).unwrap(), b"new-binary", "内核自己不动文件");
+        assert_eq!(fs::read(&backup).unwrap(), b"old-binary", "备份原封不动");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 手动回滚：壳还没换过 ⇒ 取消这次更新（没有备份可回滚）；已换过 ⇒ 登记回滚交给壳。
+    #[test]
+    fn shell_owner_rollback_cancels_before_swap_and_defers_after() {
+        // ① 还没换过：候选还在
+        let dir = temp_dir("shell-cancel");
+        let target = dir.join("launcher-kernel");
+        let staged = dir.join("staged-kernel");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&target, b"old-binary").unwrap();
+        fs::write(&staged, b"new-binary").unwrap();
+        write_json_atomic(&bin_dir(&dir).join(PENDING_FILE), &shell_pending(&target, &staged, &dir.join("no-backup"))).unwrap();
+        let message = rollback(&dir).expect("取消应成功").expect("应有说明");
+        assert!(message.contains("已取消"), "{message}");
+        assert!(!staged.exists(), "取消要顺手清掉候选");
+        assert!(!bin_dir(&dir).join(PENDING_FILE).exists(), "取消要清台账");
+        assert_eq!(fs::read(&target).unwrap(), b"old-binary");
+        let _ = fs::remove_dir_all(&dir);
+
+        // ② 已经换过：候选被搬走了 ⇒ 登记回滚，等壳来换
+        let dir = temp_dir("shell-revert");
+        let target = dir.join("launcher-kernel");
+        let backup = dir.join("backup-kernel");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&target, b"new-binary").unwrap();
+        fs::write(&backup, b"old-binary").unwrap();
+        write_json_atomic(&bin_dir(&dir).join(PENDING_FILE), &shell_pending(&target, &dir.join("consumed"), &backup)).unwrap();
+        let message = rollback(&dir).expect("登记应成功").expect("应有说明");
+        assert!(message.contains("已登记回滚"), "{message}");
+        let after = pending_of(&dir).expect("台账要留给壳");
+        assert!(after.revert);
+        assert_eq!(fs::read(&target).unwrap(), b"new-binary", "内核自己不动文件");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 执行者判定：平台倾向 + 壳能力 —— 壳没这个能力就一律内核自换（老壳配新内核的回落）。
+    #[test]
+    fn swap_owner_follows_declared_capability() {
+        assert_eq!(swap_owner_for(false), SwapOwner::Kernel, "壳没声明 ⇒ 内核自换并给出明确错误");
+        assert_eq!(swap_owner_for(true) == SwapOwner::Shell, cfg!(windows), "只有 Windows 才需要壳代劳");
+    }
+
+    /// 壳的回执读后即删（内核启动时把它写进热更新日志，避免「成没成」一片空白）。
+    #[test]
+    fn swap_result_is_consumed_once() {
+        let dir = temp_dir("swap-result");
+        fs::create_dir_all(bin_dir(&dir)).unwrap();
+        let path = bin_dir(&dir).join(SWAP_RESULT_FILE);
+        write_json_atomic(&path, &serde_json::json!({ "result": "applied", "detail": "壳已替换", "at": 1 })).unwrap();
+        let first = take_swap_result(&dir).expect("第一次应读到");
+        assert_eq!(first.result, "applied");
+        assert!(!path.exists(), "读完即删");
+        assert!(take_swap_result(&dir).is_none(), "第二次没有");
         let _ = fs::remove_dir_all(&dir);
     }
 }

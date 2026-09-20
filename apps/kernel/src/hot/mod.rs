@@ -424,6 +424,11 @@ impl HotUpdate {
         binary::mark_boot_success(&self.dir)
     }
 
+    /// 取走壳的替换回执（读后即删）：由 `Kernel::mark_ready` 写进热更新日志。
+    pub fn take_swap_result(&self) -> Option<binary::SwapResult> {
+        binary::take_swap_result(&self.dir)
+    }
+
     fn build_or_default(&self, spec: &HotSpec) -> Result<Router> {
         match (self.builder)(spec) {
             Ok(tree) => Ok(tree),

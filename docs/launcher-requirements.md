@@ -335,7 +335,7 @@ launcher/
 | `app.quit` | — | `void` | |
 | `app.setAutostart` | `{ enabled: boolean }` | `void` | |
 | `app.info` | — | `{ version, shellVersion, shellHotVersion, platform, arch, dataRoot, bundlePath?, canSelfUpdate }` | 壳自身信息。`version` / `shellVersion` 同源（`tauri.conf.json`，外置内核台账用的就是它）；`canSelfUpdate` = 打包态 + 安装位置可写（应用自更新的前置判断，开发态为 false） |
-| `shell.applyUpdate` | `{ appPath: string }` | `{ ok, restarting: true, from, to, target }` | 应用（壳）自更新：候选 `.app` 先跑 `--hot-probe` 自检（结构 / 版本自洽 / 能跑）→ 写 `hot/shell/pending.json` → 交独立 helper → **壳在回执后 400ms 退出重启**（内核随之停掉）。仅 macOS；开发态 / 不可写位置拒绝 |
+| `shell.applyUpdate` | `{ appPath: string }` | `{ ok, restarting: true, from, to, target }` | 应用（壳）自更新：候选安装目录（macOS `.app` / Windows 绿色版目录）先跑 `--hot-probe` 自检（结构 / 版本自洽 / 能跑）→ 写 `hot/shell/pending.json` → 交独立 helper → **壳在回执后 400ms 退出重启**（内核随之停掉）。开发态 / 不可写位置拒绝；两种形态见 `docs/shell-hot-update.md` §1 |
 | `app.usage` | — | `{ ok: boolean; rss: number; cpuMs: number }` | 壳进程**自身**的常驻内存（bytes）与累计 CPU 时间（ms）—— 状态条要"启动台一共占多少"，内核算另一半（Windows 上含挂在壳下的 WebView2 进程组：它是系统托管的独立进程，不加会严重低估） |
 
 **壳主动通知内核**（无 `id`、不等应答，与请求同走 stdio JSON-RPC）：
@@ -573,10 +573,10 @@ interface AuditRecord {
 | 通道 | 固定 tag **`app-latest`**：`app-registry.json`（schema 1，含 sha256 与 `minShellHotVersion`）+ `Chassis-<版本>-macos-<架构>.zip`（整包 `.app`）。与 `v*`（给人下载的换包通道）/ `plugins-latest` / `kernel-latest` 三方独立 |
 | 角色分工 | 检查 / 下载 / 解压 = 内核侧编排 `internal-store` 命令（`check-app` / `download-app`，复用代理降级 + 域名白名单 + sha256）；**候选包自检 / 台账 / 替换 / 重启 = 壳**（`shell.applyUpdate` 原语 + 脱离壳进程树的 helper） |
 | 检查与提示 | 内核守护：启动 90s 后检查一次，之后每 6h —— **只检查**；托盘菜单第一项**常驻**（无新版「检查更新…」/ 有新版带版本号），点击**打开更新页**（托盘自己不执行更新）；「关于」页另有更新卡片。下载 / 替换 / 重启由用户在更新页或「关于」页确认后触发。`config.autoUpdateCheck`（默认 true，≤0.1.3 旧键 `autoUpdateApp` 兼容）可关；关掉后仍可在「关于」页 / 更新页手动检查 |
-| 候选包自检 | 壳跑 `--hot-probe`：结构（`Contents/MacOS/launcher-shell` + `Info.plist`）→ **版本自洽**（plist 的 `CFBundleShortVersionString` 与二进制自报一致，不一致即拒 —— 抓包拼装事故）→ 自检能跑通。三道全过才写台账 |
-| 替换 | 写 `<dataRoot>/hot/shell/pending.json` → 生成 helper（`swap.sh`）→ 壳退出 → helper 等壳完全退出 → 备份旧 `.app`（同卷 rename）→ 落新包 → `xattr -dr` → `lsregister -f` → `open`。任一步失败都回到「原包在原位」 |
-| 回滚（三重） | ① helper 的 8 秒窗口：新实例没起来 ⇒ 自动换回备份再 open；② 启动守卫：台账 `attempts ≥2` ⇒ 交 helper `restore`；③ 台账版本校验：候选版本 ≠ 当前版本 ⇒ 视为过期台账丢弃；开发态（非 `.app`）完全不参与记账 |
-| 平台 | **仅 macOS**：运行中的 `.app` 可替换。Windows 的运行中 exe 被锁，只能走安装器 —— 索引里没有 windows 资产，客户端自然不提示「更新应用」 |
+| 候选包自检 | 壳跑 `--hot-probe`：结构（macOS `Contents/MacOS/launcher-shell` + `Info.plist` / Windows `Chassis.exe`）→ **版本与平台自洽**（macOS 校验 plist 版本与二进制自报一致；Windows 校验自检报告的平台同源）→ 自检能跑通。三道全过才写台账 |
+| 替换 | 写 `<dataRoot>/hot/shell/pending.json` → 生成 helper（`swap.sh` / `swap.ps1`）→ 壳退出 → helper 等壳完全退出 → 备份旧安装（同卷 rename）→ 落新包 → 重新启动（macOS 另有 `xattr -dr` / `lsregister -f` / `open`）。任一步失败都回到「原安装在原位」 |
+| 回滚（三重） | ① helper 的 8 秒窗口：新实例没起来 ⇒ 自动换回备份再启动；② 启动守卫：台账 `attempts ≥2` ⇒ 交 helper `restore`；③ 台账版本校验：候选版本 ≠ 当前版本 ⇒ 视为过期台账丢弃；开发态完全不参与记账 |
+| 平台 | **macOS 与 Windows 都支持**：macOS 换 `X.app`、Windows 换绿色版目录（`Chassis.exe` + `resources/`）；两端都由独立 helper 在进程完全退出后整目录 rename |
 | 签名 | 硬前提：新包须与当前包**同一签名身份**，否则每次自更新后 TCC 授权（辅助功能 / 屏幕录制 / 自动化 / 通知）失配重弹。CI 从 secrets（`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD`）导入本机固定证书；未配置时回落 ad-hoc 并在工作流日志打 warning |
 | 日志 | `<dataRoot>/hot/shell/swap.log`（每次替换 / 回滚一行）；内核日志记检查 / 下载 / 应用三个阶段各一行 |
 

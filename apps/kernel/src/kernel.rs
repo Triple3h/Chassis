@@ -507,6 +507,17 @@ impl Kernel {
         if let Some(detail) = self.hot.mark_boot_success() {
             self.log("info", &detail);
         }
+        // 壳执行过替换吗？（Windows 路线：换核发生在壳里 —— 不回执的话「成没成」在日志里是一片空白）
+        if let Some(result) = self.hot.take_swap_result() {
+            self.hot.log().append(json!({
+                "type": "binary",
+                "result": result.result,
+                "stage": "shell-swap",
+                "detail": result.detail,
+                "at": result.at,
+            }));
+            self.log("info", &format!("[hot] 壳替换回执：{}（{}）", result.result, result.detail));
+        }
     }
 
     pub fn is_ready(&self) -> bool {
@@ -1282,7 +1293,9 @@ impl Kernel {
             }
         };
         let ui_path = crate::hot::binary::peer_ui(ui.as_deref(), &staged);
-        let pending = match crate::hot::binary::apply(&dir, &staged, &self.version(), &report.version, ui_path.as_deref()) {
+        // 与 `/api/hot/binary` 同一条判定：执行者看壳自报的能力（Windows 上交给壳在重启间隙换）
+        let owner = crate::hot::binary::swap_owner_for(self.shell_can_swap().await);
+        let pending = match crate::hot::binary::apply(&dir, &staged, &self.version(), &report.version, ui_path.as_deref(), owner) {
             Ok(pending) => pending,
             Err(err) => {
                 self.hot.log().append(json!({
@@ -1316,6 +1329,18 @@ impl Kernel {
     ///
     /// 壳未连接 ⇒ `{ available: false }`：UI 显示「不可用」，不要拿内核版本凑数
     /// （那会让更新页拿错版本去比对应用通道）。
+    /// 壳有没有把「内核换核」交给它执行的能力（`app.info.kernelSwap`，见 `hot::binary::SwapOwner`）。
+    ///
+    /// 用**壳自报的能力**而不是平台判断：老壳不认识替换台账，必须退回内核自换
+    /// （Windows 上会给出明确错误，好过写一份没人执行的台账）。
+    pub(crate) async fn shell_can_swap(&self) -> bool {
+        self.primitives
+            .shell_info()
+            .await
+            .and_then(|info| info.get("kernelSwap").and_then(Value::as_bool))
+            .unwrap_or(false)
+    }
+
     async fn shell_info(&self) -> Value {
         match self.primitives.shell_info().await {
             Some(info) => json!({
@@ -1332,7 +1357,7 @@ impl Kernel {
     }
 
     /// 应用（壳）自更新（更新页的「更新应用」、托盘与「关于」页的确认更新都汇到这条）：
-    /// 把候选 `.app` 交给壳。
+    /// 把候选安装目录交给壳（macOS `.app` / Windows 绿色版目录，由壳按平台判定）。
     ///
     /// 与内核对侧的分工：下载 / 校验 / 解压在逻辑层（`internal-store` 的 `download-app`，
     /// 审计因此记在它名下），校验候选包 / 备份 / 替换 / 重启在壳侧。壳会在回执之后退出重启 ——
@@ -1341,7 +1366,7 @@ impl Kernel {
         let app_path = payload
             .get("appPath")
             .and_then(Value::as_str)
-            .ok_or_else(|| KernelError::bad_args("appPath 必填（候选 .app 的本地路径）"))?;
+            .ok_or_else(|| KernelError::bad_args("appPath 必填（候选安装目录的本地路径：macOS .app / Windows 绿色版目录）"))?;
         let result = self.primitives.shell_apply_update("internal-store", app_path).await?;
         self.log("info", &format!("应用自更新已交壳执行：{app_path}（即将重启应用）"));
         Ok(result)
@@ -1355,7 +1380,7 @@ impl Kernel {
     /// 域名白名单都在那一侧），替换与回滚在壳侧。
     ///
     /// 静默跳过（不报错）的情况：用户关了 `autoUpdateCheck`、通道插件被禁用、
-    /// 壳不在可自更新状态（开发态 / 只读安装位置 / 非 macOS）、没有新版本。
+    /// 壳不在可自更新状态（开发态 / 只读安装位置）、没有新版本。
     /// 检查失败只记一行日志、等下一轮 —— 后台任务不该刷屏，也不该重试到把网络打满。
     pub fn spawn_app_update_check(self: &Arc<Self>) {
         let kernel = Arc::clone(self);
@@ -1514,7 +1539,7 @@ impl Kernel {
             return Err(KernelError::new("UPDATE_FAILED", "壳未连接：无法自更新"));
         };
         if info.get("canSelfUpdate").and_then(Value::as_bool) != Some(true) {
-            return Err(KernelError::new("UPDATE_FAILED", "当前壳不可自更新（开发态 / 只读安装位置 / 非 macOS）"));
+            return Err(KernelError::new("UPDATE_FAILED", "当前壳不可自更新（开发态 / 只读安装位置）"));
         }
         let current = info.get("shellVersion").and_then(Value::as_str).unwrap_or_default().to_string();
         let hot = info.get("shellHotVersion").and_then(Value::as_str).unwrap_or_default().to_string();

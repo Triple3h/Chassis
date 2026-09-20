@@ -121,8 +121,11 @@ curl -X POST http://127.0.0.1:<kernelPort>/api/hot/rollback -d '{}' -H 'Content-
   （`hot/bin/backup/` 只保留最近 1 份）。
 - **`.app` 内二进制默认拒绝**（`SIGNED_BUNDLE`）：替换会让代码签名失效，macOS 上可能直接起不来；
   打包版请随 App 一起更新，开发/自编译产物或愿意重新签名时设 `LAUNCHER_HOT_ALLOW_BUNDLE_SWAP=1`。
-- **Windows**：运行中的 exe 无法被替换（句柄占用），接口会返回 `UPDATE_FAILED` 并保留旧版本；
-  由壳在重启间隙替换（后续里程碑）。
+- **Windows（已实现：壳在重启间隙替换）**：运行中的 exe 写不了（映像被锁）⇒ 内核**只写台账**
+  （`swapOwner: "shell"`，连同候选路径与备份路径），壳在「内核已退出、尚未拉起」的窗口里照台账替换 / 回滚；
+  壳把回执写进 `<dataRoot>/hot/bin/swap-result.json`，内核启动时读后即删并记进热更新日志。
+  壳用 `app.info.kernelSwap` 声明这个能力：**老壳不报 ⇒ 内核退回自换并给出明确错误**（绝不写一份没人执行的台账）。
+  调研、风险与实验清单见 `docs/win-hot-update-research.md`。
 - `--hot-probe` 是自检入口：**最先**处理、不初始化任何东西，只输出
   `{"version":"…","hotVersion":"0.1.0"}`（这个短命进程的 stdout 是它自己的，与内核协议无关）。
 
@@ -176,6 +179,11 @@ git tag kernel/0.2.0 && git push origin kernel/0.2.0
 
 - `primitives::dispatch` 新增 `kernel/restarting`：记为**计划内重启**（`sidecar::note_hot_restart`），
   不计入崩溃重启预算（否则连续几次热更新会撞上 `MAX_RESTARTS`）。
+- **内核换核的「壳执行」那一半**（Windows 路线，2026-09-20）：`apps/shell/src/kernel_swap.rs` ——
+  `Sidecar::start()` 在拉起内核前读 `pending.json`，`swapOwner = "shell"` 时执行替换（备份 copy + 落地 rename，
+  同卷原子，任何失败都不会出现「内核不见了」）或回滚（内核登记的 `revert`）；**候选被搬走 = 幂等标记**；
+  失败保持旧版本可拉起并清台账。这条路径数据驱动、不按平台分支 ⇒ macOS 上也能被单测完整驱动（7 条）。
+  壳在 `app.info` 里报 `"kernelSwap": true`（能力声明，见 §6）。
 - `supervise` 重启成功后 `wait_ready` + `navigate_main_window`：内核端口每次启动都变，
   不重新导航 = UI 停在旧端口白屏。
 
@@ -190,6 +198,8 @@ git tag kernel/0.2.0 && git push origin kernel/0.2.0
 
 `type` ∈ `boot` / `stage` / `apply` / `rollback` / `binary` / `event` / `request`；
 结果 ∈ `applied` / `rejected` / `rolled-back` / `staged` / `done` / `timeout` / `blocked`。
+壳执行的替换 / 回滚由壳写回执（`<hot>/bin/swap-result.json`），内核启动时记一行
+`type: "binary"` + `stage: "shell-swap"`（结果 ∈ `applied` / `reverted` / `failed`）。
 时间、版本、变更模块、结果四项在**每一行**都能读到（`ts` / `hotVersion` / `modules` / `result`）。
 
 ## 10. 验证
@@ -212,4 +222,5 @@ node scripts/pack-kernel.mjs && node scripts/gen-kernel-registry.mjs   # 本地�
 - 内核自身不校验候选二进制的哈希 / 签名（`/api/hot/binary` 的信任模型 = 本地路径 + `--hot-probe` 自检）；
   分发链路（`internal-store`）对**下载**的内核包做 sha256 校验 —— 两道防线分工不同，v1 不引入签名；
 - 不做多版本历史（只留 1 份备份 / 1 个上一稳定代，与插件热更新同口径）；
-- 不做 Windows 上的「重启间隙替换」（运行中的 exe 无法替换，另立里程碑）。
+- Windows 的「重启间隙替换」已落地（2026-09-20，见 §6 / §8）；机制、风险与待做的真机实验见
+  `docs/win-hot-update-research.md`。

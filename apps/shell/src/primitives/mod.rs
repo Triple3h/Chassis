@@ -95,12 +95,17 @@ fn app_info(app: &AppHandle) -> Result<Value, String> {
         "arch": std::env::consts::ARCH,
         "dataRoot": data_root,
         // 自更新可行性：打包态 + 安装位置可写（开发态 / 只读位置 ⇒ 更新页不给「更新应用」）
-        "bundlePath": crate::update::bundle_path().map(|path| path.display().to_string()),
+        // `bundlePath` 是旧字段名（= 安装位置）：macOS 是 `X.app`，Windows 是绿色版目录
+        "bundlePath": crate::update::install_target().map(|path| path.display().to_string()),
         "canSelfUpdate": crate::update::can_self_update(),
+        // 内核能不能把「换核」交给壳执行（Windows：运行中的 exe 写不了 ⇒ 只能在重启间隙换）。
+        // 内核只在壳报了这个能力时才登记台账 —— 老壳不认识台账，会退回内核自换并明确报错。
+        "kernelSwap": true,
     }))
 }
 
-/// 应用自更新（`internal-store` 的「更新应用」发起）：`{ appPath }` = 已解压的候选 `.app`。
+/// 应用自更新（`internal-store` 的「更新应用」发起）：`{ appPath }` = 已解压的候选安装目录
+/// （macOS `.app` / Windows 绿色版目录，壳按平台判定）。
 ///
 /// 壳自己不做网络与解压（那是内核侧 internal-store 的职责），只做三件事：
 /// 校验候选包 → 写台账 → 交 helper，然后退出重启。失败一律留在当前版本。
@@ -108,7 +113,7 @@ fn apply_shell_update(app: &AppHandle, params: &Value) -> Result<Value, String> 
     let candidate = params
         .get("appPath")
         .and_then(Value::as_str)
-        .ok_or_else(|| "appPath 必填（候选 .app 的本地路径）".to_string())?;
+        .ok_or_else(|| "appPath 必填（候选安装包的本地路径：macOS 是 .app，Windows 是解压好的绿色版目录）".to_string())?;
     let data_root = crate::sidecar::data_root(app);
     crate::update::apply(app, &data_root, std::path::Path::new(candidate))
 }

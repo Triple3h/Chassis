@@ -7,9 +7,10 @@
  *   --tag <tag>                      固定发布 tag（默认 app-latest）
  *   --min-shell-hot-version <版本>   可选：客户端壳自更新机制低于此版本不提示（默认取产物自报）
  *   --notes <文本>                   可选：更新说明
+ *   --release-dir <目录>             分片与索引所在目录（默认 app/release；测试用临时目录）
  *
- * 输入：app/release/app-shard-<平台>-<架构>.json（pack-app.mjs 产出）
- * 输出：app/release/app-registry.json
+ * 输入：<release-dir>/app-shard-<平台>-<架构>.json（pack-app.mjs 产出；当前平台集 = macos / windows）
+ * 输出：<release-dir>/app-registry.json
  *
  * 与另外两条通道**完全独立**：App 的 `v*` 是给人下载的换包通道、插件用 `plugins-latest`、
  * 内核用 `kernel-latest`、应用自更新用 `app-latest` —— 四个 tag 互不干扰。
@@ -19,11 +20,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const releaseDir = path.join(repoRoot, 'app', 'release')
 
 const options = readOptions(process.argv.slice(2))
 const repo = options.repo ?? 'triple3h/Chassis'
 const tag = options.tag ?? 'app-latest'
+const releaseDir = path.resolve(repoRoot, options['release-dir'] ?? path.join('app', 'release'))
 
 const shards = fs
   .readdirSync(releaseDir)
@@ -39,6 +40,10 @@ const version = shards[0].version
 for (const shard of shards) {
   if (shard.version !== version) {
     console.warn(`! 分片版本不一致（${version} vs ${shard.version}），以 ${version} 为准`)
+  }
+  // 机制版本两端必须一样（同一份壳代码）：不一致 = 有一个平台的包打晚了，客户端会被 minShellHotVersion 挡下
+  if (shard.shellHotVersion !== shards[0].shellHotVersion) {
+    console.warn(`! ${shard.platform} 分片的 shellHotVersion 与首个分片不一致（${shards[0].shellHotVersion} vs ${shard.shellHotVersion}）`)
   }
 }
 

@@ -3,7 +3,7 @@ name = "launcher-shell"
 # 不要手改 version：**唯一维护点是根 `version.json`**，由 `scripts/version.mjs` 同步（`pnpm version:sync`）。
 # 本字段与 `tauri.conf.json` 的 version 必须同值（`pnpm version:check` 拦漂移）——
 # 壳运行时版本以 `tauri.conf.json` 为准（`build.rs` 读它注入 `SHELL_VERSION`；`pack-local-app.mjs` / `pack-app.mjs` 同源）。
-version = "0.1.4"
+version = "0.1.5"
 description = "Launcher shell: system primitives only (window / hotkey / tray / notify / clipboard / open)"
 authors = ["launcher"]
 edition = "2021"

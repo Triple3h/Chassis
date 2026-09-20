@@ -96,7 +96,7 @@ pnpm version:check              # 校验三处位点一致（发版 workflow 里
 | 只发什么 | 怎么做 | 客户端怎么拿到 |
 |---|---|---|
 | App（壳）手动换包 | `git tag v0.2.0 && git push origin v0.2.0` → `release.yml` | 用户手动换包（新机器 / 关掉自动检查时用） |
-| App（壳）自更新 | `pnpm version:set app 0.1.4` → `gh workflow run app-release.yml --ref main -f notes="…"`（或推 tag `app/*`） | **检查并提示**：内核守护（启动 90s 后 / 每 6h）只检查；托盘第一项**常驻**（无新版「检查更新…」/ 有新版带版本号）**点击打开更新页**（托盘自己不执行更新），「关于」页有同一份提示 → 用户在更新页 / 关于页确认后下载、替换、整体重启。仅 macOS |
+| App（壳）自更新 | `pnpm version:set app 0.1.4` → `gh workflow run app-release.yml --ref main -f notes="…"`（或推 tag `app/*`） | **检查并提示**：内核守护（启动 90s 后 / 每 6h）只检查；托盘第一项**常驻**（无新版「检查更新…」/ 有新版带版本号）**点击打开更新页**（托盘自己不执行更新），「关于」页有同一份提示 → 用户在更新页 / 关于页确认后下载、替换、整体重启。**macOS 与 Windows 都能自动安装**（macOS 换 `.app`、Windows 换绿色版目录，helper 在进程退出后执行） |
 | 内核 | `pnpm version:set kernel 0.1.4` → `gh workflow run kernel-release.yml --ref main -f notes="…" [-f min_hot_version=…]`（或推 tag `kernel/*`） | 更新页「内核」区 → 更新内核（热替换 + 优雅重启内核，不动 App） |
 | 插件 | bump 插件 `package.json` 版本 → `gh workflow run plugins-release.yml --ref main [-f plugins="<id>"]`（或推 tag `plugins/*`） | 更新页插件列表 → 更新（热重载，不动 App） |
 

@@ -8,6 +8,7 @@
 //! 热键**不等待内核**：否则内核起不来时会变成"装了却唤不出来"的死局。
 
 mod ipc;
+mod kernel_swap;
 mod logging;
 mod primitives;
 mod sidecar;

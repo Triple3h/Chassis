@@ -669,7 +669,10 @@ async fn hot_binary(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>
     );
 
     let current_version = kernel.version();
-    match crate::hot::binary::apply(&dir, &staged, &current_version, &report.version, ui_path.as_deref()) {
+    // 执行者按**壳自报的能力**定，而不是按平台猜（docs/win-hot-update-research.md §5.3-4）：
+    // 老壳不认识替换台账 ⇒ 退回内核自换（Windows 上会明确报错），绝不写一份没人执行的台账。
+    let owner = crate::hot::binary::swap_owner_for(kernel.shell_can_swap().await);
+    match crate::hot::binary::apply(&dir, &staged, &current_version, &report.version, ui_path.as_deref(), owner) {
         Ok(pending) => {
             kernel.hot.log().append(json!({
                 "type": "binary",
@@ -679,18 +682,25 @@ async fn hot_binary(State(kernel): State<Arc<Kernel>>, body: Option<Json<Value>>
                 "to": pending.to_version,
                 "backup": pending.backup,
                 "pending": true,
+                "swapOwner": pending.swap_owner,
             }));
             let restart = body.get("restart").and_then(Value::as_bool).unwrap_or(true);
             if restart {
                 let kernel_for_restart = kernel.clone();
                 tokio::spawn(async move { kernel_for_restart.hot_restart("binary-update").await });
             }
+            let note = if pending.swap_owner == crate::hot::binary::SwapOwner::Shell {
+                "内核只登记、不动文件：壳会在「内核已退出、尚未拉起」的窗口里完成替换；\
+                 新版本若连续两次启动未就绪，会登记回滚由壳换回"
+            } else {
+                "内核会优雅重启（等在途请求排空）；新版本若连续两次启动未就绪，下一次启动自动回滚"
+            };
             ok_json(json!({
                 "ok": true,
                 "mode": "apply",
                 "pending": pending,
                 "restartScheduled": restart,
-                "note": "内核会优雅重启（等在途请求排空）；新版本若连续两次启动未就绪，下一次启动自动回滚",
+                "note": note,
             }))
         }
         Err(err) => {

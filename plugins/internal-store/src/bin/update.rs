@@ -313,8 +313,8 @@ fn download_kernel(ctx: &Context, args: &Value) -> Result<()> {
 /// 检查应用更新。`current` / `shellHotVersion` 由 view 从 `pluginAction('shellInfo')` 读
 /// （壳是唯一知道自己版本与安装位置的角色）。
 ///
-/// 非 macOS 平台拿不到产物 ⇒ 与「已是最新」同样的结果（`update: null`）：
-/// Windows 的运行中 exe 无法替换，自更新只在 macOS 成立、不在这里报错。
+/// 索引里两个平台都有产物（macOS `.app` zip / Windows 绿色版 zip），按 `current_platform()` 挑；
+/// 「能不能装」由壳回答（`canSelfUpdate`）—— 这里只负责「源里有没有适配当前平台的包」。
 fn check_app(ctx: &Context, args: &Value) -> Result<()> {
     let current = args.get("current").and_then(Value::as_str).unwrap_or_default().to_string();
     if current.is_empty() {

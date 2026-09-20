@@ -1,15 +1,20 @@
-//! 壳自更新（App 层热更新）：候选包自检 → 备份 → **独立 helper 替换 `.app`** → 重启；
+//! 壳自更新（App 层热更新）：候选包自检 → 备份 → **独立 helper 替换安装** → 重启；
 //! 失败由 helper（立即回滚）与下次启动的 `boot_guard`（连续两次未就绪回滚）两处自愈。
 //!
 //! 与内核热更新（`apps/kernel/src/hot/binary.rs`）**同构**，差别只在「谁来重启」：
 //! 内核不能重启自己（壳的 `supervise` 拉起它），壳也没有父进程可依靠 —— 所以替换与重启交给
-//! 一个**脱离壳进程树**的 `/bin/sh` 脚本（`<dataRoot>/hot/shell/swap.sh`），等壳完全退出后再动手
-//! （壳退出会连带停掉内核，整个应用一起重启，这是预期行为）。
+//! 一个**脱离壳进程树**的 helper（macOS `/bin/sh`、Windows PowerShell 5.1，两者都是系统自带），
+//! 等壳完全退出后再动手（壳退出会连带停掉内核，整个应用一起重启，这是预期行为）。
 //!
-//! 为什么 macOS 能做、Windows 不能：macOS 允许替换正在运行的 `.app`（进程持有旧 inode 继续跑），
-//! Windows 的运行中 exe 被锁 ⇒ 只能走安装器（`can_self_update()` 在非 macOS 恒为 false）。
+//! 两种安装形态（`InstallKind`）只有「候选包长什么样」与「helper 怎么写」不同，账本 / 启动守卫 /
+//! 确认成功三段**完全共用**：
+//!  - macOS：`X.app`（同卷 rename 整个 bundle），helper = `<dataRoot>/hot/shell/swap.sh`；
+//!  - Windows：绿色版安装目录（`Chassis.exe` + `resources/`，同卷 rename 整个目录），helper = `swap.ps1`。
 //!
-//! 签名是**硬前提**：新包必须与当前包同一签名身份（固定证书），否则 TCC 授权（辅助功能 /
+//! 两端都不能在**自己还活着**的时候替换：macOS 是「替换了 bundle 也算数」（旧 inode 继续跑），
+//! Windows 则连运行中的 exe 与它所在目录都动不了 —— 所以「等进程退出」这一步在两边都是硬前提。
+//!
+//! 签名是 macOS 的**硬前提**：新包必须与当前包同一签名身份（固定证书），否则 TCC 授权（辅助功能 /
 //! 屏幕录制…）会失配重弹。CI 侧用 `MACOS_SIGN_P12` secrets 导入同一证书解决，见 `.github/workflows/app-release.yml`。
 
 use serde::{Deserialize, Serialize};
@@ -19,10 +24,21 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// 壳自更新机制版本（索引的 `minShellHotVersion` 与它比对；**机制变了才动**，产物版本另算）。
+///
+/// 2026-09-20 加 Windows 安装形态时**刻意没动**：包格式对 macOS 没变，而 Windows 侧此前
+/// `canSelfUpdate` 恒 false（根本不会尝试安装）⇒ 没有需要被挡下的旧客户端；
+/// 反过来动它会把**所有存量客户端（含 macOS）**挡在门外 —— 那是「机制不兼容」才配付的代价。
 pub const SHELL_HOT_VERSION: &str = "0.1.0";
 
 /// `Contents/MacOS/` 下的壳二进制名（改这里要同步 `scripts/pack-local-app.mjs`）。
 const SHELL_EXE: &str = "launcher-shell";
+
+/// Windows 绿色版里的壳二进制名（改这里要同步 `scripts/pack-win.mjs` 的 `Chassis.exe`）。
+const APP_EXE: &str = "Chassis.exe";
+
+/// `CREATE_NO_WINDOW`（winbase.h）：GUI 进程 spawn 控制台程序时不要闪黑框。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// 自检超时：`--hot-probe` 只打印一行 JSON 就退出，正常在几十毫秒内。
 const PROBE_TIMEOUT_MS: u64 = 3_000;
@@ -41,9 +57,36 @@ pub fn hot_version() -> &'static str {
 
 // ── 定位 ────────────────────────────────────────────────────────
 
-/// 当前 `.app` 的路径；开发态（`target/debug/launcher-shell`）为 `None`。
-pub fn bundle_path() -> Option<PathBuf> {
-    bundle_of(&std::env::current_exe().ok()?)
+/// 安装形态：决定「候选包长什么样」「怎么替换」「helper 用哪门脚本」。
+/// 抽成参数（而不是到处 `cfg`）是为了让两条路都能在任一平台上被单测驱动。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallKind {
+    /// `X.app`（macOS）
+    MacBundle,
+    /// 绿色版安装目录：`Chassis.exe` + `resources/`（Windows）
+    WindowsDir,
+}
+
+/// 当前平台的安装形态
+pub fn install_kind() -> InstallKind {
+    if cfg!(windows) {
+        InstallKind::WindowsDir
+    } else {
+        InstallKind::MacBundle
+    }
+}
+
+/// 当前安装目标；开发态（`target/debug/…`）为 `None`。
+pub fn install_target() -> Option<PathBuf> {
+    install_target_of(install_kind(), &std::env::current_exe().ok()?)
+}
+
+/// 从可执行文件路径推断安装目标（可注入，便于测试另一种形态）。
+pub fn install_target_of(kind: InstallKind, exe: &Path) -> Option<PathBuf> {
+    match kind {
+        InstallKind::MacBundle => bundle_of(exe),
+        InstallKind::WindowsDir => windows_dir_of(exe),
+    }
 }
 
 /// 从可执行文件往上找 `.app`：`…/X.app/Contents/MacOS/x` → `…/X.app`。
@@ -57,13 +100,22 @@ fn bundle_of(exe: &Path) -> Option<PathBuf> {
     looks_like_bundle.then(|| bundle.to_path_buf())
 }
 
-/// 打包态 + 目标目录可写 ⇒ 允许自更新（开发态一律拒绝：替换的不是正经安装位）。
-pub fn can_self_update() -> bool {
-    if !cfg!(target_os = "macos") {
-        return false;
+/// Windows 绿色版安装目录：`<dir>/Chassis.exe` 且 `<dir>/resources/` 在才算正经安装位
+/// （开发态是 `target/debug/launcher-shell.exe`，名字与结构都对不上 ⇒ 一律拒绝 ——
+/// 与 macOS「开发态不是 `.app`」同一条规矩：绝不拿 dev 跑出来的路径去替换生产安装）。
+fn windows_dir_of(exe: &Path) -> Option<PathBuf> {
+    if exe.file_name()? != APP_EXE {
+        return None;
     }
-    match bundle_path() {
-        Some(bundle) => bundle.parent().map(is_writable).unwrap_or(false),
+    let dir = exe.parent()?.to_path_buf();
+    dir.join("resources").is_dir().then_some(dir)
+}
+
+/// 打包态 + **父目录可写** ⇒ 允许自更新（两种形态都是「整个目录被 rename 走再换新的」，
+/// 所以写权限取决于父目录；开发态一律拒绝：替换的不是正经安装位）。
+pub fn can_self_update() -> bool {
+    match install_target() {
+        Some(target) => target.parent().map(is_writable).unwrap_or(false),
         None => false,
     }
 }
@@ -87,7 +139,7 @@ pub fn probe_report() -> String {
     json!({
         "version": version(),
         "hotVersion": SHELL_HOT_VERSION,
-        "bundle": bundle_path().map(|path| path.display().to_string()),
+        "bundle": install_target().map(|path| path.display().to_string()),
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
     })
@@ -102,41 +154,64 @@ pub struct StagedApp {
 }
 
 /// 候选包校验（三道都要过）：
-///  1. 结构：`Contents/MacOS/launcher-shell` 存在；
-///  2. 版本：`Info.plist` 的 `CFBundleShortVersionString` 与二进制 `--hot-probe` 自报**一致**
-///     （不一致 = 包拼装事故，宁可拒绝也不装出一个版本说不清的包）；
+///  1. 结构：macOS = `Contents/MacOS/launcher-shell`、Windows = `Chassis.exe` 存在；
+///  2. 版本：macOS 要 `Info.plist` 的 `CFBundleShortVersionString` 与二进制 `--hot-probe` 自报**一致**
+///     （不一致 = 包拼装事故，宁可拒绝也不装出一个版本说不清的包）；Windows 没有 plist，
+///     改查自检报告的 `platform` 与当前形态同源（防拿错平台的包）；
 ///  3. 能跑：`--hot-probe` 真的跑起来并退出 0。
 ///
 /// 版本**是否比当前新**不在这里判断 —— 那是调用方（内核侧 internal-store 的 semver 比较）的职责，
 /// 壳只保证「这个包是完整、自洽、能跑的」。
 pub fn verify_staged(candidate: &Path) -> Result<StagedApp, String> {
+    verify_staged_with(install_kind(), candidate)
+}
+
+/// `verify_staged` 的可注入版本（便于在任一平台上测另一种形态）。
+pub fn verify_staged_with(kind: InstallKind, candidate: &Path) -> Result<StagedApp, String> {
     if !candidate.is_dir() {
         return Err(format!("候选包不是目录：{}", candidate.display()));
     }
-    let binary = candidate.join("Contents").join("MacOS").join(SHELL_EXE);
+    let (binary, expected_platform) = match kind {
+        InstallKind::MacBundle => (candidate.join("Contents").join("MacOS").join(SHELL_EXE), "macos"),
+        InstallKind::WindowsDir => (candidate.join(APP_EXE), "windows"),
+    };
     if !binary.exists() {
-        return Err(format!("候选包里没有 Contents/MacOS/{SHELL_EXE}（不是完整的 .app）"));
+        return Err(match kind {
+            InstallKind::MacBundle => format!("候选包里没有 Contents/MacOS/{SHELL_EXE}（不是完整的 .app）"),
+            InstallKind::WindowsDir => format!("候选包里没有 {APP_EXE}（不是绿色版目录）"),
+        });
     }
-    let plist_version = plist_version(candidate)?;
     let report = run_probe(&binary)?;
     let reported = report.get("version").and_then(Value::as_str).unwrap_or_default().to_string();
     if reported.is_empty() {
         return Err("候选包自检没有报告版本（--hot-probe）".to_string());
     }
-    if reported != plist_version {
+    let platform = report.get("platform").and_then(Value::as_str).unwrap_or_default();
+    if platform != expected_platform {
         return Err(format!(
-            "候选包的二进制版本（{reported}）与 Info.plist（{plist_version}）不一致：包拼装有问题，拒绝安装"
+            "候选包自检报告的平台是 {platform}，与当前安装形态（{expected_platform}）不符：拒绝安装"
         ));
+    }
+    if kind == InstallKind::MacBundle {
+        let plist_version = plist_version(candidate)?;
+        if reported != plist_version {
+            return Err(format!(
+                "候选包的二进制版本（{reported}）与 Info.plist（{plist_version}）不一致：包拼装有问题，拒绝安装"
+            ));
+        }
     }
     Ok(StagedApp { path: candidate.to_path_buf(), version: reported })
 }
 
 fn run_probe(binary: &Path) -> Result<Value, String> {
-    let mut child = Command::new(binary)
-        .arg("--hot-probe")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let mut command = Command::new(binary);
+    command.arg("--hot-probe").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW); // 自检不要闪黑框
+    }
+    let mut child = command
         .spawn()
         .map_err(|err| format!("候选包自检无法启动（{}）：{err}", binary.display()))?;
     let started = Instant::now();
@@ -195,8 +270,13 @@ pub fn pending_file(data_root: &Path) -> PathBuf {
     shell_hot_dir(data_root).join("pending.json")
 }
 
-pub fn helper_script(data_root: &Path) -> PathBuf {
-    shell_hot_dir(data_root).join("swap.sh")
+/// helper 脚本路径（形态决定扩展名：macOS `swap.sh` / Windows `swap.ps1`）
+fn helper_script_of(kind: InstallKind, data_root: &Path) -> PathBuf {
+    let name = match kind {
+        InstallKind::MacBundle => "swap.sh",
+        InstallKind::WindowsDir => "swap.ps1",
+    };
+    shell_hot_dir(data_root).join(name)
 }
 
 pub fn helper_log(data_root: &Path) -> PathBuf {
@@ -251,11 +331,20 @@ fn backup_path(target: &Path) -> PathBuf {
 /// 两条路都会在 `open` 之后等 8 秒查一次进程；没起来就（replace 模式下）回滚再 open ——
 /// 这是 boot_guard 之外的第一道自愈（新包连启动都做不到时，用户只会看到「闪一下」）。
 fn write_helper(data_root: &Path) -> Result<PathBuf, String> {
-    let script = helper_script(data_root);
+    write_helper_with(install_kind(), data_root)
+}
+
+fn write_helper_with(kind: InstallKind, data_root: &Path) -> Result<PathBuf, String> {
+    let script = helper_script_of(kind, data_root);
     if let Some(parent) = script.parent() {
         std::fs::create_dir_all(parent).map_err(|err| format!("创建热更新目录失败：{err}"))?;
     }
-    std::fs::write(&script, HELPER_SOURCE).map_err(|err| format!("写入 helper 失败：{err}"))?;
+    let source = match kind {
+        InstallKind::MacBundle => HELPER_SOURCE.to_string(),
+        // PowerShell 5.1 读无 BOM 的 UTF-8 会按 ANSI 解 —— 中文日志会乱码，必须带 BOM
+        InstallKind::WindowsDir => format!("\u{feff}{HELPER_PS1}"),
+    };
+    std::fs::write(&script, source).map_err(|err| format!("写入 helper 失败：{err}"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -335,14 +424,122 @@ fi
 exit 1
 "#;
 
+/// Windows 版 helper（PowerShell 5.1：系统自带，仍是「脱离壳进程树等它退出再动手」同一套）。
+///
+/// 与 sh 版的差异只有三处，都是平台决定的：
+///  - **整目录 rename**：绿色版安装 = 一个目录（`Chassis.exe` + `resources/`），替换 = 目录换位；
+///  - 等进程退出用 `Get-Process -Id`（Windows 上运行中的 exe 与它所在目录都被锁，等是硬前提）；
+///  - 起新实例用 `Start-Process`（等价 macOS 的 `open`）。
+///
+/// 坑：参数名**不能叫 `pid`** —— PowerShell 的 `$PID` 是只读自动变量，声明同名参数会直接报错。
+const HELPER_PS1: &str = r#"# 壳自更新 helper（由启动台生成，不要手改）：等旧进程退出 → 替换安装目录 → 重新启动。
+# 用法: swap.ps1 <replace|restore> <pid> <target> <staged> <backup> <log>
+param([string]$mode, [int]$targetPid, [string]$target, [string]$staged, [string]$backup, [string]$log)
+$ErrorActionPreference = 'Stop'
+
+function Write-Log([string]$message) {
+  $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+  Add-Content -Path $log -Value "$stamp [shell-swap] $message" -ErrorAction SilentlyContinue
+}
+
+# ① 等旧进程完全退出：运行中的 exe 与它所在目录都动不了
+$waited = 0
+while ($waited -lt 300) {
+  if (-not (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)) { break }
+  Start-Sleep -Milliseconds 200
+  $waited++
+}
+if ($waited -ge 300) {
+  Write-Log "等待旧进程退出超时（pid=$targetPid），放弃（本次不做任何替换）"
+  exit 1
+}
+Start-Sleep -Milliseconds 300
+
+$exe = Join-Path $target 'Chassis.exe'
+
+# ② 替换（失败一律回到「原目录还在原位」的状态，绝不留半个安装）
+if ($mode -eq 'replace') {
+  Write-Log "开始替换：$target（候选 $staged）"
+  try {
+    if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
+    Move-Item -Path $target -Destination $backup
+    Move-Item -Path $staged -Destination $target
+  } catch {
+    Write-Log "替换失败：$($_.Exception.Message)（立即回滚）"
+    if ((Test-Path $backup) -and -not (Test-Path $target)) {
+      Move-Item -Path $backup -Destination $target -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $exe) { Start-Process -FilePath $exe -WorkingDirectory $target }
+    exit 1
+  }
+} else {
+  Write-Log "回滚：备份换回 $target"
+  try {
+    if (Test-Path $target) { Remove-Item -Recurse -Force $target }
+    Move-Item -Path $backup -Destination $target
+  } catch {
+    Write-Log "回滚失败：$($_.Exception.Message)（备份 $backup）"
+    exit 1
+  }
+}
+
+# ③ 起新实例（绿色版：直接跑目录里的 Chassis.exe）
+if (-not (Test-Path $exe)) {
+  Write-Log "目标目录里没有 Chassis.exe：$target"
+  exit 1
+}
+Start-Process -FilePath $exe -WorkingDirectory $target
+Start-Sleep -Seconds 8
+if (Get-Process -Name 'Chassis' -ErrorAction SilentlyContinue) {
+  Write-Log "新实例已就绪：$target"
+  exit 0
+}
+
+# ④ 连启动都做不到：replace 模式下自动回滚（boot_guard 之外的兜底）
+Write-Log "新实例未在 8 秒内起来"
+if ($mode -eq 'replace' -and (Test-Path $backup)) {
+  Write-Log "自动回滚到备份"
+  try {
+    if (Test-Path $target) { Remove-Item -Recurse -Force $target }
+    Move-Item -Path $backup -Destination $target
+    $restored = Join-Path $target 'Chassis.exe'
+    if (Test-Path $restored) { Start-Process -FilePath $restored -WorkingDirectory $target }
+  } catch {
+    Write-Log "自动回滚失败：$($_.Exception.Message)"
+  }
+}
+exit 1
+"#;
+
 /// 脱离壳进程树启动 helper（不等待、不接管输出；壳退出不会杀它）。
 fn spawn_helper(data_root: &Path, args: &[String]) -> Result<(), String> {
-    let script = helper_script(data_root);
+    spawn_helper_with(install_kind(), data_root, args)
+}
+
+fn spawn_helper_with(kind: InstallKind, data_root: &Path, args: &[String]) -> Result<(), String> {
+    let script = helper_script_of(kind, data_root);
     if !script.exists() {
         return Err("helper 脚本不存在".to_string());
     }
-    let mut command = Command::new("/bin/sh");
-    command.arg(&script).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // 两者都是系统自带：macOS `/bin/sh`、Windows PowerShell（不引第三方依赖）
+    let mut command = match kind {
+        InstallKind::MacBundle => {
+            let mut command = Command::new("/bin/sh");
+            command.arg(&script);
+            command
+        }
+        InstallKind::WindowsDir => {
+            let mut command = Command::new("powershell");
+            command.arg("-NoProfile").arg("-ExecutionPolicy").arg("Bypass").arg("-File").arg(&script);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(CREATE_NO_WINDOW); // 别在用户面前闪一屏黑框
+            }
+            command
+        }
+    };
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     command.spawn().map(|_| ()).map_err(|err| format!("启动 helper 失败：{err}"))
 }
 
@@ -352,15 +549,12 @@ fn spawn_helper(data_root: &Path, args: &[String]) -> Result<(), String> {
 ///
 /// 返回后调用方要把 `{ ok, restarting: true }` 回给内核（壳会在 `EXIT_DELAY_MS` 后退出）。
 pub fn apply(app: &tauri::AppHandle, data_root: &Path, candidate: &Path) -> Result<Value, String> {
-    if !cfg!(target_os = "macos") {
-        return Err("当前平台不支持应用自更新（Windows 的运行中 exe 无法替换，请用安装包）".to_string());
-    }
     let staged = verify_staged(candidate)?;
-    let target = bundle_path().ok_or_else(|| "开发态（未打包）不支持应用自更新".to_string())?;
+    let target = install_target().ok_or_else(|| "开发态（未打包）不支持应用自更新".to_string())?;
     if target == staged.path {
         return Err("候选包与当前安装位置相同".to_string());
     }
-    let parent = target.parent().ok_or_else(|| "定位不到 .app 的父目录".to_string())?;
+    let parent = target.parent().ok_or_else(|| "定位不到安装位置的父目录".to_string())?;
     if !is_writable(parent) {
         return Err(format!("安装位置不可写：{}（把 App 放到可写目录再试）", parent.display()));
     }
@@ -422,19 +616,19 @@ pub struct BootOutcome {
 }
 
 pub fn boot_guard(data_root: &Path) -> Option<BootOutcome> {
-    boot_guard_with(data_root, bundle_path().as_deref(), &|args| spawn_helper(data_root, args))
+    boot_guard_with(data_root, install_target().as_deref(), &|args| spawn_helper(data_root, args))
 }
 
-/// `boot_guard` 的可测版本：bundle 与「交 helper」都可注入
-/// （单测跑在 `target/debug` 下，永远不是 `.app`；真 spawn 会在测试进程活着时一直等）。
+/// `boot_guard` 的可测版本：安装位置与「交 helper」都可注入
+/// （单测跑在 `target/debug` 下，永远不是正经安装位；真 spawn 会在测试进程活着时一直等）。
 fn boot_guard_with(
     data_root: &Path,
-    bundle: Option<&Path>,
+    install: Option<&Path>,
     spawn: &dyn Fn(&[String]) -> Result<(), String>,
 ) -> Option<BootOutcome> {
-    // 只有打包态才参与：开发态（`target/debug/launcher-shell`）与 /Applications 里那份
+    // 只有打包态才参与：开发态（`target/debug/launcher-shell`）与真正的安装
     // **共用同一个数据目录** —— 让 dev 跑一遍就记账、甚至去回滚生产安装，是绝不该发生的事。
-    if bundle.is_none() {
+    if install.is_none() {
         return None;
     }
     let mut pending = read_pending(data_root)?;
@@ -508,11 +702,11 @@ fn boot_guard_with(
 
 /// 走到「内核就绪」后调用：确认本次启动成功，清掉台账（回滚也就不会再发生）。
 pub fn mark_boot_success(data_root: &Path) -> Option<String> {
-    mark_boot_success_in(data_root, bundle_path().as_deref())
+    mark_boot_success_in(data_root, install_target().as_deref())
 }
 
-fn mark_boot_success_in(data_root: &Path, bundle: Option<&Path>) -> Option<String> {
-    if bundle.is_none() {
+fn mark_boot_success_in(data_root: &Path, install: Option<&Path>) -> Option<String> {
+    if install.is_none() {
         return None;
     }
     let pending = read_pending(data_root)?;
@@ -547,7 +741,9 @@ mod tests {
         let binary = macos.join(SHELL_EXE);
         std::fs::write(
             &binary,
-            format!("#!/bin/sh\nprintf '%s' '{{\"version\":\"{version}\",\"hotVersion\":\"{SHELL_HOT_VERSION}\"}}'\n"),
+            format!(
+                "#!/bin/sh\nprintf '%s' '{{\"version\":\"{version}\",\"hotVersion\":\"{SHELL_HOT_VERSION}\",\"platform\":\"macos\"}}'\n"
+            ),
         )
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
@@ -613,7 +809,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 假 bundle 路径（单测跑在 `target/debug` 下，真 `bundle_path()` 是 None）。
+    /// 假安装位置（单测跑在 `target/debug` 下，真 `install_target()` 是 None）。
     const FAKE_BUNDLE: &str = "/Applications/Chassis.app";
 
     /// 当前版本的 pending（版本必须与 `version()` 一致，否则会被当成过期台账丢弃）。
@@ -695,11 +891,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Windows 安装形态：`Chassis.exe` + `resources/` 才算安装位；开发态（`launcher-shell.exe`）不算。
     #[test]
-    fn helper_source_is_posix_shell() {
-        assert!(HELPER_SOURCE.starts_with("#!/bin/sh"), "必须显式 /bin/sh（macOS 没有 bash 4 特性）");
-        assert!(HELPER_SOURCE.contains("kill -0"), "等旧进程退出是替换的前提");
-        assert!(HELPER_SOURCE.contains("xattr -dr com.apple.quarantine"), "未公证包要摘 quarantine");
-        assert!(HELPER_SOURCE.contains("pgrep -f"), "启动失败要能自愈");
+    fn windows_install_dir_is_recognized_by_structure() {
+        let dir = temp_dir("win-install");
+        let install = dir.join("Chassis");
+        std::fs::create_dir_all(install.join("resources")).unwrap();
+        let exe = install.join(APP_EXE);
+        std::fs::write(&exe, b"stub").unwrap();
+        assert_eq!(install_target_of(InstallKind::WindowsDir, &exe).as_deref(), Some(install.as_path()));
+
+        // 缺 resources/ ⇒ 不是正经安装位
+        let bare = dir.join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        let bare_exe = bare.join(APP_EXE);
+        std::fs::write(&bare_exe, b"stub").unwrap();
+        assert!(install_target_of(InstallKind::WindowsDir, &bare_exe).is_none(), "缺 resources 不算安装位");
+
+        // 开发态二进制名（launcher-shell.exe）⇒ 一律拒绝（与 macOS 的「不是 .app」同一条规矩）
+        let dev = dir.join("debug");
+        std::fs::create_dir_all(dev.join("resources")).unwrap();
+        let dev_exe = dev.join("launcher-shell.exe");
+        std::fs::write(&dev_exe, b"stub").unwrap();
+        assert!(install_target_of(InstallKind::WindowsDir, &dev_exe).is_none(), "开发态不能当安装位");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Windows 候选包：结构（`Chassis.exe`）+ 自检（报告的 `platform` 必须同源）。
+    #[cfg(unix)]
+    #[test]
+    fn windows_staged_package_is_verified_by_structure_and_platform() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("win-staged");
+
+        let good = dir.join("candidate");
+        std::fs::create_dir_all(&good).unwrap();
+        let exe = good.join(APP_EXE);
+        std::fs::write(&exe, "#!/bin/sh\nprintf '%s' '{\"version\":\"0.2.0\",\"platform\":\"windows\"}'\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let staged = verify_staged_with(InstallKind::WindowsDir, &good).expect("结构 + 平台自洽应放行");
+        assert_eq!(staged.version, "0.2.0");
+
+        // 拿错平台的包（自检报 macos）⇒ 拒绝
+        let wrong = dir.join("wrong-platform");
+        std::fs::create_dir_all(&wrong).unwrap();
+        let wrong_exe = wrong.join(APP_EXE);
+        std::fs::write(&wrong_exe, "#!/bin/sh\nprintf '%s' '{\"version\":\"0.2.0\",\"platform\":\"macos\"}'\n").unwrap();
+        std::fs::set_permissions(&wrong_exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let err = verify_staged_with(InstallKind::WindowsDir, &wrong).expect_err("平台不符必须拒绝");
+        assert!(err.contains("平台"), "{err}");
+
+        // 缺 Chassis.exe ⇒ 拒绝
+        let empty = dir.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert!(verify_staged_with(InstallKind::WindowsDir, &empty).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 两种形态各写各的 helper（Windows 的 ps1 **必须带 BOM**：PS 5.1 否则按 ANSI 解、中文日志乱码）。
+    #[test]
+    fn helper_scripts_are_written_per_install_kind() {
+        let dir = temp_dir("helper");
+
+        let sh = write_helper_with(InstallKind::MacBundle, &dir).unwrap();
+        assert_eq!(sh.file_name().unwrap(), "swap.sh");
+        let text = std::fs::read_to_string(&sh).unwrap();
+        assert!(text.starts_with("#!/bin/sh"), "必须显式 /bin/sh（macOS 没有 bash 4 特性）");
+        assert!(text.contains("kill -0"), "等旧进程退出是替换的前提");
+        assert!(text.contains("xattr -dr com.apple.quarantine"), "未公证包要摘 quarantine");
+        assert!(text.contains("pgrep -f"), "启动失败要能自愈");
+
+        let ps1 = write_helper_with(InstallKind::WindowsDir, &dir).unwrap();
+        assert_eq!(ps1.file_name().unwrap(), "swap.ps1");
+        let text = std::fs::read_to_string(&ps1).unwrap();
+        assert!(text.starts_with('\u{feff}'), "PS 5.1 要 BOM 才按 UTF-8 读");
+        assert!(text.contains("Get-Process -Id $targetPid"), "等旧进程退出（$PID 是只读自动变量，参数名不能叫 pid）");
+        assert!(text.contains("Move-Item"), "替换 = 整目录换位");
+        assert!(text.contains("Start-Process"), "换完要起新实例");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

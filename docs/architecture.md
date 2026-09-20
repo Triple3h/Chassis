@@ -203,7 +203,7 @@ active → degraded（脚本连续失败 3 次）
 │   ├── bin/{staging,backup}/    # 内核二进制热替换的暂存与备份
 │   └── shell/                   # 应用（壳）自更新
 │       ├── pending.json         # 待验证台账（attempts ≥2 ⇒ 回滚）
-│       ├── swap.sh              # helper：壳退出后替换 / 回滚 `.app`
+│       ├── swap.sh / swap.ps1   # helper：壳退出后替换 / 回滚安装（macOS / Windows）
 │       └── swap.log             # 每次替换 / 回滚一行
 ├── .staging/                    # zip / 目录安装的临时目录（装完即删）
 └── logs/

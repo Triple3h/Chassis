@@ -78,7 +78,7 @@ line(`✓ 组装完成：${path.relative(repoRoot, outDir)}`)
 
 // 3) 压缩（PowerShell 自带 Compress-Archive，不引第三方依赖）
 const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
-const version = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version
+const version = appVersion()
 const zipPath = path.join(repoRoot, 'dist-app', `${APP_NAME}-${version}-win-${arch}.zip`)
 fs.rmSync(zipPath, { force: true })
 const compress = spawnSync(
@@ -98,3 +98,13 @@ line(`✓ 打包完成：${path.relative(repoRoot, zipPath)}`)
 line(`  使用：解压后双击 ${APP_NAME}.exe（首次会提示安装 WebView2，系统通常已自带）`)
 line(`  数据目录：%APPDATA%\\${APP_NAME}`)
 line('  权限：截取选中文本用 UI Automation（无需授权）；hosts 写入走 UAC 授权框')
+
+/**
+ * 壳版本：**唯一维护点是根 `version.json`**（根 `package.json` 的 version 是内部包版本、不发布、会漂移 ——
+ * 曾经读它，导致 Windows 包名停在 0.1.0，与更新索引里的版本对不上）。
+ */
+function appVersion() {
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'version.json'), 'utf8'))
+  if (!manifest.app) fail('version.json 里没有 app 版本')
+  return manifest.app
+}

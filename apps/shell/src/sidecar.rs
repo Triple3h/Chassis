@@ -280,6 +280,12 @@ impl Sidecar {
             KernelLocation::Direct(path) => (path, ui_dist_dir(app)),
         };
 
+        // Windows 路线：内核对换核只写台账，壳在「内核已退出、尚未拉起」窗口里照台账执行 / 回滚。
+        // macOS 上台账的 swapOwner 不是 shell（内核自己换过了）⇒ 这里什么都不做。
+        if let Some(detail) = crate::kernel_swap::apply_pending(&data_root, &entry) {
+            crate::logging::log(&format!("[shell] {detail}"));
+        }
+
         // v2：内核本身就是可执行文件（Rust）—— 不再需要找用户的 Node、也不再拼解释器参数
         let mut command = Command::new(&entry);
         command

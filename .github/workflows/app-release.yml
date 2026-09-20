@@ -1,4 +1,10 @@
-# 应用（壳）自更新：把 `.app` 与 app-registry.json 发到固定 tag 的 Release。
+# 应用（壳）自更新：把各平台的壳产物与 app-registry.json 发到固定 tag 的 Release。
+#
+# 两个平台各有产物（索引按 `platforms` 分发）：
+#   - macOS：`.app` 的 zip（自动替换链路在用）
+#   - Windows：绿色版目录的 zip（`Chassis.exe` + `resources/`）—— **自动替换尚未实现**
+#     （运行中的 exe 写不了，安装路径见 docs/win-hot-update-research.md §4.3），
+#     索引里带上它是给「手动换包 / 将来接上 helper」留一个稳定的下载入口
 #
 # 与另外三条通道完全独立（四个 tag 各自 releases/download/<tag>/... 直链，互不顶替）：
 #   - App 换包（给人下载）：release.yml（tag v*）
@@ -97,8 +103,35 @@ jobs:
           path: app/release/*
           if-no-files-found: error
 
+  # Windows 与 macOS 并行：同一个 version.json、同一条 build-all；差别只在打包脚本
+  # （pack-win 一条命令走完 build-all → 资源就位 → cargo build 壳 → 绿色版 zip）
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 版本一致性（根 version.json 是唯一维护点）
+        run: node scripts/version.mjs check
+
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/pack-win.mjs
+      # 只搬运 pack-win 的 zip 并写分片（压缩逻辑不重复第二份）
+      - run: node scripts/pack-app.mjs --platform windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-windows
+          path: app/release/*
+          if-no-files-found: error
+
   publish:
-    needs: [macos]
+    needs: [macos, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -136,10 +169,12 @@ jobs:
 
             - `app-registry.json`：索引（schema 1，含各平台产物的 sha256 与最低壳自更新机制版本）
             - `Chassis-<版本>-macos-<架构>.zip`：完整 `.app`（解压结构 = `Chassis.app/Contents/…`）
+            - `Chassis-<版本>-win-<架构>.zip`：Windows 绿色版（解压结构 = `Chassis.exe` + `resources/`）
 
             安装由 `internal-store` 的「更新应用」发起：下载 → sha256 校验 → 解压 →
             `pluginAction('applyShellUpdate')` → 壳校验候选包（`--hot-probe`）→ 备份 → 独立 helper 替换 →
-            重新打开；新版本连续两次启动未就绪会自动回滚。
+            重新启动；新版本连续两次启动未就绪会自动回滚。**macOS 与 Windows 同一套流程**，
+            差别只在安装形态（`.app` / 绿色版目录）与 helper（`swap.sh` / `swap.ps1`，见 docs/shell-hot-update.md）。
 
       # 同 release 里只保留本次索引指向的 zip（理由同 plugins-release.yml 的同名步骤）：
       # 每次自更新都会打出新文件名的 zip，不清理就会在 app-latest 里无限积累

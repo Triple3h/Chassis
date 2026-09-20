@@ -378,7 +378,8 @@ pub struct AppUpdate {
     pub asset: RegistryAsset,
 }
 
-/// 应用更新包解压后的落点（`app` = 候选 `Chassis.app` 目录，交给壳的 `shell.applyUpdate`）。
+/// 应用更新包解压后的落点（`app` = 候选安装目录，交给壳的 `shell.applyUpdate`：
+/// macOS 是 `Chassis.app`，Windows 是绿色版目录）。
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppBundle {
@@ -403,8 +404,9 @@ pub fn pick_app_asset<'a>(entry: &'a AppEntry, platform: &str, arch: &str) -> Op
 
 /// 「有没有应用可更新」：口径与内核 / 插件通道一致（非 semver / 版本不新 ⇒ `None`）。
 ///
-/// 平台过滤天然把 Windows 挡在外面（索引里只有 macOS 产物）：Windows 上运行中的 exe 无法替换，
-/// 自更新只能在安装器里做，因此那条通道不存在「更新应用」这个动作。
+/// 两个平台都有产物（macOS `.app` zip / Windows 绿色版 zip），按 `platforms` 挑；
+/// 「能不能装」由壳回答（`app.info.canSelfUpdate` = 打包态 + 安装位置可写）——
+/// Windows 上壳会把替换交给独立 helper（`swap.ps1`），见 `apps/shell/src/update.rs`。
 pub fn collect_app_update(
     registry: &AppRegistry,
     current: &str,
@@ -428,28 +430,39 @@ pub fn collect_app_update(
     })
 }
 
-/// 解压应用更新包（结构 = `Chassis.app/Contents/…`），并校验壳二进制与 `Info.plist` 都在。
+/// 解压应用更新包并做**通用结构**校验，返回交给壳的候选目录。
+///
+/// 两种结构都接受（**选哪个由壳按平台判定**，这里只保证解压结果不是垃圾）：
+///  - macOS：最外层一个 `X.app`（要 `Contents/MacOS/launcher-shell` + `Info.plist`）；
+///  - Windows：绿色版目录（要 `Chassis.exe`，`resources/` 随包）。
 ///
 /// 这里只做**结构与存在性**校验：候选包「能不能跑」由壳侧的 `--hot-probe` 自检回答
 /// （见 `apps/shell/src/update.rs`），那是唯一的权威判据。
 pub fn unzip_app_bundle(zip_path: &Path, target_dir: &Path) -> std::result::Result<AppBundle, String> {
     extract_zip(zip_path, target_dir)?;
-    let app = find_app_dir(target_dir)?;
-    let binary = app.join("Contents").join("MacOS").join("launcher-shell");
-    if !binary.exists() {
-        return Err(format!(
-            "更新包里没有 Contents/MacOS/launcher-shell（结构应为 Chassis.app/Contents/…）：{}",
-            app.display()
-        ));
+    if let Some(app) = find_app_dir(target_dir)? {
+        let binary = app.join("Contents").join("MacOS").join("launcher-shell");
+        if !binary.exists() {
+            return Err(format!(
+                "更新包里没有 Contents/MacOS/launcher-shell（结构应为 Chassis.app/Contents/…）：{}",
+                app.display()
+            ));
+        }
+        if !app.join("Contents").join("Info.plist").exists() {
+            return Err("更新包里缺少 Contents/Info.plist（不是完整的 .app）".to_string());
+        }
+        return Ok(AppBundle { app });
     }
-    if !app.join("Contents").join("Info.plist").exists() {
-        return Err("更新包里缺少 Contents/Info.plist（不是完整的 .app）".to_string());
+    // Windows 绿色版：zip 根就是应用目录（`Chassis.exe` + `resources/`，与 pack-win.mjs 同源）
+    if target_dir.join("Chassis.exe").exists() {
+        return Ok(AppBundle { app: target_dir.to_path_buf() });
     }
-    Ok(AppBundle { app })
+    Err("更新包里既没有 .app 也没有 Chassis.exe（结构应为 Chassis.app/Contents/… 或绿色版目录）".to_string())
 }
 
-/// 在解压结果里找唯一一个 `.app`（`ditto --keepParent` 出来的结构 = 最外层一个 `X.app/`）。
-fn find_app_dir(root: &Path) -> std::result::Result<PathBuf, String> {
+/// 在解压结果里找唯一一个 `.app`（`ditto --keepParent` 出来的结构 = 最外层一个 `X.app/`）；
+/// 没有 `.app` ⇒ `None`（可能是 Windows 绿色版结构，交给调用方判断）。
+fn find_app_dir(root: &Path) -> std::result::Result<Option<PathBuf>, String> {
     let mut found: Option<PathBuf> = None;
     for entry in std::fs::read_dir(root).map_err(|err| format!("读取解压目录失败：{err}"))?.flatten() {
         let path = entry.path();
@@ -460,7 +473,7 @@ fn find_app_dir(root: &Path) -> std::result::Result<PathBuf, String> {
             found = Some(path);
         }
     }
-    found.ok_or_else(|| "更新包里没有 .app（结构应为 Chassis.app/Contents/…）".to_string())
+    Ok(found)
 }
 
 pub fn current_platform() -> &'static str {
@@ -726,14 +739,15 @@ mod tests {
     "notes": "截图下沉到壳",
     "assets": [
       {{ "platforms": ["macos"], "arch": ["arm64"], "url": "https://github.com/o/r/releases/download/app-latest/Chassis-0.2.0-macos-arm64.zip", "sha256": "aa", "bytes": 1 }},
-      {{ "platforms": ["macos"], "arch": ["x64"], "url": "https://github.com/o/r/releases/download/app-latest/Chassis-0.2.0-macos-x64.zip", "sha256": "bb", "bytes": 2 }}
+      {{ "platforms": ["macos"], "arch": ["x64"], "url": "https://github.com/o/r/releases/download/app-latest/Chassis-0.2.0-macos-x64.zip", "sha256": "bb", "bytes": 2 }},
+      {{ "platforms": ["windows"], "arch": ["x64"], "url": "https://github.com/o/r/releases/download/app-latest/Chassis-0.2.0-win-x64.zip", "sha256": "cc", "bytes": 3 }}
     ]
   }}
 }}"#
         )
     }
 
-    /// 应用通道的门槛：版本 / 平台 / 机制版本三条都要过（Windows 永远没有产物 ⇒ 不提示）。
+    /// 应用通道的门槛：版本 / 平台 / 机制版本三条都要过（索引按平台挑产物）。
     #[test]
     fn app_registry_gates_by_version_platform_and_hot() {
         let registry = parse_app_registry(&app_registry_raw(1)).unwrap();
@@ -746,9 +760,11 @@ mod tests {
 
         assert!(collect_app_update(&registry, "0.2.0", "macos", "arm64", Some("0.1.0")).is_none(), "同版本不提示");
         assert!(collect_app_update(&registry, "0.3.0", "macos", "arm64", Some("0.1.0")).is_none(), "索引更旧不提示");
+        let win = collect_app_update(&registry, "0.1.0", "windows", "x64", Some("0.1.0")).expect("Windows 也要能拿到更新");
+        assert!(win.asset.url.ends_with("Chassis-0.2.0-win-x64.zip"), "按平台挑到绿色版：{}", win.asset.url);
         assert!(
-            collect_app_update(&registry, "0.1.0", "windows", "x64", Some("0.1.0")).is_none(),
-            "Windows 没有产物 ⇒ 自更新通道不存在（运行中的 exe 换不了）"
+            collect_app_update(&registry, "0.1.0", "windows", "arm64", Some("0.1.0")).is_none(),
+            "索引里没有该架构的产物 ⇒ 不提示（宁可漏，不可乱装）"
         );
         assert!(parse_app_registry(&app_registry_raw(9)).is_err(), "未知 schema 拒绝");
 
@@ -777,6 +793,45 @@ mod tests {
             writer.write_all(b"nope").unwrap();
         }
         writer.finish().unwrap();
+    }
+
+    /// Windows 绿色版结构的 zip（`Chassis.exe` + `resources/…`：与 `pack-win.mjs` 的压法同源）
+    fn write_app_zip_windows(zip_path: &Path, with_exe: bool) {
+        use std::io::Write;
+        let file = std::fs::File::create(zip_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let plain = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
+        if with_exe {
+            writer.start_file("Chassis.exe", plain).unwrap();
+            writer.write_all(b"shell-bytes").unwrap();
+            writer.start_file("resources/kernel/launcher-kernel.exe", plain).unwrap();
+            writer.write_all(b"kernel-bytes").unwrap();
+        } else {
+            writer.start_file("readme.txt", plain).unwrap();
+            writer.write_all(b"nothing here").unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    /// Windows 包解压：绿色版目录直接就是候选安装位置（交给壳按平台再校验一遍）
+    #[test]
+    fn unzip_app_bundle_accepts_windows_green_layout() {
+        let dir = std::env::temp_dir().join(format!("app-bundle-win-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let zip_path = dir.join("Chassis-0.2.0-win-x64.zip");
+        write_app_zip_windows(&zip_path, true);
+        let out = dir.join("out");
+        let bundle = unzip_app_bundle(&zip_path, &out).expect("绿色版结构应解压成功");
+        assert_eq!(bundle.app, out, "候选位置 = 解压目录本身（里面是 Chassis.exe）");
+        assert!(bundle.app.join("Chassis.exe").exists());
+
+        let junk = dir.join("junk.zip");
+        write_app_zip_windows(&junk, false);
+        let err = unzip_app_bundle(&junk, &dir.join("out2")).expect_err("既没有 .app 也没有 Chassis.exe 必须拒绝");
+        assert!(err.contains("Chassis.exe"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 应用包解压：结构校验 + 可执行位恢复（候选包自检要跑得起来）。

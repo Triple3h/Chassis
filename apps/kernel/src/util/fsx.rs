@@ -2,7 +2,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -43,6 +43,83 @@ pub fn list_dir_safe(dir: &Path) -> Vec<PathBuf> {
     match std::fs::read_dir(dir) {
         Ok(entries) => entries.flatten().map(|entry| entry.path()).collect(),
         Err(_) => Vec::new(),
+    }
+}
+
+// ── 重试策略（rename / 目录替换这类易被占用的操作） ─────────────────────────
+//
+// 平台差异（docs/win-hot-update-research.md §5.1-#1、§5.3-3）：
+//  - Windows：杀软实时扫描、句柄释放滞后 ⇒ 「共享冲突 / 访问被拒」是**瞬时**态，值得退避重试；
+//  - unix：rename 罕见瞬时失败，`EACCES` / `EXDEV` 基本都是永久错误 ⇒ 立即上报，别让用户白等。
+// 所以「退避表」与「什么算瞬时」都按平台取，调用方只消费同一套判定。
+
+/// 重试策略：`backoff_ms` 的**每一项**都是一次重试前的等待（长度 = 可重试次数，空表 = 不重试）。
+/// 用显式退避表而不是「基数 + 翻倍」，为了总预算一眼可见。
+#[derive(Debug, Clone, Copy)]
+pub struct RetryPolicy {
+    pub backoff_ms: &'static [u64],
+}
+
+/// rename / 目录替换的默认策略（总预算：Windows ~2.3s、unix 150ms）。
+#[cfg(windows)]
+pub const RENAME_POLICY: RetryPolicy = RetryPolicy { backoff_ms: &[100, 200, 400, 800, 800] };
+#[cfg(not(windows))]
+pub const RENAME_POLICY: RetryPolicy = RetryPolicy { backoff_ms: &[50, 100] };
+
+/// 值得重试吗？只认「瞬时占用」：
+///  - Windows：`PermissionDenied`（`ACCESS_DENIED`，常是映像正被占用）/ `WouldBlock` / 共享冲突 32 / 锁冲突 33；
+///  - unix：`EBUSY`(16) / `ETXTBSY`(26)。
+/// 其它（`NotFound` / `AlreadyExists` / `EXDEV` / unix 的 `EACCES`）都是永久错误 —— 重试它们只会拖慢失败上报。
+#[cfg(windows)]
+pub fn is_transient(err: &io::Error) -> bool {
+    matches!(err.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted)
+        || matches!(err.raw_os_error(), Some(32) | Some(33))
+}
+
+#[cfg(not(windows))]
+pub fn is_transient(err: &io::Error) -> bool {
+    // 只认 EBUSY / ETXTBSY：EINTR 已由 std 内部重试，EACCES 是永久权限问题
+    matches!(err.kind(), io::ErrorKind::Interrupted) || matches!(err.raw_os_error(), Some(16) | Some(26))
+}
+
+/// 同步重试（`thread::sleep`；启动早期与非 async 上下文用）。
+pub fn retry<T>(policy: RetryPolicy, mut action: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    let mut attempt = 0usize;
+    loop {
+        match action() {
+            Ok(value) => return Ok(value),
+            Err(err) => {
+                if !is_transient(&err) {
+                    return Err(err);
+                }
+                let Some(delay) = policy.backoff_ms.get(attempt) else { return Err(err) };
+                if *delay > 0 {
+                    std::thread::sleep(Duration::from_millis(*delay));
+                }
+                attempt += 1;
+            }
+        }
+    }
+}
+
+/// 异步重试（`tokio::time::sleep`）—— 与同步版共用策略与判定，只是睡眠原语不同；
+/// **async 上下文里必须用这个**（同步版会占住 runtime 线程）。
+pub async fn retry_async<T>(policy: RetryPolicy, mut action: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    let mut attempt = 0usize;
+    loop {
+        match action() {
+            Ok(value) => return Ok(value),
+            Err(err) => {
+                if !is_transient(&err) {
+                    return Err(err);
+                }
+                let Some(delay) = policy.backoff_ms.get(attempt) else { return Err(err) };
+                if *delay > 0 {
+                    tokio::time::sleep(Duration::from_millis(*delay)).await;
+                }
+                attempt += 1;
+            }
+        }
     }
 }
 
@@ -142,5 +219,71 @@ mod tests {
         assert_eq!(percent_decode("/%E4%B8%AD%E6%96%87"), "/中文");
         assert_eq!(percent_decode("/bad%zz"), "/bad%zz", "非法序列原样保留");
         assert_eq!(percent_decode("/plain"), "/plain");
+    }
+
+    #[test]
+    fn retry_stops_immediately_on_permanent_error() {
+        let mut calls = 0;
+        let err = retry(RetryPolicy { backoff_ms: &[0, 0, 0] }, || {
+            calls += 1;
+            Err::<(), _>(io::Error::new(io::ErrorKind::NotFound, "gone"))
+        })
+        .expect_err("永久错误必须原样返回");
+        assert_eq!(calls, 1, "永久错误一次都不重试（重试只会拖慢失败上报）");
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn retry_uses_budget_then_reports_last_error() {
+        let mut calls = 0;
+        let err = retry(RetryPolicy { backoff_ms: &[0, 0] }, || {
+            calls += 1;
+            Err::<(), _>(io::Error::new(io::ErrorKind::Interrupted, "busy"))
+        })
+        .expect_err("预算用尽仍失败");
+        assert_eq!(calls, 3, "1 次首试 + 2 次重试");
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+
+        let mut calls = 0;
+        let recovered = retry(RetryPolicy { backoff_ms: &[0, 0] }, || {
+            calls += 1;
+            if calls < 3 { Err(io::Error::new(io::ErrorKind::Interrupted, "busy")) } else { Ok(7) }
+        });
+        assert_eq!(recovered.unwrap(), 7, "中途恢复 ⇒ 成功");
+        assert_eq!(calls, 3);
+    }
+
+    #[tokio::test]
+    async fn retry_async_shares_policy_and_short_circuits() {
+        let mut calls = 0;
+        let err = retry_async(RetryPolicy { backoff_ms: &[0] }, || {
+            calls += 1;
+            Err::<(), _>(io::Error::new(io::ErrorKind::NotFound, "gone"))
+        })
+        .await
+        .expect_err("永久错误必须原样返回");
+        assert_eq!(calls, 1);
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+
+        let mut calls = 0;
+        let err = retry_async(RetryPolicy { backoff_ms: &[0] }, || {
+            calls += 1;
+            Err::<(), _>(io::Error::new(io::ErrorKind::Interrupted, "busy"))
+        })
+        .await
+        .expect_err("预算用尽仍失败");
+        assert_eq!(calls, 2, "1 次首试 + 1 次重试");
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn transient_classification_follows_platform_semantics() {
+        assert!(is_transient(&io::Error::new(io::ErrorKind::Interrupted, "eintr")), "两个平台都算瞬时");
+        for kind in [io::ErrorKind::NotFound, io::ErrorKind::AlreadyExists, io::ErrorKind::InvalidInput] {
+            assert!(!is_transient(&io::Error::new(kind, "permanent")), "{kind:?} 不该重试");
+        }
+        // 平台语义相反的典型：EACCES 在 unix 是永久权限问题，在 Windows 常是「映像正被占用」
+        let denied = io::Error::new(io::ErrorKind::PermissionDenied, "denied");
+        assert_eq!(is_transient(&denied), cfg!(windows), "PermissionDenied 只在 Windows 算瞬时");
     }
 }

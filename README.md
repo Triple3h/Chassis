@@ -105,7 +105,7 @@ pnpm dev          # 内核（standalone）+ UI（vite dev，HMR）
 
 - **插件**：除 3 个底座基础能力（`app-launcher` / `file-search` / `internal-settings`）外的出厂插件都可被覆盖更新；来源是固定 tag `plugins-latest` 的 GitHub Release，不接受自定义源。契约与发版流程见 [`docs/plugin-spec.md`](docs/plugin-spec.md) §6.4 与附录 C。
 - **内核**：固定 tag `kernel-latest`，内核 + UI 同包更新、优雅重启；打包版内核以数据目录外置副本运行，不触碰 App 的代码签名。机制与边界见 [`docs/kernel-hot-update.md`](docs/kernel-hot-update.md)。
-- **应用（壳）**：固定 tag `app-latest`，整包替换——**自动检查并提示新版本：托盘常驻「检查更新…」（有新版带版本号，点击打开更新页）与「关于」页更新卡片，由你决定何时更新**；候选包先跑 `--hot-probe` 自检，连续两次启动未就绪自动回滚。仅 macOS（Windows 的运行中 exe 无法替换，走安装包）。机制与签名前提见 [`docs/shell-hot-update.md`](docs/shell-hot-update.md)。
+- **应用（壳）**：固定 tag `app-latest`，整包替换——**自动检查并提示新版本：托盘常驻「检查更新…」（有新版带版本号，点击打开更新页）与「关于」页更新卡片，由你决定何时更新**；候选包先跑 `--hot-probe` 自检，连续两次启动未就绪自动回滚。**macOS 与 Windows 都支持自动替换**（macOS 换 `.app`、Windows 换绿色版目录，都由独立 helper 在进程完全退出后执行；装到只读位置时标「手动更新」）。机制与签名前提见 [`docs/shell-hot-update.md`](docs/shell-hot-update.md)。
 - **资产保留**：三个固定 tag 的 Release 在发布收尾**只保留索引指向的最新包**（CI 自动清理旧版本 zip），不会越积越多——历史版本包请从 `v*` 的正式 Release 获取。
 
 ## 写插件
@@ -152,6 +152,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 |---|---|
 | [`docs/launcher-requirements.md`](docs/launcher-requirements.md) | **唯一需求源**：产品定义、行为规格、里程碑（计划口径） |
 | [`docs/architecture.md`](docs/architecture.md) | 内核实现细节 + 与需求的差异清单 + 已知边界 + 测试与验收 |
+| [`docs/win-hot-update-research.md`](docs/win-hot-update-research.md) | Windows 三层热更新调研（未开工）：可行性预判、文件锁实验清单、风险与决策点 |
 | [`AGENTS.md`](AGENTS.md) | 仓库指南（给 AI 与新贡献者）：结构、命令、风格、提交规范 |
 
 **历史与合规**：[`docs/decisions/`](docs/decisions)（ADR-0001~0006）｜ [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) ｜ [`LICENSE`](LICENSE)

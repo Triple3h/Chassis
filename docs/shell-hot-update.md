@@ -34,18 +34,32 @@ GitHub Action 发版后**自动检查并提示新版本**（托盘常驻「检�
     "shellHotVersion": "0.1.0",
     "minShellHotVersion": "0.1.0",
     "notes": "…",
-    "assets": [{ "platforms": ["macos"], "arch": ["arm64"], "url": "…", "sha256": "…", "bytes": 123 }]
+    "assets": [
+      { "platforms": ["macos"], "arch": ["arm64"], "url": "…", "sha256": "…", "bytes": 123 },
+      { "platforms": ["windows"], "arch": ["x64"], "url": "…", "sha256": "…", "bytes": 456 }
+    ]
   }
 }
 ```
 
-- 更新包 = 完整 `.app` 的 zip（解压结构 `Chassis.app/Contents/…`），`ditto --keepParent` 打的，保留 unix 权限位。
-- **只有 macOS 有产物**：Windows 的运行中 exe 被锁，替换只能由安装器做 —— 那边不提供「更新应用」，索引里没有 windows 资产，客户端自然不提示。
+- 更新包（两种形态，由 `pack-app.mjs` 按平台产出）：
+  - macOS：完整 `.app` 的 zip（解压结构 `Chassis.app/Contents/…`），`ditto --keepParent` 打的，保留 unix 权限位；
+  - Windows：绿色版目录的 zip（解压结构 = `Chassis.exe` + `resources/`，与 `pnpm app:win` 同源，
+    由 `pack-win.mjs` 打的）。
+
+**两种安装形态（其余机制完全共用）**：
+
+| 形态 | 安装位置 | 候选包结构 | helper | 替换动作 |
+|---|---|---|---|---|
+| macOS | `X.app`（`/Applications/Chassis.app`） | `Contents/MacOS/launcher-shell` + `Info.plist` | `swap.sh`（`/bin/sh`） | 同卷 rename 整个 bundle |
+| Windows | 绿色版目录（`Chassis.exe` + `resources/`） | 同左（zip 根就是该目录） | `swap.ps1`（PowerShell 5.1，脚本带 BOM） | 同卷 rename 整个目录 |
+
+两端的共同硬前提：**替换必须发生在进程完全退出之后**（Windows 连运行中的 exe 与它所在目录都锁）。
 
 ## 2. 全自动链路
 
 ```
-app-release.yml（CI：build-all → pack-local-app（**签名**）→ pack-app → 发 app-latest）
+app-release.yml（CI 双平台：macos = build-all → pack-local-app（**签名**）→ pack-app；windows = pack-win → pack-app --platform windows → 发 app-latest）
         ▼
 内核守护（启动 90s 后 + 每 6h）：问壳版本 → exec.run('internal-store', update, check-app)
         ▼ 有新版
@@ -55,7 +69,7 @@ app-release.yml（CI：build-all → pack-local-app（**签名**）→ pack-app 
         ▼
 壳：候选包自检（--hot-probe）→ 写台账 pending.json → 生成 helper → 退出（连带停掉内核）
         ▼
-helper（脱离壳进程树的 /bin/sh）：等壳退出 → 备份旧 .app → 落新包 → xattr → lsregister → open
+helper（脱离壳进程树：macOS /bin/sh、Windows PowerShell）：等壳退出 → 备份旧安装 → 落新包 → 重新启动
         ▼
 新壳启动：boot_guard 记 attempts → 走到「内核就绪」⇒ mark_boot_success
         ▼ 连续两次没走到就绪
@@ -107,11 +121,13 @@ gh secret set MACOS_SIGN_P12_PASSWORD --body '<导出时的密码>'
 ```
 <dataRoot>/hot/shell/
 ├── pending.json    # 待验证台账（from/to/target/backup/attempts）
-├── swap.sh         # helper（由壳生成，唯一能在壳退出后动手的角色）
+├── swap.sh         # macOS helper（由壳生成，唯一能在壳退出后动手的角色）
+├── swap.ps1        # Windows helper（同上；脚本带 UTF-8 BOM，PS 5.1 才按 UTF-8 读）
 └── swap.log        # 每次替换 / 回滚一行（排障入口）
 ```
 
-`.app` 的备份落在安装位置旁边：`/Applications/Chassis.app.chassis-backup`（失败时被换回来）。
+备份落在安装位置旁边（失败时被换回来）：macOS `/Applications/Chassis.app.chassis-backup`、
+Windows `<安装目录>.chassis-backup`（与安装目录同卷 ⇒ rename 即完成备份）。
 
 ## 7. 发版
 
@@ -120,7 +136,7 @@ gh secret set MACOS_SIGN_P12_PASSWORD --body '<导出时的密码>'
 `pnpm version:check`（本地与全部发版 workflow）拦漂移 —— 手改位点文件的后果是自更新**静默失效**。
 
 ```bash
-pnpm version:set app 0.1.4      # 改版本（自动同步三处位点；内核同号时再 version:set kernel 0.1.4）
+pnpm version:set app 0.1.5      # 改版本（自动同步三处位点；内核同号时再 version:set kernel 0.1.5）
 gh workflow run app-release.yml --ref main -f notes="…"     # 或推 app/* tag
 ```
 
@@ -137,7 +153,9 @@ gh workflow run app-release.yml --ref main -f notes="…"     # 或推 app/* tag
 
 - **自动应用更新**：更新只**检查 + 提示**（托盘常驻入口 / 「关于」页），下载 / 替换 / 重启一律等用户确认 ——
   不做静默下载与无人值守替换（更新时机由用户自己决定）。
-- **Windows 自更新**：运行中 exe 无法替换，走 NSIS 安装器（`pack-win.mjs` / `release.yml`）。
+- **Windows 的安装器（NSIS / MSIX）**：绿色版 + `swap.ps1` 已经够用（自用场景）；
+  要装到 `Program Files` 得另立安装器通道，见 `docs/win-hot-update-research.md` §4.3 的方案 B。
+- **Windows 的 Authenticode 签名**：替换不涉及签名身份（不像 macOS 的 TCC 按签名记账），暂不接。
 - **增量包 / dmg / 公证**：整包替换足够（17 MB 级），公证与分发面的事随 `v*` 通道另议。
 - **多版本回退历史**：只留 1 份备份（与内核 / 插件热更新同口径）。
 - **壳内网络栈**：检查 / 下载仍在插件侧（`internal-store`），壳只做「校验 + 替换 + 重启」——
