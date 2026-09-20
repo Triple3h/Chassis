@@ -7,64 +7,38 @@
 
 /*
  * 配色对齐 bejson（线上 JSON 工具）：亮色用它的编辑器/树视图配色，
- * 暗色用它那套 Material Palenight。两组都只在本插件内生效，不外溢到别的插件。
+ * 暗色用它那套 Material Palenight。只在本插件内生效，不外溢到别的插件。
+ *
+ * 每个语义一行、明暗成对（`--launcher-if-light` / `--launcher-if-dark`，见 theme.css）：
+ * 分开写两个块迟早漏改深色那半边，而漏改在界面上只看得见「这个颜色怪」。
  */
 :root {
-  /* 树视图（bejson light） */
-  --json-key: #1d4ed8;
-  --json-str: #059669;
-  --json-num: #dc2626;
-  --json-bool: #7c3aed;
-  --json-null: #6b7280;
-  --json-punc: #374151;
-  --json-index: #6b7280;
-  --json-chevron: #6b7280;
-  --json-row-hover: rgba(0, 0, 0, 0.05);
-  --json-row-sel: rgba(0, 0, 0, 0.08);
-  --json-add: #059669;
-  --json-add-bg: rgba(5, 150, 105, 0.12);
-  --json-del-fg: #dc2626;
-  --json-del-bg: #fff3cd;
-  --json-edit-border: #d1d5db;
-  --json-edit-bg: rgba(255, 255, 255, 0.8);
-  --json-focus: #3b82f6;
-  --json-focus-ring: rgba(59, 130, 246, 0.15);
+  /* 树视图（浅色 = bejson light，深色 = Material Palenight） */
+  --json-key: var(--launcher-if-light, #1d4ed8) var(--launcher-if-dark, #82b1ff);
+  --json-str: var(--launcher-if-light, #059669) var(--launcher-if-dark, #c3e88d);
+  --json-num: var(--launcher-if-light, #dc2626) var(--launcher-if-dark, #f78c6c);
+  --json-bool: var(--launcher-if-light, #7c3aed) var(--launcher-if-dark, #c792ea);
+  --json-null: var(--launcher-if-light, #6b7280) var(--launcher-if-dark, #7d8ba1);
+  --json-punc: var(--launcher-if-light, #374151) var(--launcher-if-dark, #89ddff);
+  --json-index: var(--launcher-if-light, #6b7280) var(--launcher-if-dark, #ffcb6b);
+  --json-chevron: var(--launcher-if-light, #6b7280) var(--launcher-if-dark, #7d8ba1);
+  --json-row-hover: var(--launcher-if-light, rgba(0, 0, 0, 0.05)) var(--launcher-if-dark, rgba(255, 255, 255, 0.05));
+  --json-row-sel: var(--launcher-if-light, rgba(0, 0, 0, 0.08)) var(--launcher-if-dark, rgba(255, 255, 255, 0.09));
+  --json-add: var(--launcher-if-light, #059669) var(--launcher-if-dark, #c3e88d);
+  --json-add-bg: var(--launcher-if-light, rgba(5, 150, 105, 0.12)) var(--launcher-if-dark, rgba(195, 232, 141, 0.14));
+  --json-del-fg: var(--launcher-if-light, #dc2626) var(--launcher-if-dark, #f78c6c);
+  --json-del-bg: var(--launcher-if-light, #fff3cd) var(--launcher-if-dark, rgba(247, 140, 108, 0.18));
+  --json-edit-border: var(--launcher-if-light, #d1d5db) var(--launcher-if-dark, #4b5563);
+  --json-edit-bg: var(--launcher-if-light, rgba(255, 255, 255, 0.8)) var(--launcher-if-dark, rgba(0, 0, 0, 0.3));
+  --json-focus: var(--launcher-if-light, #3b82f6) var(--launcher-if-dark, #82b1ff);
+  --json-focus-ring: var(--launcher-if-light, rgba(59, 130, 246, 0.15)) var(--launcher-if-dark, rgba(130, 177, 255, 0.18));
 
-  /* 文本视图（bejson 左编辑器 = CodeMirror 默认主题） */
-  --json-code-key: #aa1111;
-  --json-code-str: #aa1111;
-  --json-code-num: #116444;
-  --json-code-kw: #221199;
-  --json-code-punc: #111827;
-}
-
-[data-theme="dark"] {
-  /* 树视图（Material Palenight） */
-  --json-key: #82b1ff;
-  --json-str: #c3e88d;
-  --json-num: #f78c6c;
-  --json-bool: #c792ea;
-  --json-null: #7d8ba1;
-  --json-punc: #89ddff;
-  --json-index: #ffcb6b;
-  --json-chevron: #7d8ba1;
-  --json-row-hover: rgba(255, 255, 255, 0.05);
-  --json-row-sel: rgba(255, 255, 255, 0.09);
-  --json-add: #c3e88d;
-  --json-add-bg: rgba(195, 232, 141, 0.14);
-  --json-del-fg: #f78c6c;
-  --json-del-bg: rgba(247, 140, 108, 0.18);
-  --json-edit-border: #4b5563;
-  --json-edit-bg: rgba(0, 0, 0, 0.3);
-  --json-focus: #82b1ff;
-  --json-focus-ring: rgba(130, 177, 255, 0.18);
-
-  /* 文本视图（Palenight） */
-  --json-code-key: #82b1ff;
-  --json-code-str: #c3e88d;
-  --json-code-num: #f78c6c;
-  --json-code-kw: #c792ea;
-  --json-code-punc: #89ddff;
+  /* 文本视图（浅色 = bejson 左编辑器 CodeMirror 默认主题，深色 = Palenight） */
+  --json-code-key: var(--launcher-if-light, #aa1111) var(--launcher-if-dark, #82b1ff);
+  --json-code-str: var(--launcher-if-light, #aa1111) var(--launcher-if-dark, #c3e88d);
+  --json-code-num: var(--launcher-if-light, #116444) var(--launcher-if-dark, #f78c6c);
+  --json-code-kw: var(--launcher-if-light, #221199) var(--launcher-if-dark, #c792ea);
+  --json-code-punc: var(--launcher-if-light, #111827) var(--launcher-if-dark, #89ddff);
 }
 
 /* ------------------------------------------------ 文本视图（JSON 高亮） */

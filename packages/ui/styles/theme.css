@@ -8,36 +8,45 @@
  */
 
 :root {
-  --launcher-bg: #f6f6f7;
-  --launcher-panel: #ffffff;
-  --launcher-panel-2: #f1f1f3;
-  --launcher-hover: rgba(0, 0, 0, 0.045);
-  --launcher-active: rgba(0, 0, 0, 0.075);
-  --launcher-line: rgba(0, 0, 0, 0.08);
-  --launcher-line-strong: rgba(0, 0, 0, 0.16);
-  --launcher-fg: #18181b;
-  --launcher-muted: #6b7280;
-  --launcher-faint: #9ca3af;
-  --launcher-accent: #2563eb;
-  --launcher-accent-fg: #ffffff;
-  --launcher-danger: #dc2626;
-  --launcher-success: #16a34a;
-  --launcher-warn: #d97706;
-  --launcher-add-bg: rgba(22, 163, 74, 0.14);
-  --launcher-add-fg: #15803d;
-  --launcher-del-bg: rgba(220, 38, 38, 0.13);
-  --launcher-del-fg: #b91c1c;
-  --launcher-code: #7c3aed;
-  --launcher-string: #16a34a;
-  --launcher-number: #ea580c;
-  --launcher-key: #2563eb;
-  --launcher-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  /* ── 主题槽位：一个语义一行、明暗成对 ──────────────────────────
+     插件声明自己的专有色时用这两个变量，写法：
+       --my-color: var(--launcher-if-light, 浅色值) var(--launcher-if-dark, 深色值);
+     原理：`initial` 让 var() 走 fallback（该半边整个产出空），空值让 var() 取空 ——
+     同一行在两种主题下各产出其中一个值。深色主题下两者在 [data-theme="dark"] 里互换。
+     之所以不写两个块：分开写迟早会漏改深色那半边，而漏改在界面上只看得见「颜色怪」。 */
+  --launcher-if-light: initial;
+  --launcher-if-dark: ;
+
+  --launcher-bg: var(--launcher-if-light, #f6f6f7) var(--launcher-if-dark, #1b1b1d);
+  --launcher-panel: var(--launcher-if-light, #ffffff) var(--launcher-if-dark, #232326);
+  --launcher-panel-2: var(--launcher-if-light, #f1f1f3) var(--launcher-if-dark, #2a2a2e);
+  --launcher-hover: var(--launcher-if-light, rgba(0, 0, 0, 0.045)) var(--launcher-if-dark, rgba(255, 255, 255, 0.055));
+  --launcher-active: var(--launcher-if-light, rgba(0, 0, 0, 0.075)) var(--launcher-if-dark, rgba(255, 255, 255, 0.095));
+  --launcher-line: var(--launcher-if-light, rgba(0, 0, 0, 0.08)) var(--launcher-if-dark, rgba(255, 255, 255, 0.075));
+  --launcher-line-strong: var(--launcher-if-light, rgba(0, 0, 0, 0.16)) var(--launcher-if-dark, rgba(255, 255, 255, 0.16));
+  --launcher-fg: var(--launcher-if-light, #18181b) var(--launcher-if-dark, #ececee);
+  --launcher-muted: var(--launcher-if-light, #6b7280) var(--launcher-if-dark, #9a9aa2);
+  --launcher-faint: var(--launcher-if-light, #9ca3af) var(--launcher-if-dark, #6f6f78);
+  --launcher-accent: var(--launcher-if-light, #2563eb) var(--launcher-if-dark, #5b8cff);
+  --launcher-accent-fg: var(--launcher-if-light, #ffffff) var(--launcher-if-dark, #0b1220);
+  --launcher-danger: var(--launcher-if-light, #dc2626) var(--launcher-if-dark, #f87171);
+  --launcher-success: var(--launcher-if-light, #16a34a) var(--launcher-if-dark, #4ade80);
+  --launcher-warn: var(--launcher-if-light, #d97706) var(--launcher-if-dark, #fbbf24);
+  --launcher-add-bg: var(--launcher-if-light, rgba(22, 163, 74, 0.14)) var(--launcher-if-dark, rgba(74, 222, 128, 0.16));
+  --launcher-add-fg: var(--launcher-if-light, #15803d) var(--launcher-if-dark, #86efac);
+  --launcher-del-bg: var(--launcher-if-light, rgba(220, 38, 38, 0.13)) var(--launcher-if-dark, rgba(248, 113, 113, 0.15));
+  --launcher-del-fg: var(--launcher-if-light, #b91c1c) var(--launcher-if-dark, #fca5a5);
+  --launcher-code: var(--launcher-if-light, #7c3aed) var(--launcher-if-dark, #c4b5fd);
+  --launcher-string: var(--launcher-if-light, #16a34a) var(--launcher-if-dark, #86efac);
+  --launcher-number: var(--launcher-if-light, #ea580c) var(--launcher-if-dark, #fdba74);
+  --launcher-key: var(--launcher-if-light, #2563eb) var(--launcher-if-dark, #93c5fd);
+  --launcher-shadow: var(--launcher-if-light, 0 12px 32px rgba(0, 0, 0, 0.16)) var(--launcher-if-dark, 0 16px 40px rgba(0, 0, 0, 0.5));
 
   /* UA 自绘控件（下拉开合列表、取色器、原生滚动条…）的明暗由它决定：
      不跟着主题走的话，深色主题里会弹出一个纯白的原生下拉列表 */
   color-scheme: light;
-  /* 下拉箭头：原生箭头是系统色，剥掉外观后用它自绘（深色主题另给一份，与 --launcher-muted 同色） */
-  --launcher-select-arrow: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%20viewBox='0%200%2010%206'%3E%3Cpath%20d='M1%201l4%204%204-4'%20fill='none'%20stroke='%236b7280'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* 下拉箭头：原生箭头是系统色，剥掉外观后用它自绘（与 --launcher-muted 同色，两版只差描边色） */
+  --launcher-select-arrow: var(--launcher-if-light, url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%20viewBox='0%200%2010%206'%3E%3Cpath%20d='M1%201l4%204%204-4'%20fill='none'%20stroke='%236b7280'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E")) var(--launcher-if-dark, url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%20viewBox='0%200%2010%206'%3E%3Cpath%20d='M1%201l4%204%204-4'%20fill='none'%20stroke='%239a9aa2'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E"));
 
   /* 滚动条滑块：只由前景色调出来（深浅主题各自动取值），几何在文件末尾的 ::-webkit-scrollbar 块 */
   --launcher-scroll-thumb: color-mix(in srgb, var(--launcher-fg) 16%, transparent);
@@ -69,33 +78,12 @@
   }
 }
 
+/* 深色主题：**只翻槽位** —— 上面每个 `--launcher-*` 一行的第二个值从此生效。
+   这里不再重抄一遍色值：重抄就意味着「改浅色忘了改深色」永远有可能发生。 */
 [data-theme="dark"] {
-  --launcher-bg: #1b1b1d;
-  --launcher-panel: #232326;
-  --launcher-panel-2: #2a2a2e;
-  --launcher-hover: rgba(255, 255, 255, 0.055);
-  --launcher-active: rgba(255, 255, 255, 0.095);
-  --launcher-line: rgba(255, 255, 255, 0.075);
-  --launcher-line-strong: rgba(255, 255, 255, 0.16);
-  --launcher-fg: #ececee;
-  --launcher-muted: #9a9aa2;
-  --launcher-faint: #6f6f78;
-  --launcher-accent: #5b8cff;
-  --launcher-accent-fg: #0b1220;
-  --launcher-danger: #f87171;
-  --launcher-success: #4ade80;
-  --launcher-warn: #fbbf24;
-  --launcher-add-bg: rgba(74, 222, 128, 0.16);
-  --launcher-add-fg: #86efac;
-  --launcher-del-bg: rgba(248, 113, 113, 0.15);
-  --launcher-del-fg: #fca5a5;
-  --launcher-code: #c4b5fd;
-  --launcher-string: #86efac;
-  --launcher-number: #fdba74;
-  --launcher-key: #93c5fd;
-  --launcher-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --launcher-if-light: ;
+  --launcher-if-dark: initial;
   color-scheme: dark;
-  --launcher-select-arrow: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='10'%20height='6'%20viewBox='0%200%2010%206'%3E%3Cpath%20d='M1%201l4%204%204-4'%20fill='none'%20stroke='%239a9aa2'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 @theme inline {

@@ -15,49 +15,28 @@
 
 /* ── 预览区配色（只在本插件内生效，主题跟随宿主 data-theme）────────
    高亮取 GitHub 的亮色 / 暗色两套 token：读者对这套配色最熟，
-   和「渲染得专业」的直觉一致。 */
+   和「渲染得专业」的直觉一致。
+   每个语义一行、明暗成对（`--launcher-if-light` / `--launcher-if-dark`，见 theme.css）。 */
 :root {
-  --md-code-bg: #f5f6f8;
-  --md-code-head: rgba(0, 0, 0, 0.025);
-  --md-quote-bar: rgba(0, 0, 0, 0.2);
-  --md-quote-bg: rgba(0, 0, 0, 0.028);
-  --md-row-alt: rgba(0, 0, 0, 0.022);
+  --md-code-bg: var(--launcher-if-light, #f5f6f8) var(--launcher-if-dark, #1e1e21);
+  --md-code-head: var(--launcher-if-light, rgba(0, 0, 0, 0.025)) var(--launcher-if-dark, rgba(255, 255, 255, 0.025));
+  --md-quote-bar: var(--launcher-if-light, rgba(0, 0, 0, 0.2)) var(--launcher-if-dark, rgba(255, 255, 255, 0.22));
+  --md-quote-bg: var(--launcher-if-light, rgba(0, 0, 0, 0.028)) var(--launcher-if-dark, rgba(255, 255, 255, 0.03));
+  --md-row-alt: var(--launcher-if-light, rgba(0, 0, 0, 0.022)) var(--launcher-if-dark, rgba(255, 255, 255, 0.025));
 
-  --md-hl-key: #0550ae;
-  --md-hl-kw: #cf222e;
-  --md-hl-str: #0a3069;
-  --md-hl-num: #953800;
-  --md-hl-fn: #8250df;
-  --md-hl-com: #6e7781;
-  --md-hl-pun: #24292f;
-  --md-hl-tag: #116329;
-  --md-hl-add: #1a7f37;
-  --md-hl-add-bg: rgba(26, 127, 55, 0.12);
-  --md-hl-del: #cf222e;
-  --md-hl-del-bg: rgba(207, 34, 46, 0.1);
-  --md-hl-meta: #8250df;
-}
-
-[data-theme="dark"] {
-  --md-code-bg: #1e1e21;
-  --md-code-head: rgba(255, 255, 255, 0.025);
-  --md-quote-bar: rgba(255, 255, 255, 0.22);
-  --md-quote-bg: rgba(255, 255, 255, 0.03);
-  --md-row-alt: rgba(255, 255, 255, 0.025);
-
-  --md-hl-key: #79c0ff;
-  --md-hl-kw: #ff7b72;
-  --md-hl-str: #a5d6ff;
-  --md-hl-num: #ffa657;
-  --md-hl-fn: #d2a8ff;
-  --md-hl-com: #8b949e;
-  --md-hl-pun: #c9d1d9;
-  --md-hl-tag: #7ee787;
-  --md-hl-add: #7ee787;
-  --md-hl-add-bg: rgba(126, 231, 135, 0.14);
-  --md-hl-del: #ffa198;
-  --md-hl-del-bg: rgba(255, 129, 130, 0.14);
-  --md-hl-meta: #d2a8ff;
+  --md-hl-key: var(--launcher-if-light, #0550ae) var(--launcher-if-dark, #79c0ff);
+  --md-hl-kw: var(--launcher-if-light, #cf222e) var(--launcher-if-dark, #ff7b72);
+  --md-hl-str: var(--launcher-if-light, #0a3069) var(--launcher-if-dark, #a5d6ff);
+  --md-hl-num: var(--launcher-if-light, #953800) var(--launcher-if-dark, #ffa657);
+  --md-hl-fn: var(--launcher-if-light, #8250df) var(--launcher-if-dark, #d2a8ff);
+  --md-hl-com: var(--launcher-if-light, #6e7781) var(--launcher-if-dark, #8b949e);
+  --md-hl-pun: var(--launcher-if-light, #24292f) var(--launcher-if-dark, #c9d1d9);
+  --md-hl-tag: var(--launcher-if-light, #116329) var(--launcher-if-dark, #7ee787);
+  --md-hl-add: var(--launcher-if-light, #1a7f37) var(--launcher-if-dark, #7ee787);
+  --md-hl-add-bg: var(--launcher-if-light, rgba(26, 127, 55, 0.12)) var(--launcher-if-dark, rgba(126, 231, 135, 0.14));
+  --md-hl-del: var(--launcher-if-light, #cf222e) var(--launcher-if-dark, #ffa198);
+  --md-hl-del-bg: var(--launcher-if-light, rgba(207, 34, 46, 0.1)) var(--launcher-if-dark, rgba(255, 129, 130, 0.14));
+  --md-hl-meta: var(--launcher-if-light, #8250df) var(--launcher-if-dark, #d2a8ff);
 }
 
 /* ── 预览区排版（渲染器输出的 html 走这里）────────────────────────

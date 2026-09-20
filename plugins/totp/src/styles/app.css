@@ -103,22 +103,17 @@
    主题色派生的半透明填充一律走下面这组令牌，**不要写 color-mix**：
    构建器会把 color-mix 拆成「实色兜底 + 真值」两条规则，实色兜底在老一点的 WebKit 上
    会把整张卡片刷成纯蓝（选中态看起来像坏了）。rgba 落死，到处都一样。
-   色值取自 theme.css 的 --launcher-accent / --launcher-success（插件页不跟随用户主题色）。 */
+
+   色值对应 theme.css 的 --launcher-accent / --launcher-success 的**默认档**：用户改了主题色时
+   --launcher-accent 会跟着换，而这组派生填充不换（半透明叠色换色相的收益小于不一致的代价）。
+   明暗两值成对写在同一个 --launcher-if-light / --launcher-if-dark 行里（见 theme.css）。 */
 :root {
-  --totp-sel-bg: rgba(37, 99, 235, 0.09);
-  --totp-sel-line: rgba(37, 99, 235, 0.34);
-  --totp-soft-bg: rgba(37, 99, 235, 0.13);
-  --totp-soft-line: rgba(37, 99, 235, 0.26);
-  --totp-ok-bg: rgba(22, 163, 74, 0.08);
-  --totp-ok-line: rgba(22, 163, 74, 0.45);
-}
-[data-theme='dark'] {
-  --totp-sel-bg: rgba(91, 140, 255, 0.13);
-  --totp-sel-line: rgba(91, 140, 255, 0.38);
-  --totp-soft-bg: rgba(91, 140, 255, 0.17);
-  --totp-soft-line: rgba(91, 140, 255, 0.3);
-  --totp-ok-bg: rgba(74, 222, 128, 0.09);
-  --totp-ok-line: rgba(74, 222, 128, 0.4);
+  --totp-sel-bg: var(--launcher-if-light, rgba(37, 99, 235, 0.09)) var(--launcher-if-dark, rgba(91, 140, 255, 0.13));
+  --totp-sel-line: var(--launcher-if-light, rgba(37, 99, 235, 0.34)) var(--launcher-if-dark, rgba(91, 140, 255, 0.38));
+  --totp-soft-bg: var(--launcher-if-light, rgba(37, 99, 235, 0.13)) var(--launcher-if-dark, rgba(91, 140, 255, 0.17));
+  --totp-soft-line: var(--launcher-if-light, rgba(37, 99, 235, 0.26)) var(--launcher-if-dark, rgba(91, 140, 255, 0.3));
+  --totp-ok-bg: var(--launcher-if-light, rgba(22, 163, 74, 0.08)) var(--launcher-if-dark, rgba(74, 222, 128, 0.09));
+  --totp-ok-line: var(--launcher-if-light, rgba(22, 163, 74, 0.45)) var(--launcher-if-dark, rgba(74, 222, 128, 0.4));
 }
 
 /* 顶栏品牌块 —— 与头像同一种圆角色块，把「这是哪个插件」立起来 */

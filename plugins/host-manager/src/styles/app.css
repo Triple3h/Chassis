@@ -6,39 +6,24 @@
 @source "../../../../packages/ui";
 
 /* ── 块色号（左栏卡片与右栏行底色共用）──────────────────────────────
-   深浅两套显式写死 rgba：**不要用 color-mix** —— 构建器（Lightning CSS）会把它拆成
-   「实色兜底 + 真值」两条规则，在没有 color-mix 的引擎上整块会被刷成纯色。 */
+   显式的 rgba 成对写死：**不要用 color-mix** —— 构建器（Lightning CSS）会把它拆成
+   「实色兜底 + 真值」两条规则，在没有 color-mix 的引擎上整块会被刷成纯色。
+   明暗两值成对写在同一个 `--launcher-if-light` / `--launcher-if-dark` 行里（见 theme.css）。 */
 :root {
-  --hm-fill-0: rgba(37, 99, 235, 0.06);
-  --hm-fill-1: rgba(22, 163, 74, 0.07);
-  --hm-fill-2: rgba(217, 119, 6, 0.08);
-  --hm-fill-3: rgba(124, 58, 237, 0.06);
-  --hm-fill-4: rgba(219, 39, 119, 0.06);
-  --hm-fill-5: rgba(13, 148, 136, 0.07);
-  --hm-edge-0: #2563eb;
-  --hm-edge-1: #16a34a;
-  --hm-edge-2: #d97706;
-  --hm-edge-3: #7c3aed;
-  --hm-edge-4: #db2777;
-  --hm-edge-5: #0d9488;
+  --hm-fill-0: var(--launcher-if-light, rgba(37, 99, 235, 0.06)) var(--launcher-if-dark, rgba(91, 140, 255, 0.1));
+  --hm-fill-1: var(--launcher-if-light, rgba(22, 163, 74, 0.07)) var(--launcher-if-dark, rgba(74, 222, 128, 0.1));
+  --hm-fill-2: var(--launcher-if-light, rgba(217, 119, 6, 0.08)) var(--launcher-if-dark, rgba(251, 191, 36, 0.1));
+  --hm-fill-3: var(--launcher-if-light, rgba(124, 58, 237, 0.06)) var(--launcher-if-dark, rgba(196, 181, 253, 0.1));
+  --hm-fill-4: var(--launcher-if-light, rgba(219, 39, 119, 0.06)) var(--launcher-if-dark, rgba(244, 114, 182, 0.1));
+  --hm-fill-5: var(--launcher-if-light, rgba(13, 148, 136, 0.07)) var(--launcher-if-dark, rgba(45, 212, 191, 0.1));
+  --hm-edge-0: var(--launcher-if-light, #2563eb) var(--launcher-if-dark, #5b8cff);
+  --hm-edge-1: var(--launcher-if-light, #16a34a) var(--launcher-if-dark, #4ade80);
+  --hm-edge-2: var(--launcher-if-light, #d97706) var(--launcher-if-dark, #fbbf24);
+  --hm-edge-3: var(--launcher-if-light, #7c3aed) var(--launcher-if-dark, #c4b5fd);
+  --hm-edge-4: var(--launcher-if-light, #db2777) var(--launcher-if-dark, #f472b6);
+  --hm-edge-5: var(--launcher-if-light, #0d9488) var(--launcher-if-dark, #2dd4bf);
   /* 选中块时叠在行上的一层薄色（用 background-image 叠，保住块底色） */
-  --hm-active-layer: rgba(0, 0, 0, 0.05);
-}
-
-[data-theme="dark"] {
-  --hm-fill-0: rgba(91, 140, 255, 0.1);
-  --hm-fill-1: rgba(74, 222, 128, 0.1);
-  --hm-fill-2: rgba(251, 191, 36, 0.1);
-  --hm-fill-3: rgba(196, 181, 253, 0.1);
-  --hm-fill-4: rgba(244, 114, 182, 0.1);
-  --hm-fill-5: rgba(45, 212, 191, 0.1);
-  --hm-edge-0: #5b8cff;
-  --hm-edge-1: #4ade80;
-  --hm-edge-2: #fbbf24;
-  --hm-edge-3: #c4b5fd;
-  --hm-edge-4: #f472b6;
-  --hm-edge-5: #2dd4bf;
-  --hm-active-layer: rgba(255, 255, 255, 0.07);
+  --hm-active-layer: var(--launcher-if-light, rgba(0, 0, 0, 0.05)) var(--launcher-if-dark, rgba(255, 255, 255, 0.07));
 }
 
 .launcher-mono {
