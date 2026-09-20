@@ -75,6 +75,7 @@ pub struct InstalledPlugin {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateEntry {
     pub id: String,
     pub title: String,
@@ -603,6 +604,30 @@ mod tests {
         // 拿不到内核版本时放行
         let updates = collect_updates(&registry, &installed, "macos", "arm64", None);
         assert!(updates[0].min_kernel_ok);
+    }
+
+    #[test]
+    fn update_entry_serializes_camel_case() {
+        // view 读的是 `minKernelOk`；曾因漏 rename_all 序列化成 `min_kernel_ok`，
+        // 更新页把每个插件条目都判成「底座版本过低」（插件通道首次真实使用才暴露）
+        let entry = UpdateEntry {
+            id: "json-tools".to_string(),
+            title: "JSON 工具箱".to_string(),
+            current: "0.1.0".to_string(),
+            latest: "0.2.0".to_string(),
+            notes: None,
+            min_kernel_ok: true,
+            asset: RegistryAsset {
+                platforms: vec![],
+                arch: vec![],
+                url: "https://github.com/Triple3h/Chassis/releases/download/plugins-latest/x.zip".to_string(),
+                sha256: "ab".to_string(),
+                bytes: 1,
+            },
+        };
+        let raw = serde_json::to_string(&entry).unwrap();
+        assert!(raw.contains("\"minKernelOk\":true"), "序列化必须是 camelCase：{raw}");
+        assert!(!raw.contains("min_kernel_ok"), "snake_case 字段 view 读不到：{raw}");
     }
 
     #[test]
