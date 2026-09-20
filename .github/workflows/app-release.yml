@@ -42,6 +42,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # 版本漂移在发版这一步就拦下：`version.json` 与三处位点不一致时，
+      # 打出来的包会「客户端判不出新版本」或「版本号对不上」——比发出去再救便宜得多
+      - name: 版本一致性（根 version.json 是唯一维护点）
+        run: node scripts/version.mjs check
+
       - name: 导入固定签名证书（未配置 secrets 则回落 ad-hoc）
         env:
           P12_BASE64: ${{ secrets.MACOS_SIGN_P12 }}

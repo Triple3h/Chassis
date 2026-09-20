@@ -156,7 +156,8 @@ internal-store「内核更新」区
 **单独发内核（不动 App、不动插件）**：
 
 ```bash
-# 版本号在 apps/kernel/Cargo.toml（只有机制变了才动 HOT_UPDATE_VERSION：spec 必须声明同值）
+# 版本改根 version.json 的 kernel 键（pnpm version:set kernel 0.2.0，自动同步 apps/kernel/Cargo.toml；
+# 唯一维护点见 scripts/version.mjs）。只有机制变了才动 HOT_UPDATE_VERSION：spec 必须声明同值
 gh workflow run kernel-release.yml --ref main -f notes="修复…" -f min_hot_version=0.1.0
 # 或推一次性 tag（名字必须新：同名 tag 不能重复推）
 git tag kernel/0.2.0 && git push origin kernel/0.2.0

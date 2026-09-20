@@ -8,6 +8,9 @@
  *   kernel/release/launcher-kernel-<版本>-<平台>-<架构>.zip   解压结构 = launcher-kernel(.exe) + ui/
  *   kernel/release/kernel-shard-<平台>-<架构>.json            分片（给 gen-kernel-registry.mjs 汇总）
  *
+ * 版本来源：`apps/kernel/Cargo.toml` 的 [package] version —— **唯一维护点是根 `version.json`**
+ * （由 `scripts/version.mjs` 同步，`pnpm version:check` 拦漂移）。
+ *
  * 为什么 UI 与内核同包：UI 由内核托管（`--ui-dist`），只换内核会出现「新内核 + 旧 UI」——
  * 一致性由内核侧**同一份 pending 台账**保证（apps/kernel/src/hot/binary.rs：一起换、一起回滚）。
  *

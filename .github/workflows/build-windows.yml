@@ -30,6 +30,9 @@ jobs:
       - name: pnpm install
         run: pnpm install --frozen-lockfile
 
+      - name: 版本一致性（根 version.json 是唯一维护点）
+        run: node scripts/version.mjs check
+
       - name: typecheck（TS / Vue）
         run: pnpm typecheck
 

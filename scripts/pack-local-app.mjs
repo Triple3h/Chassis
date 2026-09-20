@@ -33,8 +33,9 @@ const APP_NAME = 'Chassis'
 const outApp = path.join(repoRoot, 'dist-app', `${APP_NAME}.app`)
 
 /**
- * 壳版本只有一个源：`apps/shell/tauri.conf.json` 的 `version`。
- * 它同时是 `build.rs` 注入 `SHELL_VERSION`（`--hot-probe` 自报）与 `pack-app.mjs` 校验的来源 ——
+ * 壳版本从 `apps/shell/tauri.conf.json` 的 `version` 读 —— 它的**唯一维护点是根 `version.json`**
+ * （`pnpm version:set app <x.y.z>` / `scripts/version.mjs sync` 写入，`version:check` 拦漂移）。
+ * 这个值同时是 `build.rs` 注入 `SHELL_VERSION`（`--hot-probe` 自报）与 `pack-app.mjs` 校验的来源 ——
  * 分叉的后果是「客户端永远判不出新版本」或「更新到一个版本号对不上的包」。
  */
 const shellVersion = readShellVersion()

@@ -32,6 +32,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      - name: 版本一致性（根 version.json 是唯一维护点）
+        run: node scripts/version.mjs check
+
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-all.mjs
       # 壳单独编（pack-local-app.mjs 负责）；产物 → dist-app/Chassis.app

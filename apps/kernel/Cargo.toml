@@ -1,6 +1,8 @@
+# 不要手改 version：**唯一维护点是根 `version.json`**，由 `scripts/version.mjs` 同步（`pnpm version:sync`）。
+# 用途：pack-kernel 打包命名与分片 / 更新页「内核 v…」（host_info 上报）/ 内核热更新比对。
 [package]
 name = "launcher-kernel"
-version = "0.1.0"
+version = "0.1.4"
 edition = "2021"
 description = "Chassis 内核（Rust）：协议层 / 插件运行时 / 搜索调度 / 热更新"
 license = "MIT"

@@ -9,9 +9,10 @@
  *   app/release/Chassis-<版本>-macos-<架构>.zip   解压结构 = Chassis.app/Contents/…
  *   app/release/app-shard-macos-<架构>.json       分片（给 gen-app-registry.mjs 汇总）
  *
- * 版本只有一个源：`apps/shell/tauri.conf.json` 的 `version`（`build.rs` 读它注入 `SHELL_VERSION`，
- * `pack-local-app.mjs` 读它写 Info.plist）——本脚本再校验一次「Info.plist 与它一致」，把
- * 「版本源分叉」这类事故拦在发版之前（否则客户端要么判不出新版本、要么装出对不上号的包）。
+ * 版本从 `apps/shell/tauri.conf.json` 读（**唯一维护点是根 `version.json`**，由 `scripts/version.mjs`
+ * 同步；`build.rs` 注入 `SHELL_VERSION`、`pack-local-app.mjs` 写 Info.plist）——本脚本再校验一次
+ * 「Info.plist 与它一致」，把「版本源分叉」这类事故拦在发版之前
+ * （否则客户端要么判不出新版本、要么装出对不上号的包）。
  *
  * 签名是自更新的硬前提：新包必须与当前包**同一签名身份**，否则每次更新 TCC 授权（辅助功能 /
  * 屏幕录制…）都会失配重弹。CI 上用 secrets 导入同一张证书（见 .github/workflows/app-release.yml）。
