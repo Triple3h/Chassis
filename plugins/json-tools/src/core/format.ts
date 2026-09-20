@@ -11,7 +11,8 @@ import {
 } from './scanner'
 import type { KindCounts } from './tree'
 
-export type IndentOption = 2 | 4 | 'tab'
+/** 缩进：1–4 空格或 Tab（对齐 bejson 的缩进下拉） */
+export type IndentOption = 1 | 2 | 3 | 4 | 'tab'
 
 export interface FormatOptions {
   /** 缩进：2 / 4 空格或 Tab */

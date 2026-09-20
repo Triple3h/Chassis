@@ -5,99 +5,389 @@
 @source "../";
 @source "../../../../packages/ui";
 
-/* JSON 语法高亮配色（跟随主题变量） */
+/*
+ * 配色对齐 bejson（线上 JSON 工具）：亮色用它的编辑器/树视图配色，
+ * 暗色用它那套 Material Palenight。两组都只在本插件内生效，不外溢到别的插件。
+ */
+:root {
+  /* 树视图（bejson light） */
+  --json-key: #1d4ed8;
+  --json-str: #059669;
+  --json-num: #dc2626;
+  --json-bool: #7c3aed;
+  --json-null: #6b7280;
+  --json-punc: #374151;
+  --json-index: #6b7280;
+  --json-chevron: #6b7280;
+  --json-row-hover: rgba(0, 0, 0, 0.05);
+  --json-row-sel: rgba(0, 0, 0, 0.08);
+  --json-add: #059669;
+  --json-add-bg: rgba(5, 150, 105, 0.12);
+  --json-del-fg: #dc2626;
+  --json-del-bg: #fff3cd;
+  --json-edit-border: #d1d5db;
+  --json-edit-bg: rgba(255, 255, 255, 0.8);
+  --json-focus: #3b82f6;
+  --json-focus-ring: rgba(59, 130, 246, 0.15);
+
+  /* 文本视图（bejson 左编辑器 = CodeMirror 默认主题） */
+  --json-code-key: #aa1111;
+  --json-code-str: #aa1111;
+  --json-code-num: #116444;
+  --json-code-kw: #221199;
+  --json-code-punc: #111827;
+}
+
+[data-theme="dark"] {
+  /* 树视图（Material Palenight） */
+  --json-key: #82b1ff;
+  --json-str: #c3e88d;
+  --json-num: #f78c6c;
+  --json-bool: #c792ea;
+  --json-null: #7d8ba1;
+  --json-punc: #89ddff;
+  --json-index: #ffcb6b;
+  --json-chevron: #7d8ba1;
+  --json-row-hover: rgba(255, 255, 255, 0.05);
+  --json-row-sel: rgba(255, 255, 255, 0.09);
+  --json-add: #c3e88d;
+  --json-add-bg: rgba(195, 232, 141, 0.14);
+  --json-del-fg: #f78c6c;
+  --json-del-bg: rgba(247, 140, 108, 0.18);
+  --json-edit-border: #4b5563;
+  --json-edit-bg: rgba(0, 0, 0, 0.3);
+  --json-focus: #82b1ff;
+  --json-focus-ring: rgba(130, 177, 255, 0.18);
+
+  /* 文本视图（Palenight） */
+  --json-code-key: #82b1ff;
+  --json-code-str: #c3e88d;
+  --json-code-num: #f78c6c;
+  --json-code-kw: #c792ea;
+  --json-code-punc: #89ddff;
+}
+
+/* ------------------------------------------------ 文本视图（JSON 高亮） */
+
 .launcher-hl-key {
-  color: var(--launcher-key);
+  color: var(--json-code-key);
 }
 .launcher-hl-str {
-  color: var(--launcher-string);
+  color: var(--json-code-str);
 }
 .launcher-hl-num {
-  color: var(--launcher-number);
+  color: var(--json-code-num);
 }
 .launcher-hl-kw {
-  color: var(--launcher-code);
+  color: var(--json-code-kw);
 }
 .launcher-hl-punc {
-  color: var(--launcher-muted);
+  color: var(--json-code-punc);
 }
 
-.launcher-code-row {
+/* ------------------------------------------------------ 编辑器（左栏，可编辑） */
+
+.jed-root {
+  position: relative;
+  overflow: hidden;
+  background: var(--launcher-panel);
+  cursor: text;
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 20px;
-  height: 20px;
+  /* 制表符宽度要和光标 / 选区测量保持一致 */
+  tab-size: 4;
+}
+
+.jed-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+.jed-canvas {
+  position: relative;
+}
+
+.jed-row {
+  position: absolute;
+  left: 0;
+  min-width: 100%;
+  padding: 0 24px 0 12px;
   white-space: pre;
-  position: absolute;
-  left: 0;
-  padding-left: 12px;
-  padding-right: 24px;
 }
 
-.launcher-gutter {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 20px;
-  height: 20px;
+.jed-row.is-hit {
+  background: color-mix(in srgb, var(--launcher-accent) 18%, transparent);
+}
+.jed-row.is-err {
+  background: color-mix(in srgb, var(--launcher-danger) 15%, transparent);
+}
+
+/* 行号 / 折叠箭头沟槽：不横向滚动，只随 scrollTop 平移 */
+.jed-gutter {
   position: absolute;
+  top: 0;
+  bottom: 0;
   left: 0;
-  width: 46px;
-  text-align: right;
-  padding-right: 10px;
-  color: var(--launcher-faint);
+  overflow: hidden;
+  border-right: 1px solid var(--launcher-line);
+  background: var(--launcher-panel);
   user-select: none;
 }
 
-/* 从树里定位过来的那一行（临时高亮） */
-.launcher-code-row.is-hit {
-  background: color-mix(in srgb, var(--launcher-accent) 20%, transparent);
-  border-radius: 3px;
+.jed-gutter-inner {
+  position: relative;
 }
 
-/* 树视图：类型徽标 */
-.launcher-kind {
-  background: var(--launcher-hover);
-  color: var(--launcher-faint);
-}
-
-.launcher-kind-str {
-  color: var(--launcher-string);
-}
-
-.launcher-kind-num {
-  color: var(--launcher-number);
-}
-
-.launcher-kind-bool {
-  color: var(--launcher-code);
-}
-
-.launcher-kind-null {
-  color: var(--launcher-faint);
-}
-
-.launcher-kind-container {
-  color: var(--launcher-muted);
-}
-
-/* 树视图：源码行号列（点击跳回文本视图） */
-.launcher-tree-line {
-  flex: none;
-  text-align: right;
+.jed-ln {
+  position: absolute;
+  left: 0;
+  box-sizing: border-box;
   padding-right: 6px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+  text-align: right;
+  font-size: 11px;
   color: var(--launcher-faint);
-  user-select: none;
+  pointer-events: none;
 }
-
-.launcher-tree-line:hover {
+.jed-ln.is-hit {
   color: var(--launcher-accent);
 }
+.jed-ln.is-err {
+  color: var(--launcher-danger);
+  font-weight: 700;
+}
 
-/* 过滤命中的片段 */
-.launcher-mark {
-  background: color-mix(in srgb, var(--launcher-warn) 40%, transparent);
-  color: inherit;
+.jed-fold {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--json-chevron);
+  cursor: pointer;
+}
+.jed-fold svg {
+  width: 10px;
+  height: 10px;
+}
+.jed-fold:hover {
+  color: var(--launcher-fg);
+}
+
+.jed-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.jed-sel {
+  position: absolute;
   border-radius: 2px;
+  background: color-mix(in srgb, var(--launcher-accent) 26%, transparent);
+}
+
+.jed-caret {
+  position: absolute;
+  width: 2px;
+  background: var(--launcher-accent);
+  animation: jed-blink 1.1s steps(1, end) infinite;
+}
+
+@keyframes jed-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 跟随光标的输入框：文字与原生光标都隐藏，保留输入法锚点、撤销栈与复制粘贴 */
+.jed-input {
+  position: absolute;
+  /* 故意只留几像素宽：内容靠 scrollLeft 顶到左边缘，系统的输入法候选框才贴着画出来的光标 */
+  width: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font: inherit;
+  pointer-events: none;
+}
+.jed-input::selection {
+  background: transparent;
+}
+
+.jed-ph {
+  position: absolute;
+  top: 0;
+  white-space: pre;
+  color: var(--launcher-faint);
+  pointer-events: none;
+}
+
+/* --------------------------------------------------- 树视图（bejson 形态） */
+
+.jtree {
+  font-family: var(--font-mono);
+  cursor: default;
+}
+
+.jrow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+.jrow:hover {
+  background: var(--json-row-hover);
+}
+.jrow.is-sel {
+  background: var(--json-row-sel);
+}
+
+/* 展开箭头：bejson 用的是 12px 实心三角，展开向下、收起向右 */
+.jchev {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--json-chevron);
+  cursor: pointer;
+}
+.jchev svg {
+  width: 12px;
+  height: 12px;
+}
+span.jchev {
+  cursor: default;
+}
+
+/* 键与值都是「点一下就改」的内联编辑点 */
+.jkey,
+.jval {
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: text;
+}
+.jkey {
+  min-width: 30px;
+  color: var(--json-key);
+  font-weight: 700;
+}
+.jkey:hover,
+.jval:hover {
+  border-color: var(--json-edit-border);
+  background: var(--json-edit-bg);
+}
+.jv-str {
+  color: var(--json-str);
+}
+.jv-num {
+  color: var(--json-num);
+}
+.jv-bool {
+  color: var(--json-bool);
+}
+.jv-null {
+  color: var(--json-null);
+}
+.jidx {
+  min-width: 20px;
+  margin-right: 8px;
+  color: var(--json-index);
+  font-weight: 700;
+}
+.jpunc {
+  color: var(--json-punc);
+}
+.jbrack {
+  margin-right: 4px;
+  font-weight: 700;
+}
+.jlen {
+  color: var(--json-punc);
+}
+.jadd {
+  margin-left: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--json-add);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.jadd:hover {
+  background: var(--json-add-bg);
+}
+.jdel {
+  margin-left: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--json-del-fg);
+  font-size: 12px;
+  line-height: 16px;
+  opacity: 0;
+  cursor: pointer;
+}
+.jrow:hover .jdel {
+  opacity: 1;
+  background: var(--json-del-bg);
+}
+
+/* 行内编辑框：与 bejson 的 contenteditable 焦点态同款（蓝框 + 淡底） */
+.jedit {
+  padding: 0 10px;
+  border: 1px solid var(--json-focus);
+  border-radius: 3px;
+  background: var(--json-edit-bg);
+  box-shadow: 0 0 0 2px var(--json-focus-ring);
+  font: inherit;
+  outline: none;
+}
+
+/* 工具条上的小号下拉（缩进 / 字号） */
+.jselect {
+  width: auto;
+  padding: 3px 24px 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 工具条上的动作下拉（Unicode / \ 转义） */
+.jmenu-root {
+  position: relative;
+  width: auto;
+}
+.jmenu-trigger.is-open,
+.jmenu-trigger.is-open:hover {
+  background: var(--launcher-active);
+}
+.jmenu-caret {
+  color: var(--launcher-muted);
 }

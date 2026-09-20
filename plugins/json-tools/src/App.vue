@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useToast } from '@launcher/ui/toast'
@@ -11,32 +11,75 @@ import type { FormatOptions, FormatResult, IndentOption } from './core/format'
 import { runBuildTree, runFormat } from './core/runner'
 import type { FlatTree } from './core/tree'
 import { escapeUnicode, unescapeUnicode } from './core/unicode'
-import OutputPane from './components/OutputPane.vue'
+import { addEscape, removeEscape } from './core/escape'
+import JsonEditor from './components/JsonEditor.vue'
+import ToolMenu from './components/ToolMenu.vue'
 import TreePane from './components/TreePane.vue'
 
 const MAX_TREE_CHARS = 4_000_000
 const SAMPLE = `{"name":"launcher","version":"0.9.0","plugin":{"id":"json","tags":["format","validate"],"extra":{"deep":{"a":1,"b":[true,false,null,1e999,12345678901234567890]}}}}`
 
 const indentOptions: { v: IndentOption; t: string }[] = [
+  { v: 1, t: '1 空格' },
   { v: 2, t: '2 空格' },
+  { v: 3, t: '3 空格' },
   { v: 4, t: '4 空格' },
   { v: 'tab', t: 'Tab' },
+]
+const fontSizes = [12, 13, 14, 15, 16, 18, 20]
+
+/** 文本级变换（工具条下拉 / 宿主「更多」菜单共用） */
+type TransformId = 'zh' | 'zhBack' | 'nonAscii' | 'addEscape' | 'stripEscape'
+
+const TXT_LABEL: Record<TransformId, string> = {
+  zh: '中文转Unicode',
+  zhBack: 'Unicode转中文',
+  nonAscii: '转义非 ASCII',
+  addEscape: '添加 \\ 转义',
+  stripEscape: '去除 \\ 转义',
+}
+
+/** bejson 的 `Unicode ▾` 菜单 */
+const unicodeItems = [
+  { id: 'zh', label: '中文转Unicode' },
+  { id: 'zhBack', label: 'Unicode转中文' },
+]
+/** bejson 的 `\ 转义 ▾` 菜单 */
+const escapeItems = [
+  { id: 'addEscape', label: '添加 \\ 转义' },
+  { id: 'stripEscape', label: '去除 \\ 转义' },
 ]
 
 const source = ref('')
 const result = shallowRef<FormatResult | null>(null)
 const indent = ref<IndentOption>(2)
+const fontSize = ref(14)
 const minify = ref(false)
 const sortKeys = ref(false)
-const view = ref<'text' | 'tree'>('text')
+const showLineNumbers = ref(true)
 const busy = ref(false)
 const split = ref(46)
 const wrapRef = ref<HTMLElement | null>(null)
+const editor = ref<{
+  replaceAll: (text: string) => void
+  scrollToLine: (line: number) => void
+  foldAll: () => void
+  unfoldAll: () => void
+  focus: () => void
+} | null>(null)
 const tree = shallowRef<FlatTree | null>(null)
 const treeIssue = ref('')
-/** 从树里定位过来、需要高亮的输出行（1 起，0 = 无） */
+/** 换了一份新文档（粘贴 / 打开文件 / 示例 / 清空）—— 树视图据此复位展开与滚动 */
+const docEpoch = ref(0)
+/** 从树里定位过来、编辑器里需要高亮的行（1 起，0 = 无） */
 const hitLine = ref(0)
-const outputPane = ref<{ scrollToLine: (line: number) => void } | null>(null)
+const treePane = ref<{
+  expandAll: () => void
+  collapseAll: () => void
+  copyValue: () => void
+  copyPath: () => void
+  revealSelected: () => void
+} | null>(null)
 const toast = useToast()
 const { theme, toggle: toggleTheme } = useTheme()
 
@@ -49,6 +92,7 @@ const options = computed<FormatOptions>(() => ({
   minify: minify.value,
   sortKeys: sortKeys.value,
 }))
+const indentUnit = computed(() => (indent.value === 'tab' ? '\t' : ' '.repeat(indent.value)))
 
 /* ---------------------------------------------------------------- 计算调度 */
 
@@ -71,15 +115,15 @@ async function compute(immediate = false) {
     result.value = res
     hitLine.value = 0
     busy.value = false
-    if (view.value === 'tree') void refreshTree()
+    void refreshTree()
   }
   if (immediate) await run()
   else timer = setTimeout(run, 160) as unknown as number
 }
 
 /**
- * 树基于「格式化输出」构建（不是原始输入）：这样节点行号就是文本视图里的行号，
- * 树里的「定位」与文本里的行能一一对上。
+ * 树基于「格式化输出」构建（不是原始输入）：这样节点偏移与编辑器里的文本一一对应，
+ * 树上的行内编辑也能直接在这个文本上做最小替换。
  */
 async function refreshTree() {
   const res = result.value
@@ -90,7 +134,7 @@ async function refreshTree() {
   const text = res.output
   if (text.length > MAX_TREE_CHARS) {
     tree.value = null
-    treeIssue.value = `内容过大（${text.length.toLocaleString()} 字符），已停用树视图，请改用文本视图`
+    treeIssue.value = `内容过大（${text.length.toLocaleString()} 字符），已停用树视图`
     return
   }
   treeIssue.value = ''
@@ -100,18 +144,17 @@ async function refreshTree() {
   tree.value = built
 }
 
+/**
+ * 树上的编辑（改键 / 改值 / 增删成员）已经把结果文本算好了 —— 直接换掉文档，
+ * 不再走「原始输入」那一层：此时用户改的就是这份 JSON 本身（与 bejson 同款语义）。
+ */
+function onTreeEdit(text: string) {
+  source.value = text
+  void compute(true)
+}
+
 watch(source, () => void compute())
 watch(options, () => void compute(true))
-watch(view, async (v) => {
-  if (v === 'tree') {
-    void refreshTree()
-    return
-  }
-  if (hitLine.value) {
-    await nextTick()
-    outputPane.value?.scrollToLine(hitLine.value)
-  }
-})
 
 /* ------------------------------------------------------------------- 交互 */
 
@@ -121,6 +164,9 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`
 }
 
+/** 错误提示里的指位行：与 bejson 一样用 `----^` 指出出错那一列 */
+const caretLine = computed(() => '-'.repeat(Math.max(0, (issue.value?.column ?? 1) - 1)) + '^')
+
 function looksLikeJson(text: string): boolean {
   const t = text.trim()
   return t.startsWith('{') || t.startsWith('[') || t.startsWith('"{') || t.startsWith("'")
@@ -128,6 +174,7 @@ function looksLikeJson(text: string): boolean {
 
 function setSource(text: string) {
   source.value = text
+  docEpoch.value++
   void compute(true)
 }
 
@@ -178,33 +225,104 @@ function loadSample() {
   setSource(SAMPLE)
 }
 
-function toggleView() {
-  view.value = view.value === 'tree' ? 'text' : 'tree'
+/* ------------------------------------------------- 原地改写文档（对齐 bejson） */
+
+/** 把文本写回文档本身：走编辑器就能保留撤销栈（⌘Z 能退回改之前的原文） */
+function replaceDoc(text: string) {
+  const ed = editor.value
+  if (ed) ed.replaceAll(text)
+  else source.value = text
 }
 
-/** 树视图点行号 / 定位：切到文本视图并滚到那一行 */
-async function revealLine(line: number) {
+/**
+ * 格式化 / 压缩 / 改缩进 / 改排序统一走这里：结果**原地改写编辑器里的文档**，
+ * 而不是只换个右栏预览。右栏仍留一份结果视图，但文档自始至终只有一份。
+ *
+ * 这里刻意自己算一遍、直接用返回值，而不是改完选项再读 `result`：
+ * 改选项会触发 `watch(options)` 里的另一次计算，把 `job` 顶掉，
+ * 读到的可能是上一份结果 ⇒ 判定「已经就是这样」而把这次改写静默吞掉。
+ */
+async function reformat(mode: 'pretty' | 'minify', announce = '') {
+  const text = source.value
+  if (!text.trim()) {
+    toast.info('先输入 JSON')
+    return
+  }
+  const opts: FormatOptions = { indent: indent.value, minify: mode === 'minify', sortKeys: sortKeys.value }
+  busy.value = true
+  try {
+    const res = await runFormat(text, opts)
+    result.value = res
+    minify.value = mode === 'minify'
+    if (!res.ok) {
+      toast.err('JSON 有语法错误，先修好再改写文档')
+      return
+    }
+    hitLine.value = 0
+    if (res.output === source.value) {
+      if (announce) toast.info(`${announce}：已经就是这样`)
+      return
+    }
+    replaceDoc(res.output)
+    if (announce) toast.ok(`${announce}（${modLabel}Z 可撤销）`)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function toggleSort() {
+  sortKeys.value = !sortKeys.value
+  await reformat(minify.value ? 'minify' : 'pretty', sortKeys.value ? '已按键名排序' : '已取消排序')
+}
+
+/** 缩进改动同样就地重排（bejson 的缩进下拉就是即时重排） */
+watch(indent, () => void reformat('pretty'))
+
+/** 树视图点「定位」：滚到编辑器里的那一行并高亮 */
+function revealLine(line: number) {
   if (!line || line < 1) return
   hitLine.value = line
-  view.value = 'text'
-  await nextTick()
-  outputPane.value?.scrollToLine(line)
+  editor.value?.scrollToLine(line)
 }
 
-/** 字符串里的非 ASCII 字符 ↔ \uXXXX 互转（作用于输入文本） */
-function applyUnicode(mode: 'escape' | 'unescape') {
+/**
+ * 文本级变换：Unicode 互转（汉字/非 ASCII）与整篇 `\` 转义，全都作用于当前文档文本。
+ */
+function transform(id: TransformId) {
   if (!source.value.trim()) {
     toast.info('先输入 JSON')
     return
   }
-  const res = mode === 'escape' ? escapeUnicode(source.value) : unescapeUnicode(source.value)
+  const text = source.value
+  let res: { text: string; changed: number }
+  switch (id) {
+    case 'zh':
+      // 与 bejson 的「中文转Unicode」同范围：只转 [\u4e00-\u9fa5]
+      res = escapeUnicode(text, { only: 'cjk' })
+      break
+    case 'zhBack':
+      res = unescapeUnicode(text)
+      break
+    case 'nonAscii':
+      res = escapeUnicode(text)
+      break
+    case 'addEscape':
+      res = addEscape(text)
+      break
+    default:
+      res = removeEscape(text)
+      break
+  }
   if (!res.changed) {
-    toast.info(mode === 'escape' ? '没有需要转义的字符' : '没有可还原的 \\uXXXX')
+    toast.info(`${TXT_LABEL[id]}：没有可处理的内容`)
     return
   }
   setSource(res.text)
-  toast.ok(mode === 'escape' ? `已转义 ${res.changed} 个字符` : `已还原 ${res.changed} 处`)
+  toast.ok(`${TXT_LABEL[id]}：已处理 ${res.changed} 处`)
 }
+
+const onUnicodeAction = (id: string) => transform(id as TransformId)
+const onEscapeAction = (id: string) => transform(id as TransformId)
 
 function onDrop(e: DragEvent) {
   const file = fileFromDataTransfer(e.dataTransfer)
@@ -234,22 +352,17 @@ function startDrag(e: MouseEvent) {
 function onKeydown(e: KeyboardEvent) {
   if (isMod(e) && e.key === 'Enter') {
     e.preventDefault()
-    void compute(true)
-    return
-  }
-  if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === 'e') {
-    e.preventDefault()
-    toggleView()
+    void reformat('pretty', '已格式化')
     return
   }
   if (isMod(e) && e.shiftKey && e.key.toLowerCase() === 'm') {
     e.preventDefault()
-    minify.value = !minify.value
+    void reformat(minify.value ? 'pretty' : 'minify', minify.value ? '已格式化' : '已压缩')
     return
   }
   if (isMod(e) && e.shiftKey && e.key.toLowerCase() === 's') {
     e.preventDefault()
-    sortKeys.value = !sortKeys.value
+    void toggleSort()
     return
   }
   if (isTypingTarget(e.target)) return
@@ -265,15 +378,7 @@ async function syncFooter() {
       label: '格式化',
       icon: 'Check',
       keys: ['Mod+Enter'],
-      onClick: () => void compute(true),
-    },
-    {
-      type: 'button',
-      id: 'view',
-      label: view.value === 'tree' ? '文本视图' : '树视图',
-      icon: 'Braces',
-      keys: ['Mod+E'],
-      onClick: toggleView,
+      onClick: () => void reformat('pretty', '已格式化'),
     },
     {
       type: 'action-panel',
@@ -283,15 +388,21 @@ async function syncFooter() {
       keys: ['Mod+K'],
       title: 'JSON 操作',
       items: [
+        { id: 'indent1', name: '缩进 1 空格', onSelect: () => { indent.value = 1; minify.value = false } },
         { id: 'indent2', name: '缩进 2 空格', onSelect: () => { indent.value = 2; minify.value = false } },
+        { id: 'indent3', name: '缩进 3 空格', onSelect: () => { indent.value = 3; minify.value = false } },
         { id: 'indent4', name: '缩进 4 空格', onSelect: () => { indent.value = 4; minify.value = false } },
         { id: 'indentTab', name: '缩进 Tab', onSelect: () => { indent.value = 'tab'; minify.value = false } },
-        { id: 'minify', name: '压缩成一行', onSelect: () => (minify.value = !minify.value) },
-        { id: 'sort', name: '对象键排序', onSelect: () => (sortKeys.value = !sortKeys.value) },
+        { id: 'ln', name: '显示 / 隐藏行号', onSelect: () => (showLineNumbers.value = !showLineNumbers.value) },
+        { id: 'foldAll', name: '折叠全部', onSelect: () => editor.value?.foldAll() },
+        { id: 'unfoldAll', name: '展开全部', onSelect: () => editor.value?.unfoldAll() },
         { id: 'copy', name: '复制结果', onSelect: copyOutput },
         { id: 'download', name: '下载 JSON', onSelect: download },
-        { id: 'escUni', name: 'Unicode 转义（非 ASCII → \\uXXXX）', onSelect: () => applyUnicode('escape') },
-        { id: 'unescUni', name: 'Unicode 还原（\\uXXXX → 字符）', onSelect: () => applyUnicode('unescape') },
+        { id: 'zh', name: '中文转Unicode', onSelect: () => transform('zh') },
+        { id: 'zhBack', name: 'Unicode转中文', onSelect: () => transform('zhBack') },
+        { id: 'addEsc', name: '添加 \\ 转义（塞进字符串用）', onSelect: () => transform('addEscape') },
+        { id: 'stripEsc', name: '去除 \\ 转义', onSelect: () => transform('stripEscape') },
+        { id: 'nonAscii', name: '转义所有非 ASCII（含 emoji）', onSelect: () => transform('nonAscii') },
         { id: 'clip', name: '读取剪贴板', onSelect: importFromClipboard },
         { id: 'clear', name: '清空', onSelect: clearAll },
       ],
@@ -319,8 +430,6 @@ onUnmounted(() => {
   stopWatch?.()
   clearTimeout(timer)
 })
-
-watch(view, () => void syncFooter())
 </script>
 
 <template>
@@ -353,36 +462,20 @@ watch(view, () => void syncFooter())
 
     <!-- 工具条 -->
     <div class="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-2">
-      <div class="flex items-center gap-0.5 rounded-lg border border-line bg-panel2 p-0.5">
-        <button
-          v-for="opt in indentOptions"
-          :key="opt.t"
-          class="rounded-md px-2 py-[3px] text-[12px]"
-          :class="!minify && indent === opt.v ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-          @click="indent = opt.v; minify = false"
-        >
-          {{ opt.t }}
-        </button>
-      </div>
-
-      <button class="launcher-btn" :class="{ primary: !minify }" @click="minify = false; compute(true)">
+      <button class="launcher-btn" :class="{ primary: !minify }" title="格式化并改写文档" @click="reformat('pretty', '已格式化')">
         <UiIcon name="braces" :size="13" />格式化
       </button>
-      <button class="launcher-btn" :class="{ primary: minify }" @click="minify = true; compute(true)">
+      <button class="launcher-btn" :class="{ primary: minify }" title="压缩成一行并改写文档" @click="reformat('minify', '已压缩')">
         <UiIcon name="minus" :size="13" />压缩
       </button>
-      <button class="launcher-btn" :class="{ primary: sortKeys }" @click="sortKeys = !sortKeys">
+      <button class="launcher-btn" :class="{ primary: sortKeys }" title="对象键排序并改写文档" @click="toggleSort">
         <UiIcon name="sortAsc" :size="13" />键排序
       </button>
 
       <div class="mx-1 h-4 w-px bg-line" />
 
-      <button class="launcher-btn ghost" title="把字符串里的非 ASCII 字符转成 \uXXXX" @click="applyUnicode('escape')">
-        <UiIcon name="upload" :size="13" />Unicode 转义
-      </button>
-      <button class="launcher-btn ghost" title="把 \uXXXX 还原成字符" @click="applyUnicode('unescape')">
-        <UiIcon name="download" :size="13" />还原
-      </button>
+      <ToolMenu label="Unicode" icon="languages" :items="unicodeItems" @pick="onUnicodeAction" />
+      <ToolMenu :label="'\\ 转义'" :items="escapeItems" @pick="onEscapeAction" />
 
       <div class="mx-1 h-4 w-px bg-line" />
 
@@ -395,23 +488,6 @@ watch(view, () => void syncFooter())
       <button class="launcher-btn ghost" title="清空" @click="clearAll">
         <UiIcon name="trash" :size="13" />清空
       </button>
-
-      <div class="ml-auto flex items-center gap-0.5 rounded-lg border border-line bg-panel2 p-0.5">
-        <button
-          class="rounded-md px-2.5 py-[3px] text-[12px]"
-          :class="view === 'text' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-          @click="view = 'text'"
-        >
-          文本
-        </button>
-        <button
-          class="rounded-md px-2.5 py-[3px] text-[12px]"
-          :class="view === 'tree' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-          @click="view = 'tree'"
-        >
-          树形
-        </button>
-      </div>
     </div>
 
     <!-- 主体：输入 / 输出 分栏 -->
@@ -420,41 +496,62 @@ watch(view, () => void syncFooter())
         <div class="flex items-center gap-2 border-b border-line px-3 py-1.5 text-[11.5px] text-muted">
           <span>输入</span>
           <span v-if="stats" class="text-faint">{{ stats.inChars.toLocaleString() }} 字符</span>
-          <span class="ml-auto text-faint">可直接拖入 .json 文件</span>
+          <span class="ml-auto text-faint">{{ modLabel }}Z 撤销 · Tab 缩进 · 可直接拖入 .json 文件</span>
         </div>
-        <textarea
+        <JsonEditor
+          ref="editor"
           v-model="source"
-          class="launcher-scroll flex-1 resize-none border-0 bg-panel p-3 font-mono text-[12.5px] leading-[20px] outline-none"
-          spellcheck="false"
-          placeholder='粘贴 JSON，或把 .json 文件拖进来…&#10;&#10;支持注释 / 尾逗号 / 单引号 / 裸键的宽松修复。'
+          class="min-h-0 flex-1"
+          :font-size="fontSize"
+          :show-line-numbers="showLineNumbers"
+          :indent-unit="indentUnit"
+          :hit-line="hitLine"
+          :error-line="issue?.line ?? 0"
         />
       </div>
 
       <div class="w-px cursor-col-resize bg-line hover:bg-accent" @mousedown="startDrag" />
 
       <div class="flex min-w-0 flex-1 flex-col">
-        <div class="flex items-center gap-2 border-b border-line px-3 py-1.5 text-[11.5px] text-muted">
-          <span>{{ view === 'tree' ? '树形' : '结果' }}</span>
-          <span v-if="stats && view === 'text'" class="text-faint">
-            {{ stats.outLines.toLocaleString() }} 行 · {{ fmtBytes(stats.outBytes) }}
+        <!-- 输出栏工具条：树控件（全展开 / 全折叠 / 缩进 / 字号，对齐 bejson） -->
+        <div class="flex items-center gap-1.5 border-b border-line px-3 py-1.5">
+          <span class="flex items-center gap-1 text-[11.5px] text-muted">
+            <UiIcon name="braces" :size="13" />树视图
           </span>
-          <span v-if="stats" class="text-faint">
-            {{ stats.nodes.toLocaleString() }} 节点 · 深度 {{ stats.depth }}
-          </span>
-          <span v-if="repaired" class="ml-auto text-[color:var(--launcher-warn)]" title="注释被丢弃，单引号/裸键/尾逗号已重写">
-            已按宽松模式修复
-          </span>
+
+          <div class="mx-0.5 h-4 w-px bg-line" />
+
+          <button class="launcher-btn ghost" @click="treePane?.expandAll()">全展开</button>
+          <button class="launcher-btn ghost" @click="treePane?.collapseAll()">全折叠</button>
+
+          <select v-model="indent" class="launcher-input launcher-select jselect" title="缩进">
+            <option v-for="opt in indentOptions" :key="String(opt.v)" :value="opt.v">{{ opt.t }}</option>
+          </select>
+          <select v-model.number="fontSize" class="launcher-input launcher-select jselect" title="字号">
+            <option v-for="size in fontSizes" :key="size" :value="size">{{ size }}px</option>
+          </select>
+
+          <div class="ml-auto flex items-center gap-1">
+            <button class="launcher-btn ghost !px-1.5" title="复制选中节点的值" @click="treePane?.copyValue()">
+              <UiIcon name="copy" :size="12" />值
+            </button>
+            <button class="launcher-btn ghost !px-1.5" title="复制选中节点的路径" @click="treePane?.copyPath()">
+              <UiIcon name="link" :size="12" />路径
+            </button>
+            <button class="launcher-btn ghost !px-1.5" title="在编辑器里定位这一行" @click="treePane?.revealSelected()">
+              <UiIcon name="external" :size="12" />定位
+            </button>
+          </div>
         </div>
 
         <div v-if="issue" class="flex items-start gap-2 border-b border-line bg-[color:var(--launcher-del-bg)] px-3 py-2">
           <UiIcon name="alert" :size="14" class="mt-[2px] text-danger" />
-          <div class="min-w-0 text-[12.5px]">
+          <div class="min-w-0 flex-1 text-[12.5px]">
             <div class="text-danger">
-              第 {{ issue.line }} 行 第 {{ issue.column }} 列：{{ issue.message }}
+              JSON 格式错误：第 {{ issue.line }} 行 第 {{ issue.column }} 列 —— {{ issue.message }}
             </div>
-            <div v-if="issue.snippet" class="mt-0.5 truncate font-mono text-[11.5px] text-muted">
-              {{ issue.snippet }}
-            </div>
+            <pre v-if="issue.snippet" class="launcher-scroll mt-0.5 overflow-x-auto font-mono text-[11.5px] leading-[16px] text-muted">{{ issue.snippet }}
+{{ caretLine }}</pre>
           </div>
         </div>
 
@@ -462,14 +559,15 @@ watch(view, () => void syncFooter())
           <UiIcon name="info" :size="13" />{{ treeIssue }}
         </div>
 
-        <!-- v-show 而非 v-if：切视图不丢树的展开状态与滚动位置 -->
         <div class="min-h-0 flex-1">
-          <OutputPane v-show="view === 'text'" ref="outputPane" :text="output" :plain="minify" :hit-line="hitLine" />
           <TreePane
-            v-show="view === 'tree'"
+            ref="treePane"
             :tree="tree"
             :source="output"
-            :show-line="!minify"
+            :indent="indent === 'tab' ? '\t' : ' '.repeat(indent)"
+            :font-size="fontSize"
+            :doc-epoch="docEpoch"
+            @edit="onTreeEdit"
             @reveal="revealLine"
           />
         </div>
@@ -481,6 +579,10 @@ watch(view, () => void syncFooter())
       <span v-if="issue" class="text-danger">解析失败</span>
       <span v-else-if="output">已格式化</span>
       <span v-else>等待输入</span>
+      <span v-if="stats && stats.nodes">
+        {{ stats.outLines.toLocaleString() }} 行 · {{ fmtBytes(stats.outBytes) }} · {{ stats.nodes.toLocaleString() }} 节点 ·
+        深度 {{ stats.depth }}
+      </span>
       <span v-if="stats && stats.nodes" class="flex items-center gap-2.5" title="按类型统计的节点数">
         <span>对象 {{ stats.kinds.object }}</span>
         <span>数组 {{ stats.kinds.array }}</span>
@@ -491,7 +593,6 @@ watch(view, () => void syncFooter())
       </span>
       <span class="ml-auto flex items-center gap-3">
         <span><span class="launcher-kbd">{{ modLabel }}</span> <span class="launcher-kbd">↵</span> 格式化</span>
-        <span><span class="launcher-kbd">{{ modLabel }}</span> <span class="launcher-kbd">E</span> 视图</span>
         <span>无损保留数字精度</span>
       </span>
     </footer>

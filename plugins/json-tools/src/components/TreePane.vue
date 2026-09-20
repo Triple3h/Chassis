@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import UiIcon from '@launcher/ui/UiIcon.vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useVirtualList } from '@launcher/ui/virtual'
 import { useToast } from '@launcher/ui/toast'
 import { copyText } from '@launcher/ui/clipboard'
 import { formatJson } from '../core/format'
-import { escapeHtml } from '../core/highlight'
+import { addChild, canEditValue, editText, patchKey, patchValue, removeNode } from '../core/edit'
 import {
   KIND,
+  closeRowNode,
+  indexInParent,
   isContainerKind,
   jsonPath,
-  matchNodes,
+  lastChildOf,
   nodeSource,
   projectRows,
   type FlatTree,
@@ -18,54 +19,45 @@ import {
 
 const props = defineProps<{
   tree: FlatTree | null
-  /** 树对应的文本（复制节点原文 / 子树用） */
+  /** 树对应的文本：树上的编辑以它为底稿做最小替换 */
   source: string
-  /** 源码行号列（压缩成单行时没有意义，隐藏） */
-  showLine?: boolean
+  /** 新成员的缩进单位（跟随格式化设置） */
+  indent?: string
+  /** 树字号（px） */
+  fontSize?: number
+  /** 新文档的序号（粘贴 / 载入示例 / 清空）：变一次就把展开与滚动复位 */
+  docEpoch?: number
 }>()
 
-const emit = defineEmits<{ reveal: [line: number] }>()
+const emit = defineEmits<{ edit: [text: string]; reveal: [line: number] }>()
 
-const ROW = 24
-const INDENT = 14
+/** 每层缩进 / 起始留白（对齐 bejson：成员 20px 一级） */
+const INDENT_PX = 20
+const BASE_PAD = 8
 /** 超过这个大小时复制节点不再重新缩进，直接给原文 */
 const PRETTY_LIMIT = 200_000
+const DEFAULT_FONT = 14
+
 const scroller = ref<HTMLElement | null>(null)
 const toast = useToast()
 
 const expanded = new Set<number>()
 const rev = ref(0)
-const filter = ref('')
-const filterDebounced = ref('')
 const selected = ref(0)
+const editing = ref<{ idx: number; field: Field } | null>(null)
+const draft = ref('')
+let commitTimer = 0
+/** 新增成员之后要接着编辑它（等新的树回来再落座） */
+let pending: { parent: number; field: Field } | null = null
 
-let filterTimer = 0
-watch(filter, (v) => {
-  clearTimeout(filterTimer)
-  filterTimer = setTimeout(() => {
-    filterDebounced.value = v.trim()
-  }, 160) as unknown as number
-})
+type Field = 'key' | 'value'
 
-const matched = computed(() => {
-  if (!props.tree || !filterDebounced.value) return null
-  return matchNodes(props.tree, filterDebounced.value)
-})
+const ROW = computed(() => Math.max(18, Math.round((props.fontSize ?? DEFAULT_FONT) * 1.6)))
 
-const visible = computed(() => matched.value?.visible ?? null)
-
-const effectiveExpanded = computed(() => {
-  if (!visible.value || !props.tree) return expanded
-  const all = new Set<number>()
-  const { kind } = props.tree
-  for (const i of visible.value) if (isContainerKind(kind[i])) all.add(i)
-  return all
-})
-
-const rows = computed<number[]>(() => {
+const rows = computed<Int32Array>(() => {
   rev.value
-  if (!props.tree) return []
-  return Array.from(projectRows(props.tree, effectiveExpanded.value, visible.value))
+  if (!props.tree) return new Int32Array(0)
+  return projectRows(props.tree, expanded)
 })
 
 const { startIndex, endIndex, totalHeight, scrollToIndex } = useVirtualList(scroller, {
@@ -73,98 +65,82 @@ const { startIndex, endIndex, totalHeight, scrollToIndex } = useVirtualList(scro
   rowHeight: ROW,
 })
 
-const visibleRows = computed(() => rows.value.slice(startIndex.value, endIndex.value))
+const visibleRows = computed(() => Array.from(rows.value.slice(startIndex.value, endIndex.value)))
 
-/** 选中节点到根的分段（末 4 段，更长的用 … 折叠） */
-const crumbs = computed(() => {
-  const tree = props.tree
-  if (!tree) return { parts: [] as number[], clipped: false }
-  const chain: number[] = []
-  let cur = selected.value
-  while (cur >= 0) {
-    chain.push(cur)
-    cur = tree.parent[cur]
-  }
-  chain.reverse()
-  const parts = chain.length > 4 ? chain.slice(-4) : chain
-  return { parts, clipped: parts.length < chain.length }
-})
+/* ------------------------------------------------------------------ 行渲染 */
 
-const selectedPath = computed(() => (props.tree ? jsonPath(props.tree, selected.value) : ''))
-
-/** 行号列宽跟随最大行号的位数 */
-const lineWidth = computed(() => {
+function depthOf(row: number): number {
   const t = props.tree
-  if (!t || !t.nodeCount) return 28
-  return Math.max(28, String(t.line[t.nodeCount - 1]).length * 7 + 12)
-})
+  if (!t) return 0
+  const idx = row < 0 ? closeRowNode(row) : row
+  return idx < 0 ? 0 : t.depth[idx]
+}
 
-watch(rows, () => {
-  if (rows.value.length && selected.value >= rows.value.length) selected.value = rows.value.length - 1
-})
+function openChar(idx: number): string {
+  return props.tree?.kind[idx] === KIND.array ? '[' : '{'
+}
+
+function closeChar(idx: number): string {
+  return props.tree?.kind[idx] === KIND.array ? ']' : '}'
+}
+
+function isContainer(idx: number): boolean {
+  const t = props.tree
+  return !!t && idx >= 0 && isContainerKind(t.kind[idx])
+}
+
+/** 数组元素显示 `0:` 而不是键 */
+function isArrayChild(idx: number): boolean {
+  const t = props.tree
+  return !!t && idx > 0 && t.parent[idx] >= 0 && t.kind[t.parent[idx]] === KIND.array
+}
+
+function arrayIndex(idx: number): number {
+  const t = props.tree
+  return t ? indexInParent(t, idx) : 0
+}
+
+function hasComma(idx: number): boolean {
+  const t = props.tree
+  return !!t && idx >= 0 && idx !== 0 && t.nextSibling[idx] !== -1
+}
+
+function valueClass(kind: number): string {
+  switch (kind) {
+    case KIND.string:
+      return 'jv-str'
+    case KIND.number:
+      return 'jv-num'
+    case KIND.boolean:
+      return 'jv-bool'
+    case KIND.null:
+      return 'jv-null'
+    default:
+      return ''
+  }
+}
+
+function displayValue(idx: number): string {
+  const t = props.tree
+  if (!t || isContainerKind(t.kind[idx])) return ''
+  return t.truncated && t.kind[idx] === KIND.string && t.value[idx].length >= 300
+    ? `${t.value[idx]}…`
+    : t.value[idx]
+}
+
+/* -------------------------------------------------------------- 展开与选中 */
 
 function toggle(idx: number) {
-  if (!props.tree) return
-  if (!isContainerKind(props.tree.kind[idx])) return
+  if (!isContainer(idx)) return
   if (expanded.has(idx)) expanded.delete(idx)
   else expanded.add(idx)
   rev.value++
 }
 
-function rowClick(idx: number) {
-  selected.value = idx
-  const i = rows.value.indexOf(idx)
-  if (i >= 0) scrollToIndex(i)
-  if (props.tree && isContainerKind(props.tree.kind[idx])) toggle(idx)
-  else void copyValue()
-}
-
-/** 展开祖先链并把选中节点滚进视野（面包屑 / 反向定位共用） */
-function revealNode(idx: number, center = true) {
-  const tree = props.tree
-  if (!tree) return
-  let cur = tree.parent[idx]
-  while (cur >= 0) {
-    expanded.add(cur)
-    cur = tree.parent[cur]
-  }
-  if (isContainerKind(tree.kind[idx])) expanded.add(idx)
-  rev.value++
-  selected.value = idx
-  const i = rows.value.indexOf(idx)
-  if (i >= 0) scrollToIndex(i, center ? 'center' : 'start')
-}
-
-function prettify(raw: string): string {
-  if (!raw || raw.length > PRETTY_LIMIT) return raw
-  const res = formatJson(raw, { indent: 2 })
-  return res.ok ? res.output : raw
-}
-
-async function copyPath() {
-  if (!props.tree) return
-  if (await copyText(selectedPath.value)) toast.ok('已复制路径')
-}
-
-async function copyValue() {
-  const tree = props.tree
-  if (!tree) return
-  const idx = selected.value
-  const raw = nodeSource(tree, props.source, idx)
-  const text = isContainerKind(tree.kind[idx]) ? prettify(raw) : raw
-  if (await copyText(text)) toast.ok(isContainerKind(tree.kind[idx]) ? '已复制该节点的 JSON' : '已复制该节点的值')
-}
-
-function revealSource() {
-  const tree = props.tree
-  if (!tree) return
-  emit('reveal', tree.line[selected.value])
-}
-
 function expandAll() {
-  if (!props.tree) return
-  const { kind } = props.tree
-  for (let i = 0; i < props.tree.nodeCount; i++) if (isContainerKind(kind[i])) expanded.add(i)
+  const t = props.tree
+  if (!t) return
+  for (let i = 0; i < t.nodeCount; i++) if (isContainerKind(t.kind[i])) expanded.add(i)
   rev.value++
 }
 
@@ -173,24 +149,173 @@ function collapseAll() {
   rev.value++
 }
 
-function expandDepth(depth: number) {
-  if (!props.tree) return
-  expanded.clear()
-  const { kind, depth: d } = props.tree
-  for (let i = 0; i < props.tree.nodeCount; i++) {
-    if (isContainerKind(kind[i]) && d[i] < depth) expanded.add(i)
-  }
-  rev.value++
+function selectNode(idx: number) {
+  selected.value = idx
+  const at = rows.value.indexOf(idx)
+  if (at >= 0) scrollToIndex(at)
 }
 
+/* ------------------------------------------------------------------ 编辑 */
+
+function isEditing(idx: number, field: Field): boolean {
+  return editing.value?.idx === idx && editing.value.field === field
+}
+
+/** 输入框宽度：近似「中文 2 格、其余 1 格」，随内容增长 */
+const draftWidth = computed(() => {
+  let units = 0
+  for (const ch of draft.value) units += ch.charCodeAt(0) > 0x2e80 ? 2 : 1
+  return `${Math.max(2, units + 1)}ch`
+})
+
+function beginEdit(idx: number, field: Field) {
+  const t = props.tree
+  if (!t) return
+  if (field === 'key' && idx === 0) return
+  if (field === 'value' && !canEditValue(t, idx)) {
+    toast.info('字符串过长（已截断），请切到文本视图编辑')
+    return
+  }
+  // 换到另一处编辑时，先把上一处没落盘的输入写完（防抖可能还没到点）
+  clearTimeout(commitTimer)
+  if (editing.value) flush()
+  selected.value = idx
+  editing.value = { idx, field }
+  draft.value = field === 'key' ? t.key[idx] : editText(t, idx)
+  void nextTick(() => focusEditor())
+}
+
+/** 同一时刻只有一个编辑框，直接查 DOM（模板 ref 在 v-for 里拿不到元素） */
+function focusEditor(retry = true) {
+  const el = scroller.value?.querySelector('.jedit') as HTMLInputElement | null
+  if (!el) {
+    // 新加的成员可能在虚拟窗口外，滚动落定后再试一次
+    if (retry) setTimeout(() => focusEditor(false), 80)
+    return
+  }
+  el.focus()
+  el.select()
+}
+
+/** 把当前草稿写回文档；非法输入返回 false（调用方决定提示与还原） */
+function flush(): boolean {
+  const st = editing.value
+  const t = props.tree
+  if (!st || !t) return false
+  const next =
+    st.field === 'key'
+      ? patchKey(props.source, t, st.idx, draft.value)
+      : patchValue(props.source, t, st.idx, draft.value)
+  if (next === null) return false
+  if (next !== props.source) emit('edit', next)
+  return true
+}
+
+/** 输入即写（防抖）—— 与 bejson 的行内编辑一样是「改完立刻生效」 */
+function onInput() {
+  clearTimeout(commitTimer)
+  commitTimer = setTimeout(flush, 240) as unknown as number
+}
+
+function endEdit() {
+  clearTimeout(commitTimer)
+  const st = editing.value
+  if (!st) return
+  if (!flush()) {
+    const t = props.tree
+    if (t) draft.value = st.field === 'key' ? t.key[st.idx] : editText(t, st.idx)
+    toast.err(st.field === 'key' ? '键名没变' : '值不合法，已还原')
+  }
+  editing.value = null
+}
+
+function cancelEdit() {
+  clearTimeout(commitTimer)
+  editing.value = null
+}
+
+function addTo(idx: number) {
+  const t = props.tree
+  if (!t || !isContainer(idx)) return
+  const next = addChild(props.source, t, idx, { indent: props.indent ?? '  ' })
+  if (next === null) return
+  pending = { parent: idx, field: t.kind[idx] === KIND.object ? 'key' : 'value' }
+  expanded.add(idx)
+  rev.value++
+  emit('edit', next)
+}
+
+function removeAt(idx: number) {
+  const t = props.tree
+  if (!t || idx === 0) return
+  const next = removeNode(props.source, t, idx)
+  if (next === null) return
+  if (editing.value?.idx === idx) editing.value = null
+  selected.value = t.parent[idx] >= 0 ? t.parent[idx] : 0
+  emit('edit', next)
+}
+
+/** 新的树回来之后，把光标落到刚添加的成员上 */
+watch(
+  () => props.tree,
+  (t) => {
+    if (!t || !pending) return
+    const { parent, field } = pending
+    pending = null
+    const idx = lastChildOf(t, parent)
+    if (idx < 0) return
+    selectNode(idx)
+    beginEdit(idx, field)
+  },
+)
+
+/* -------------------------------------------------------------- 复制 / 定位 */
+
+function prettify(raw: string): string {
+  if (!raw || raw.length > PRETTY_LIMIT) return raw
+  const res = formatJson(raw, { indent: 2 })
+  return res.ok ? res.output : raw
+}
+
+async function copyValue() {
+  const t = props.tree
+  if (!t) return
+  const idx = selected.value
+  const raw = nodeSource(t, props.source, idx)
+  const text = isContainerKind(t.kind[idx]) ? prettify(raw) : raw
+  if (await copyText(text)) toast.ok(isContainerKind(t.kind[idx]) ? '已复制该节点的 JSON' : '已复制该节点的值')
+}
+
+async function copyPath() {
+  const t = props.tree
+  if (!t) return
+  if (await copyText(jsonPath(t, selected.value))) toast.ok('已复制路径')
+}
+
+function revealSelected() {
+  const t = props.tree
+  if (!t) return
+  emit('reveal', t.line[selected.value])
+}
+
+defineExpose({ expandAll, collapseAll, copyValue, copyPath, revealSelected, selectNode })
+
+/* ---------------------------------------------------------------- 键盘 */
+
 function onKeydown(e: KeyboardEvent) {
-  if (!rows.value.length) return
+  if (editing.value) return
+  // 行内编辑框里的按键（Enter 提交 / Esc 取消）不该再被树当成导航键
+  const el = e.target as HTMLElement | null
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+  const t = props.tree
+  if (!t || !rows.value.length) return
   const pos = rows.value.indexOf(selected.value)
   const at = pos < 0 ? 0 : pos
   const move = (delta: number) => {
     e.preventDefault()
     const next = Math.max(0, Math.min(rows.value.length - 1, at + delta))
-    selected.value = rows.value[next]
+    const row = rows.value[next]
+    selected.value = closeRowNode(row) >= 0 ? closeRowNode(row) : row
     scrollToIndex(next)
   }
   const mod = e.metaKey || e.ctrlKey
@@ -219,39 +344,54 @@ function onKeydown(e: KeyboardEvent) {
     case 'End':
       move(rows.value.length)
       break
-    case 'ArrowRight':
-      if (props.tree && isContainerKind(props.tree.kind[selected.value]) && !expanded.has(selected.value)) {
-        e.preventDefault()
-        toggle(selected.value)
-      }
-      break
-    case 'ArrowLeft':
-      if (props.tree && isContainerKind(props.tree.kind[selected.value]) && expanded.has(selected.value)) {
-        e.preventDefault()
-        toggle(selected.value)
-      }
-      break
     case 'Enter':
       e.preventDefault()
-      void copyValue()
+      beginEdit(selected.value, isArrayChild(selected.value) || selected.value === 0 ? 'value' : 'key')
       break
     default:
       break
   }
 }
 
-/** 初始展开两层，避免一进来只看到一根线 */
+/* ------------------------------------------------------------ 初始展开 */
+
+/** 默认展开两层（避免一进来只看到一根线）；只在「新文档」时复位 */
+function initExpansion(t: FlatTree) {
+  expanded.clear()
+  for (let i = 0; i < t.nodeCount; i++) {
+    if (isContainerKind(t.kind[i]) && t.depth[i] < 2) expanded.add(i)
+  }
+  selected.value = 0
+  if (scroller.value) scroller.value.scrollTop = 0
+}
+
+let inited = false
+let needsInit = false
+
+watch(
+  () => props.docEpoch,
+  () => {
+    needsInit = true
+  },
+)
+
 watch(
   () => props.tree,
   (t) => {
     if (!t) return
-    expanded.clear()
-    for (let i = 0; i < t.nodeCount; i++) {
-      if (isContainerKind(t.kind[i]) && t.depth[i] < 2) expanded.add(i)
+    if (!inited || needsInit) {
+      inited = true
+      needsInit = false
+      initExpansion(t)
     }
-    rev.value++
-    selected.value = 0
-    if (scroller.value) scroller.value.scrollTop = 0
+    // 新增成员之后把光标落到它身上
+    if (!pending) return
+    const { parent, field } = pending
+    pending = null
+    const idx = lastChildOf(t, parent)
+    if (idx < 0) return
+    selectNode(idx)
+    beginEdit(idx, field)
   },
   { immediate: true },
 )
@@ -259,164 +399,98 @@ watch(
 onMounted(() => scroller.value?.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
   scroller.value?.removeEventListener('keydown', onKeydown)
-  clearTimeout(filterTimer)
+  clearTimeout(commitTimer)
 })
-
-function indentStyle(depth: number) {
-  return { paddingLeft: 6 + depth * INDENT + 'px' }
-}
-
-const KIND_LABEL = ['对象', '数组', '字符串', '数字', '布尔', '空值']
-
-function kindLabel(kind: number): string {
-  return KIND_LABEL[kind] ?? ''
-}
-
-function kindClass(kind: number) {
-  switch (kind) {
-    case KIND.string:
-      return 'launcher-kind-str'
-    case KIND.number:
-      return 'launcher-kind-num'
-    case KIND.boolean:
-      return 'launcher-kind-bool'
-    case KIND.null:
-      return 'launcher-kind-null'
-    default:
-      return 'launcher-kind-container'
-  }
-}
-
-function valueClass(kind: number) {
-  switch (kind) {
-    case KIND.string:
-      return 'text-[color:var(--launcher-string)]'
-    case KIND.number:
-      return 'text-[color:var(--launcher-number)]'
-    case KIND.boolean:
-      return 'text-[color:var(--launcher-code)]'
-    case KIND.null:
-      return 'italic text-faint'
-    default:
-      return 'text-muted'
-  }
-}
-
-/** 过滤命中处加底色（只高亮第一个匹配，够用且省 DOM） */
-function hl(text: string): string {
-  const q = filterDebounced.value
-  if (!q) return escapeHtml(text)
-  const at = text.toLowerCase().indexOf(q.toLowerCase())
-  if (at < 0) return escapeHtml(text)
-  return (
-    escapeHtml(text.slice(0, at)) +
-    `<mark class="launcher-mark">${escapeHtml(text.slice(at, at + q.length))}</mark>` +
-    escapeHtml(text.slice(at + q.length))
-  )
-}
-
-function displayValue(idx: number): string {
-  const tree = props.tree
-  if (!tree) return ''
-  if (isContainerKind(tree.kind[idx])) return tree.preview[idx]
-  const raw = tree.value[idx]
-  if (tree.kind[idx] === KIND.string) {
-    const shown = JSON.stringify(raw)
-    return tree.truncated && shown.length > 290 ? shown.slice(0, 290) + '…"' : shown
-  }
-  return raw
-}
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col bg-panel">
-    <div class="flex items-center gap-2 border-b border-line px-3 py-2">
-      <div class="relative flex-1">
-        <UiIcon name="search" :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
-        <input v-model="filter" class="launcher-input pl-7" placeholder="过滤键或值…" spellcheck="false" />
-      </div>
-      <button class="launcher-btn ghost" title="展开两层" @click="expandDepth(2)">
-        <UiIcon name="chevronDown" :size="13" />2 层
-      </button>
-      <button class="launcher-btn ghost" title="全部展开" @click="expandAll">展开</button>
-      <button class="launcher-btn ghost" title="全部折叠" @click="collapseAll">折叠</button>
-      <span class="launcher-chip">{{ tree?.nodeCount ?? 0 }} 节点</span>
-    </div>
-
-    <!-- 选中节点的路径 + 复制 -->
-    <div class="flex items-center gap-1.5 border-b border-line px-3 py-1.5 text-[11.5px]">
-      <UiIcon name="branch" :size="12" class="shrink-0 text-faint" />
-      <div class="min-w-0 flex-1 truncate font-mono text-muted" :title="selectedPath">
-        <template v-if="crumbs.clipped">… / </template>
-        <template v-for="(idx, i) in crumbs.parts" :key="idx">
-          <button
-            class="rounded px-0.5 hover:text-fg hover:underline"
-            :class="idx === selected ? 'text-fg' : ''"
-            @click="revealNode(idx)"
-          >
-            {{ tree && idx === 0 ? '$' : tree?.key[idx] }}
-          </button>
-          <span v-if="i < crumbs.parts.length - 1" class="text-faint">/</span>
+  <div
+    ref="scroller"
+    class="jtree launcher-scroll relative h-full w-full outline-none"
+    tabindex="0"
+    :style="{ fontSize: (fontSize ?? DEFAULT_FONT) + 'px' }"
+  >
+    <div class="relative" :style="{ height: totalHeight + 'px', minWidth: '100%' }">
+      <div
+        v-for="(row, i) in visibleRows"
+        :key="row"
+        class="jrow"
+        :class="{ 'is-sel': row >= 0 && row === selected }"
+        :style="{
+          top: (startIndex + i) * ROW + 'px',
+          height: ROW + 'px',
+          paddingLeft: BASE_PAD + depthOf(row) * INDENT_PX + 'px',
+        }"
+        @click="row >= 0 && (selected = row)"
+      >
+        <!-- 收尾括号行 -->
+        <template v-if="row < 0">
+          <span class="jpunc jbrack">{{ closeChar(closeRowNode(row)) }}</span>
+          <span v-if="hasComma(closeRowNode(row))" class="jpunc">,</span>
         </template>
-      </div>
-      <button class="launcher-btn ghost !px-1.5" title="复制路径（JSONPath）" @click="copyPath">
-        <UiIcon name="link" :size="12" />路径
-      </button>
-      <button class="launcher-btn ghost !px-1.5" title="复制该节点的值（容器为 JSON）" @click="copyValue">
-        <UiIcon name="copy" :size="12" />值
-      </button>
-      <button v-if="showLine !== false" class="launcher-btn ghost !px-1.5" title="在文本视图里定位这一行" @click="revealSource">
-        <UiIcon name="external" :size="12" />定位
-      </button>
-    </div>
 
-    <div ref="scroller" class="launcher-scroll relative flex-1 outline-none" tabindex="0">
-      <div class="relative" :style="{ height: totalHeight + 'px' }">
-        <div
-          v-for="(idx, i) in visibleRows"
-          :key="idx"
-          class="absolute left-0 right-0 flex h-[24px] cursor-default items-center gap-1.5 overflow-hidden whitespace-nowrap pr-2 font-mono text-[12.5px] leading-[24px]"
-          :class="{ 'bg-active': idx === selected }"
-          :style="{ top: (startIndex + i) * ROW + 'px' }"
-          @click="rowClick(idx)"
-        >
-          <button
-            v-if="showLine !== false && tree"
-            class="launcher-tree-line"
-            :class="{ '!text-accent': idx === selected }"
-            :style="{ width: lineWidth + 'px' }"
-            title="在文本视图里定位这一行"
-            @click.stop="emit('reveal', tree.line[idx])"
-          >
-            {{ tree.line[idx] }}
+        <template v-else>
+          <button v-if="isContainer(row)" class="jchev" @click.stop="toggle(row)">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path :d="expanded.has(row) ? 'M2 4l6 6 6-6H2z' : 'M4 2l6 6-6 6V2z'" fill="currentColor" />
+            </svg>
           </button>
+          <span v-else class="jchev" />
 
-          <span :style="indentStyle(tree?.depth[idx] ?? 0)" class="flex min-w-0 items-center gap-1.5">
-            <UiIcon
-              v-if="tree && isContainerKind(tree.kind[idx])"
-              :name="expanded.has(idx) ? 'chevronDown' : 'chevronRight'"
-              :size="12"
-              class="shrink-0 text-muted"
+          <!-- 下标（数组元素） -->
+          <span v-if="isArrayChild(row)" class="jidx">{{ arrayIndex(row) }}:</span>
+          <!-- 键（对象成员）；根节点没有键 -->
+          <template v-else-if="row > 0">
+            <input
+              v-if="isEditing(row, 'key')"
+              v-model="draft"
+              class="jedit jkey"
+              :style="{ width: draftWidth }"
+              spellcheck="false"
+              @click.stop
+              @input="onInput"
+              @keydown.enter.prevent="endEdit()"
+              @keydown.esc.prevent="cancelEdit()"
+              @blur="endEdit()"
             />
-            <span v-else class="w-3 shrink-0 text-center text-faint">·</span>
-            <span class="text-[color:var(--launcher-key)]" v-html="hl(tree?.key[idx] ?? '')" />
-            <span class="text-faint">:</span>
+            <span v-else class="jkey" @click.stop="beginEdit(row, 'key')">{{ tree?.key[row] }}</span>
+            <span class="jpunc">:</span>
+          </template>
+
+          <!-- 值 -->
+          <template v-if="isContainer(row)">
+            <span class="jpunc jbrack">{{ openChar(row) }}</span>
+            <span class="jlen">{{ tree?.count[row] }}</span>
+            <button class="jadd" title="添加成员" @click.stop="addTo(row)">+</button>
+            <span v-if="!expanded.has(row)" class="jpunc jbrack">{{ closeChar(row) }}</span>
+          </template>
+          <template v-else>
+            <input
+              v-if="isEditing(row, 'value')"
+              v-model="draft"
+              class="jedit jval"
+              :class="valueClass(tree?.kind[row] ?? 0)"
+              :style="{ width: draftWidth }"
+              spellcheck="false"
+              @click.stop
+              @input="onInput"
+              @keydown.enter.prevent="endEdit()"
+              @keydown.esc.prevent="cancelEdit()"
+              @blur="endEdit()"
+            />
             <span
-              v-if="tree && isContainerKind(tree.kind[idx])"
-              class="truncate text-muted"
-              v-html="hl(displayValue(idx))"
-            />
-            <span v-else :class="valueClass(tree?.kind[idx] ?? 0)" class="truncate" v-html="hl(displayValue(idx))" />
-          </span>
+              v-else
+              class="jval"
+              :class="valueClass(tree?.kind[row] ?? 0)"
+              @click.stop="beginEdit(row, 'value')"
+            >
+              {{ displayValue(row) }}
+            </span>
+            <span v-if="hasComma(row)" class="jpunc">,</span>
+          </template>
+        </template>
 
-          <span
-            v-if="tree"
-            class="launcher-kind ml-auto shrink-0 rounded px-1 py-[1px] text-[10px] leading-[13px]"
-            :class="[kindClass(tree.kind[idx]), matched?.matched.has(idx) ? 'ring-1 ring-accent' : '']"
-          >
-            {{ kindLabel(tree.kind[idx]) }}
-          </span>
-        </div>
+        <button v-if="row > 0" class="jdel" title="删除这个成员" @click.stop="removeAt(row)">删除</button>
       </div>
     </div>
   </div>

@@ -38,6 +38,9 @@ export interface FlatTree {
   start: Int32Array
   /** 值在源码中的结束偏移（独占，同 slice 的 end） */
   end: Int32Array
+  /** 键字面量在源码中的区间（数组元素与根节点为 -1）—— 行内改键要用它定位 */
+  keyStart: Int32Array
+  keyEnd: Int32Array
   /** 值起始位置所在的源码行号（1 起） */
   line: Int32Array
   nodeCount: number
@@ -52,7 +55,8 @@ export interface BuildTreeOptions {
   maxNodes?: number
 }
 
-const VALUE_PREVIEW = 300
+/** 标量值在树里保留的最大字符数（超过会被截断 ⇒ 不允许行内编辑） */
+export const VALUE_PREVIEW = 300
 const MAX_DEPTH = 512
 
 export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
@@ -70,6 +74,8 @@ export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
   const depth: number[] = []
   const start: number[] = []
   const endAt: number[] = []
+  const keyStart: number[] = []
+  const keyEnd: number[] = []
   const line: number[] = []
   let maxDepth = 0
   let truncated = false
@@ -87,9 +93,18 @@ export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
     return lineCursorLine
   }
 
-  function push(k: number, label: string, val: string, par: number, dep: number, from: number): number {
-    if (kind.length >= maxNodes) throw new JsonError(`节点数超过 ${maxNodes}，请改用文本视图`, from)
-    kind.push(k)
+  function push(
+    k: number,
+    label: string,
+    val: string,
+    par: number,
+    dep: number,
+    from: number, 
+    keyFrom = -1,
+    keyTo = -1,
+  ): number {
+    if (kind.length >= maxNodes) throw new JsonError(`节点数超过 ${maxNodes}，请改用文本视图`, from) 
+    kind.push(k) 
     key.push(label)
     value.push(val)
     preview.push('')
@@ -100,19 +115,28 @@ export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
     depth.push(dep)
     start.push(from)
     endAt.push(-1)
+    keyStart.push(keyFrom)
+    keyEnd.push(keyTo)
     line.push(lineOf(from))
     if (dep > maxDepth) maxDepth = dep
     return kind.length - 1
   }
 
-  function linkChild(par: number, child: number, last: number): number {
+  function linkChild(par: number, child: number, last: number): number { 
     if (last === -1) firstChild[par] = child
     else nextSibling[last] = child
     count[par]++
     return child
   }
 
-  function parseValue(from: number, dep: number, label: string, par: number): { end: number; idx: number } {
+  function parseValue(
+    from: number,
+    dep: number,
+    label: string,
+    par: number,
+    keyFrom = -1,
+    keyTo = -1,
+  ): { end: number; idx: number } {
     if (dep > MAX_DEPTH) throw new JsonError(`嵌套层级超过 ${MAX_DEPTH} 层`, from)
     let i = skipWs(text, from, lenient)
     if (i >= text.length) throw new JsonError('内容意外结束：这里需要一个值', i)
@@ -121,7 +145,7 @@ export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
 
     if (c === 123 || c === 91) {
       const isObj = c === 123
-      const idx = push(isObj ? KIND.object : KIND.array, label, '', par, dep, vstart)
+      const idx = push(isObj ? KIND.object : KIND.array, label, '', par, dep, vstart, keyFrom, keyTo)
       i++
       let last = -1
       let k = 0
@@ -144,16 +168,22 @@ export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
           }
         }
         let childLabel: string
+        let keyFrom = -1
+        let keyTo = -1
         if (isObj) {
           const kc = text.charCodeAt(i)
           if (kc === 34 || ((kc === 39 || kc === 96) && lenient)) {
             const r = scanString(text, i, lenient)
             childLabel = decodeString(r.raw)
+            keyFrom = i
+            keyTo = r.end
             i = r.end
           } else if (lenient) {
             const b = scanBareKey(text, i)
             if (!b) throw new JsonError('对象的键必须是字符串', i)
             childLabel = b
+            keyFrom = i
+            keyTo = i + b.length
             i += b.length
           } else {
             throw new JsonError('对象的键必须是双引号字符串', i)
@@ -164,7 +194,7 @@ export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
         } else {
           childLabel = `[${k}]`
         }
-        const child = parseValue(i, dep + 1, childLabel, idx)
+        const child = parseValue(i, dep + 1, childLabel, idx, keyFrom, keyTo)
         i = child.end
         last = linkChild(idx, child.idx, last)
         k++
@@ -175,7 +205,7 @@ export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
     }
 
     function scalar(k: number, val: string, to: number): number {
-      const idx = push(k, label, val, par, dep, vstart)
+      const idx = push(k, label, val, par, dep, vstart, keyFrom, keyTo)
       endAt[idx] = to
       return idx
     }
@@ -227,6 +257,8 @@ export function buildTree(text: string, opts: BuildTreeOptions = {}): FlatTree {
     depth: Int32Array.from(depth),
     start: Int32Array.from(start),
     end: Int32Array.from(endAt),
+    keyStart: Int32Array.from(keyStart),
+    keyEnd: Int32Array.from(keyEnd),
     line: Int32Array.from(line),
     nodeCount: kind.length,
     maxDepth,
@@ -245,57 +277,48 @@ export function childrenOf(tree: FlatTree, idx: number): number[] {
 }
 
 /**
- * 把树投影成「当前可见的行」。
+ * 把树投影成「当前可见的行」（先序）。
+ *
+ * 展开的容器在子节点之后追加一行**收尾括号**——行与节点不是一一对应，
+ * 所以编码进同一个 Int32Array：`>= 0` 是节点下标，`< 0` 是收尾行（对应容器 = `-row - 1`）。
+ * 这样一次投影仍是零对象分配，虚拟滚动只按行数算高度即可。
+ *
  * @param expanded 已展开的容器节点
- * @param visible  过滤命中的节点集合（含祖先），null 表示不过滤
  */
-export function projectRows(tree: FlatTree, expanded: Set<number>, visible: Set<number> | null): Int32Array {
+export function projectRows(tree: FlatTree, expanded: Set<number>): Int32Array {
   const out: number[] = []
   const { kind, firstChild, nextSibling } = tree
 
   function walk(idx: number) {
     out.push(idx)
     if (!isContainerKind(kind[idx]) || !expanded.has(idx)) return
-    for (let c = firstChild[idx]; c !== -1; c = nextSibling[c]) {
-      if (visible && !visible.has(c)) continue
-      walk(c)
-    }
+    for (let c = firstChild[idx]; c !== -1; c = nextSibling[c]) walk(c)
+    out.push(-idx - 1)
   }
 
-  if (!visible || visible.has(0)) walk(0)
+  walk(0)
   return Int32Array.from(out)
 }
 
-/** 键值模糊匹配：命中节点 + 其祖先 + 其后代（用于只显示命中的分支） */
-export function matchNodes(tree: FlatTree, query: string): { visible: Set<number>; matched: Set<number> } {
-  const q = query.toLowerCase()
-  const matched = new Set<number>()
-  const visible = new Set<number>()
-  for (let i = 0; i < tree.nodeCount; i++) {
-    const inKey = tree.key[i].toLowerCase().includes(q)
-    const inValue = !inKey && !!tree.value[i] && tree.value[i].toLowerCase().includes(q)
-    if (!inKey && !inValue) continue
-    matched.add(i)
-    visible.add(i)
-    let p = tree.parent[i]
-    while (p >= 0 && !visible.has(p)) {
-      visible.add(p)
-      p = tree.parent[p]
-    }
-  }
-  // 命中容器的后代也要显示，否则展开后是空的
-  for (const m of matched) {
-    if (!isContainerKind(tree.kind[m])) continue
-    const stack = [m]
-    while (stack.length) {
-      const cur = stack.pop() as number
-      for (let c = tree.firstChild[cur]; c !== -1; c = tree.nextSibling[c]) {
-        visible.add(c)
-        if (isContainerKind(tree.kind[c])) stack.push(c)
-      }
-    }
-  }
-  return { visible, matched }
+/** 收尾行 → 容器节点下标（普通行返回 -1） */
+export function closeRowNode(row: number): number {
+  return row < 0 ? -row - 1 : -1
+}
+
+/** 容器里最后一个成员（空容器返回 -1） */
+export function lastChildOf(tree: FlatTree, idx: number): number {
+  let last = -1
+  for (let c = tree.firstChild[idx]; c !== -1; c = tree.nextSibling[c]) last = c
+  return last
+}
+
+/** 节点在父容器里的序号（数组下标 / 第几个成员）；根返回 -1 */
+export function indexInParent(tree: FlatTree, idx: number): number {
+  const parent = tree.parent[idx]
+  if (parent < 0) return -1
+  let n = 0
+  for (let c = tree.firstChild[parent]; c !== -1 && c !== idx; c = tree.nextSibling[c]) n++
+  return n
 }
 
 /** 从根到该节点的祖先链（不含自身） */

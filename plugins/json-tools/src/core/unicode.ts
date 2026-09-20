@@ -13,12 +13,23 @@ export interface UnicodeResult {
   changed: number
 }
 
+export interface EscapeOptions {
+  /**
+   * 转义范围：
+   * - `nonAscii`（默认）所有非 ASCII 与裸控制字符，最彻底（含 emoji / 重音字母）；
+   * - `cjk` 只转 `[\u4e00-\u9fa5]` 汉字 —— 与 bejson 的「中文转Unicode」逐字一致。
+   */
+  only?: 'nonAscii' | 'cjk'
+}
+
 function hex4(code: number): string {
   return '\\u' + code.toString(16).padStart(4, '0')
 }
 
 /** 把字符串内部的非 ASCII（含裸控制字符）转成 `\uXXXX`；代理对按两个 code unit 各自转义 */
-export function escapeUnicode(text: string): UnicodeResult {
+export function escapeUnicode(text: string, opts: EscapeOptions = {}): UnicodeResult {
+  const only = opts.only ?? 'nonAscii'
+  const hit = (c: number) => (only === 'cjk' ? c >= 0x4e00 && c <= 0x9fa5 : c > 126 || c < 32)
   let out = ''
   let changed = 0
   let inString = false
@@ -46,7 +57,7 @@ export function escapeUnicode(text: string): UnicodeResult {
       out += ch
       continue
     }
-    if (c > 126 || c < 32) {
+    if (hit(c)) {
       out += hex4(c)
       changed++
       continue
