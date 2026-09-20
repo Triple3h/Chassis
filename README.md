@@ -106,6 +106,7 @@ pnpm dev          # 内核（standalone）+ UI（vite dev，HMR）
 - **插件**：除 3 个底座基础能力（`app-launcher` / `file-search` / `internal-settings`）外的出厂插件都可被覆盖更新；来源是固定 tag `plugins-latest` 的 GitHub Release，不接受自定义源。契约与发版流程见 [`docs/plugin-spec.md`](docs/plugin-spec.md) §6.4 与附录 C。
 - **内核**：固定 tag `kernel-latest`，内核 + UI 同包更新、优雅重启；打包版内核以数据目录外置副本运行，不触碰 App 的代码签名。机制与边界见 [`docs/kernel-hot-update.md`](docs/kernel-hot-update.md)。
 - **应用（壳）**：固定 tag `app-latest`，整包替换——**自动检查并在托盘菜单与「关于」页提示新版本，由你决定何时更新**（更新页也可手动更新）；候选包先跑 `--hot-probe` 自检，连续两次启动未就绪自动回滚。仅 macOS（Windows 的运行中 exe 无法替换，走安装包）。机制与签名前提见 [`docs/shell-hot-update.md`](docs/shell-hot-update.md)。
+- **资产保留**：三个固定 tag 的 Release 在发布收尾**只保留索引指向的最新包**（CI 自动清理旧版本 zip），不会越积越多——历史版本包请从 `v*` 的正式 Release 获取。
 
 ## 写插件
 

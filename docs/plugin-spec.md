@@ -486,6 +486,11 @@ active → crashed（页面崩溃 / 脚本连续失败）→ 可重试
 | 平台 | **仅 macOS**（Windows 的运行中 exe 无法替换 ⇒ 索引里没有 windows 资产，客户端不提示） |
 | 版本门槛 | 索引带 `minShellHotVersion`：壳自更新机制低于它 ⇒ 界面提示但不给「更新」按钮 |
 
+**资产保留策略（三条固定 tag 通道共同）**：发布收尾**只保留索引指向的最新资产** —— CI 在
+`action-gh-release` 之后跑 `scripts/prune-release-assets.mjs`，删掉同一个 Release 里索引不再指向的 `.zip`
+（zip 文件名带版本号、覆盖上传只认同名 ⇒ 旧包会变成孤儿；单 Release 上限 1000 个资产，攒满后发布会中断）。
+客户端下载 URL 全部来自索引，索引里没有的 zip 没有合法消费方，删除不影响已安装客户端。
+
 ---
 
 ## 7. 宿主 API（UI 侧）

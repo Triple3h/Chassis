@@ -45,6 +45,7 @@ Three channels, each pinned to its own fixed tag; clients read plain `releases/d
 - An App upgrade resets the baseline: the shell re-deploys the bundled kernel into `<dataRoot>/kernel/` (ledger `kernel.json` records `sourceAppVersion`), so kernel hot-updates lead only *between* App releases. The same applies to a **shell auto-update** (its version always changes) — expect the bundled kernel to be re-deployed right after.
 - App auto-update packages are signed in CI with the **same fixed certificate as local builds** (`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD` secrets; export via `node scripts/export-signing-cert.mjs`). Without those secrets the workflow falls back to ad-hoc and every update forces the user to re-grant TCC permissions (Accessibility / Screen Recording).
 - Partial plugin releases **must merge the previous `registry.json`** (`gen-plugin-registry.mjs --merge-registry`, done automatically by `plugins-release.yml`). Without it the index lists only the plugins packed in that run and every other plugin silently stops updating — guarded by `tests/unit/plugin-registry-merge.test.ts`.
+- Fixed-tag releases keep **only the assets the current index points to**: after `action-gh-release`, each publish workflow runs `scripts/prune-release-assets.mjs` (deletes `.zip` assets missing from the freshly generated index). Without it every version leaves orphan zips behind (zip names carry versions; `overwrite_files` only overwrites same names) — a release caps at 1000 assets, and hitting that cap breaks publishing.
 
 ## Coding Style & Naming Conventions
 

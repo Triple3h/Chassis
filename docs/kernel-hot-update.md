@@ -131,6 +131,10 @@ curl -X POST http://127.0.0.1:<kernelPort>/api/hot/rollback -d '{}' -H 'Content-
 内核与插件**各自独立**监控自己的 Release 通道（2026-09-18 拍板）：App 用 `v*`、插件用 `plugins-latest`、
 内核用 **`kernel-latest`** —— 三个 tag 互不干扰，客户端走 `releases/download/<tag>/...` 直链（无需 GitHub API、无 token）。
 
+> 发布收尾会**只保留索引指向的资产**：`kernel-release.yml` 在 `action-gh-release` 之后跑
+> `scripts/prune-release-assets.mjs`，把同一个 Release 里索引不再指向的旧 `.zip` 删掉
+> （zip 名带版本号、覆盖上传只认同名 ⇒ 不清理会积累孤儿；单 Release 上限 1000 个资产，攒满 = 发布中断）。
+
 ```
 kernel-release.yml ──macOS + Windows 原生构建──▶ 固定 tag kernel-latest
   ├── kernel-registry.json                          索引：schema 1 / version / hotVersion / minHotVersion / assets[]

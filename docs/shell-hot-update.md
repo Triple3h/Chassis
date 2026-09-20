@@ -20,6 +20,10 @@ GitHub Action 发版后**自动检查并在托盘菜单与「关于」页提示�
 | 内核 | `kernel-latest` | `kernel-registry.json` + 内核 zip | 「更新」页 → 内核 |
 | **应用（壳）** | **`app-latest`** | **`app-registry.json` + `Chassis-<版本>-macos-<架构>.zip`** | **自动检查 → 托盘菜单 / 「关于」页提示 + 「更新」页 → 应用** |
 
+> 三条固定 tag 通道（`app-latest` / `kernel-latest` / `plugins-latest`）发布时会**只保留索引指向的资产**：
+> 工作流在 `action-gh-release` 之后跑 `scripts/prune-release-assets.mjs`，清掉同名覆盖没带走的旧 `.zip`
+> （不清理会无限积累孤儿；单 Release 上限 1000 个资产，攒满 = 发布中断）。
+
 索引（schema 1）与内核那份同形：
 
 ```json

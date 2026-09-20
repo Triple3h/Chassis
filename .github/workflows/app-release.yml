@@ -140,3 +140,10 @@ jobs:
             安装由 `internal-store` 的「更新应用」发起：下载 → sha256 校验 → 解压 →
             `pluginAction('applyShellUpdate')` → 壳校验候选包（`--hot-probe`）→ 备份 → 独立 helper 替换 →
             重新打开；新版本连续两次启动未就绪会自动回滚。
+
+      # 同 release 里只保留本次索引指向的 zip（理由同 plugins-release.yml 的同名步骤）：
+      # 每次自更新都会打出新文件名的 zip，不清理就会在 app-latest 里无限积累
+      - name: 清理旧版本资产（只保留索引指向的最新包）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/prune-release-assets.mjs --tag app-latest --registry app/release/app-registry.json

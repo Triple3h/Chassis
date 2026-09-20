@@ -112,3 +112,9 @@ jobs:
 
             安装由 `internal-store` 的「内核更新」发起：下载 → sha256 校验 → 解压 →
             `POST /api/hot/binary`（备份 + 原子替换 + 优雅重启）；新内核连续两次启动未就绪会自动回滚。
+
+      # 同 release 里只保留本次索引指向的 zip（理由同 plugins-release.yml 的同名步骤）
+      - name: 清理旧版本资产（只保留索引指向的最新包）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/prune-release-assets.mjs --tag kernel-latest --registry kernel/release/kernel-registry.json

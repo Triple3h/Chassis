@@ -130,3 +130,10 @@ jobs:
             - `<id>-<版本>-<平台>-<架构>.zip`：插件包（逻辑层是原生产物 ⇒ 按平台分别构建）
 
             出厂基础插件（app-launcher / file-search / internal-settings）不在此列：它们随 App 包发布。
+
+      # 同 release 里只保留本次索引指向的 zip：zip 名带版本号、action-gh-release 只覆盖同名文件，
+      # 不清理的话每发一版都会留下孤儿资产（单 release 上限 1000 assets，攒满 = 发布中断）
+      - name: 清理旧版本资产（只保留索引指向的最新 zip）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/prune-release-assets.mjs --tag plugins-latest --registry plugins/release/registry.json
