@@ -82,11 +82,22 @@ pnpm app:local   # 2. 重新打包（tray.png 走 include_bytes! ⇒ 换图标�
 
 互不干扰：App `v*`、应用自更新 `app-latest`、内核 `kernel-latest`、插件 `plugins-latest`（客户端走 `releases/download/<tag>/…` 直链，不调 GitHub API）。**CI 不监控 main**（`verify.yml` 的 push 忽略 main），发版一律显式触发；`workflow_dispatch` 取**默认分支代码** ⇒ 先合并 main 再触发。
 
+**版本只改一处**：根 `version.json`（`app` = 应用/壳、`kernel` = 内核）——
+
+```bash
+pnpm version:set app 0.1.4      # 同步 tauri.conf.json + shell/Cargo.toml
+pnpm version:set kernel 0.1.4   # 同步 kernel/Cargo.toml（整包发布时一般同号）
+pnpm version:check              # 校验三处位点一致（发版 workflow 里也会跑）
+```
+
+**别手改** `tauri.conf.json` / `Cargo.toml` 里的 version 字段（漂移 ⇒ 客户端判不出新版本，自更新静默失效）；
+机制版本（`SHELL_HOT_VERSION` / `HOT_UPDATE_VERSION`）与插件版本**不在**清单里，各自独立演进。
+
 | 只发什么 | 怎么做 | 客户端怎么拿到 |
 |---|---|---|
-| App（壳）手动换包 | `git tag v0.2.0 && git push origin v0.2.0` → `release.yml` | 用户手动换包（新机器 / 关掉自动更新时用） |
-| App（壳）自更新 | bump `apps/shell/tauri.conf.json` 的 version → `gh workflow run app-release.yml --ref main -f notes="…"`（或推 tag `app/*`） | **自动**：内核守护（启动 90s 后 / 每 6h）发现新版 → 下载 → 空闲时壳换掉 `.app` 并整体重启；也可在更新页「应用」区手动点。仅 macOS |
-| 内核 | bump `apps/kernel/Cargo.toml` 版本 → `gh workflow run kernel-release.yml --ref main -f notes="…" [-f min_hot_version=…]`（或推 tag `kernel/*`） | 更新页「内核」区 → 更新内核（热替换 + 优雅重启内核，不动 App） |
+| App（壳）手动换包 | `git tag v0.2.0 && git push origin v0.2.0` → `release.yml` | 用户手动换包（新机器 / 关掉自动检查时用） |
+| App（壳）自更新 | `pnpm version:set app 0.1.4` → `gh workflow run app-release.yml --ref main -f notes="…"`（或推 tag `app/*`） | **检查并提示**：内核守护（启动 90s 后 / 每 6h）只检查，新版本在**托盘菜单**与「关于」页提示 → 用户确认后下载、替换、整体重启；更新页「应用」区也可手动点。仅 macOS |
+| 内核 | `pnpm version:set kernel 0.1.4` → `gh workflow run kernel-release.yml --ref main -f notes="…" [-f min_hot_version=…]`（或推 tag `kernel/*`） | 更新页「内核」区 → 更新内核（热替换 + 优雅重启内核，不动 App） |
 | 插件 | bump 插件 `package.json` 版本 → `gh workflow run plugins-release.yml --ref main [-f plugins="<id>"]`（或推 tag `plugins/*`） | 更新页插件列表 → 更新（热重载，不动 App） |
 
 四条硬规矩：

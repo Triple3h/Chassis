@@ -52,16 +52,13 @@ pub const RECORD_COMMAND: &str = "record";
 /// `record` 的超时：读一次剪贴板 + 落盘，5s 足够（默认 10s 会让异常插件多占一个进程槽）
 const RECORD_TIMEOUT_MS: u64 = 5_000;
 
-/// 应用（壳）自动更新的检查通道插件：下载 / 代理降级 / 白名单 / sha256 全在它那侧。
+/// 应用（壳）更新的通道插件：检查索引 / 下载 / 代理降级 / 白名单 / sha256 全在它那侧。
 const APP_UPDATE_STORE_PLUGIN: &str = "internal-store";
 
 /// 启动后先等这么久再查第一次：把启动时的 IO / 网络让给窗口与插件加载。
 const APP_UPDATE_FIRST_DELAY: std::time::Duration = std::time::Duration::from_secs(90);
 /// 之后的检查间隔：应用更新不是急事，一天几轮足够。
 const APP_UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
-/// 下载完成后最多等这么久才重启：等窗口收起（用户已接受自动重启，这里只是给「正在输入」让路）。
-const APP_UPDATE_QUIET_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
-const APP_UPDATE_QUIET_POLL: std::time::Duration = std::time::Duration::from_secs(5);
 /// 交给 internal-store 命令的超时：索引 30s；下载（十几 MB）给 3 分钟。
 const APP_UPDATE_CHECK_TIMEOUT_MS: u64 = 30_000;
 const APP_UPDATE_DOWNLOAD_TIMEOUT_MS: u64 = 180_000;
@@ -113,6 +110,13 @@ pub struct Kernel {
     started: AtomicBool,
     /// 剪贴板监听的**当前实际状态**（plugin-spec §8.1）：幂等地开/关，避免每次插件变动都打扰壳
     clipboard_watch: AtomicBool,
+    /// 应用（壳）更新提示（`check_app_update` 的检查结果）：
+    /// `None` = 无新版本 / 尚未检查；`Some` = 有新版本**待用户确认**
+    /// （托盘菜单与「关于」页据此提示）。更新绝不自动执行 ——
+    /// 下载 / 替换 / 重启只在用户从托盘或「关于」页确认后发生。
+    app_update: std::sync::RwLock<Option<Value>>,
+    /// 应用更新执行中（防重入：托盘与「关于」页可能同时触发）
+    app_update_busy: AtomicBool,
 }
 
 /// 管理面特权服务的宿主实现（v1 `services/settingsHost.ts`）。
@@ -332,7 +336,7 @@ impl Kernel {
                     on_changed: Arc::new(move || {
                         if let Some(kernel) = weak_for_changed.upgrade() {
                             // 托盘菜单随插件状态刷新（v1 的 `onChanged: () => void this.registerTray()`）
-                            tokio::spawn(async move { kernel.register_tray().await });
+                            tokio::spawn(async move { kernel.refresh_tray().await });
                         }
                     }),
                 }))
@@ -471,6 +475,8 @@ impl Kernel {
                 quitting: AtomicBool::new(false),
                 started: AtomicBool::new(false),
                 clipboard_watch: AtomicBool::new(false),
+                app_update: std::sync::RwLock::new(None),
+                app_update_busy: AtomicBool::new(false),
             }
         })
     }
@@ -759,7 +765,7 @@ impl Kernel {
             }));
         }
 
-        self.register_tray().await;
+        self.refresh_tray().await;
         self.apply_hotkey(&config).await;
         if config.autostart {
             let _ = self.primitives.set_autostart(true).await;
@@ -770,8 +776,9 @@ impl Kernel {
 
         self.log("info", &format!("内核就绪：UI http://127.0.0.1:{}，数据目录 {}", self.ui_port(), self.data_root()));
 
-        // 应用（壳）自更新的后台守护：启动 90s 后查一次，之后每 6h 一轮（默认开，见 config.autoUpdateApp）
-        self.spawn_app_update_watch();
+        // 应用（壳）更新的检查守护：启动 90s 后查一次，之后每 6h 一轮。
+        // **只检查并提示**（托盘 + 「关于」页），更新由用户手动确认（默认开，见 config.autoUpdateCheck）
+        self.spawn_app_update_check();
         Ok(())
     }
 
@@ -1232,6 +1239,17 @@ impl Kernel {
         if action == "shellInfo" {
             return Ok(self.shell_info().await);
         }
+        // 应用更新提示（托盘菜单与「关于」页共用这一组）：读状态 / 手动检查 / 用户确认后执行。
+        // **一律不自动执行**：检查只负责把「有新版本」摆在用户面前，下载与替换都等用户确认。
+        if action == "appUpdateStatus" {
+            return Ok(self.app_update_status());
+        }
+        if action == "checkAppUpdate" {
+            return self.check_app_update().await;
+        }
+        if action == "applyAppUpdate" {
+            return self.apply_app_update().await;
+        }
         let result = self.admin.run(action, payload).await;
         // 启用 / 禁用 / 安装 / 卸载都会改变「谁在订阅剪贴板」
         self.sync_clipboard_watch().await;
@@ -1313,10 +1331,11 @@ impl Kernel {
         }
     }
 
-    /// 应用（壳）自更新（`internal-store` 的「更新应用」发起）：把候选 `.app` 交给壳。
+    /// 应用（壳）自更新（更新页的「更新应用」、托盘与「关于」页的确认更新都汇到这条）：
+    /// 把候选 `.app` 交给壳。
     ///
-    /// 与内核对侧的分工：下载 / 校验 / 解压在逻辑层（`internal-store` 的 `download-app`），
-    /// 校验候选包 / 备份 / 替换 / 重启在壳侧。壳会在回执之后退出重启 ——
+    /// 与内核对侧的分工：下载 / 校验 / 解压在逻辑层（`internal-store` 的 `download-app`，
+    /// 审计因此记在它名下），校验候选包 / 备份 / 替换 / 重启在壳侧。壳会在回执之后退出重启 ——
     /// **内核跟着一起重启**（壳退出会停掉内核，新壳再拉起新内核），所以这里不需要额外收尾。
     async fn apply_shell_update(self: &Arc<Self>, payload: &Value) -> Result<Value> {
         let app_path = payload
@@ -1328,33 +1347,33 @@ impl Kernel {
         Ok(result)
     }
 
-    /// 应用（壳）自更新的后台守护：启动后延迟查一次，之后每 6 小时一轮。
+    /// 应用（壳）更新**检查**的后台守护：启动后延迟查一次，之后每 6 小时一轮。
     ///
-    /// 分工与手动链路**完全同一套**：
-    ///  - 检查 / 下载 / 解压 → `internal-store` 的 `update` 命令（内核进程内 `exec.run`，
-    ///    与剪贴板 `record` 同一条路子；代理降级 / 域名白名单 / sha256 都在那一侧）；
-    ///  - 校验候选包 / 备份 / 替换 / 重启 → 壳（唯一能替换自己的角色）。
+    /// 只检查、只提示（托盘菜单 + 「关于」页）——**不下载、不替换、不重启**：
+    /// 更新由用户在托盘或「关于」页确认后才执行（`apply_app_update`）。
+    /// 分工与手动链路完全同一套：检查走 `internal-store` 的 `check-app`（代理降级 /
+    /// 域名白名单都在那一侧），替换与回滚在壳侧。
     ///
-    /// 静默跳过（不报错）的情况：用户关了 `autoUpdateApp`、通道插件被禁用或没有产物、
+    /// 静默跳过（不报错）的情况：用户关了 `autoUpdateCheck`、通道插件被禁用、
     /// 壳不在可自更新状态（开发态 / 只读安装位置 / 非 macOS）、没有新版本。
-    /// 任何一步失败只记一行日志、等下一轮 —— 后台任务不该刷屏，也不该重试到把网络打满。
-    pub fn spawn_app_update_watch(self: &Arc<Self>) {
+    /// 检查失败只记一行日志、等下一轮 —— 后台任务不该刷屏，也不该重试到把网络打满。
+    pub fn spawn_app_update_check(self: &Arc<Self>) {
         let kernel = Arc::clone(self);
         tokio::spawn(async move {
             tokio::time::sleep(APP_UPDATE_FIRST_DELAY).await;
             loop {
-                if let Err(err) = kernel.try_app_update().await {
-                    crate::log_warn!("应用自动更新跳过：{}", err.message);
+                if let Err(err) = kernel.try_check_app_update().await {
+                    crate::log_warn!("应用更新检查跳过：{}", err.message);
                 }
                 tokio::time::sleep(APP_UPDATE_INTERVAL).await;
             }
         });
     }
 
-    /// 一轮「检查 → 下载 → 应用」。`Ok` 表示这轮处理结束（含「无事可做」）。
-    async fn try_app_update(self: &Arc<Self>) -> Result<()> {
+    /// 一轮自动检查（守护路径）：受 `autoUpdateCheck` 配置与前置条件约束；「无事可做」不是错误。
+    async fn try_check_app_update(self: &Arc<Self>) -> Result<()> {
         let config = self.config.get();
-        if !config.auto_update_app {
+        if !config.auto_update_check {
             return Ok(());
         }
         if config.disabled.iter().any(|id| id == APP_UPDATE_STORE_PLUGIN) {
@@ -1363,15 +1382,28 @@ impl Kernel {
         if self.exec.resolve_entry(APP_UPDATE_STORE_PLUGIN, "update").is_none() {
             return Ok(());
         }
+        self.check_app_update().await.map(|_| ())
+    }
+
+    /// 检查应用更新（守护与「关于」页的「检查更新」共用）。
+    ///
+    /// 只做三件事：问壳（版本 / 能否自更新）→ 查索引 → 把结果缓存进 `app_update`
+    /// 并刷新托盘提示。**不下载** —— 下载在用户确认后的 `run_app_update` 里。
+    /// 返回提示状态（与 `app_update_status` 同形状）；壳不可用 / 不可自更新这类**正常**情况
+    /// 以 `available: false` + `reason` 表达；索引 / 网络等**失败**以 `Err` 表达 ——
+    /// 「关于」页的手动检查要让用户看到失败，守护路径会吞掉并记日志。
+    pub async fn check_app_update(self: &Arc<Self>) -> Result<Value> {
         // 壳自己知道版本 / 安装位置 / 能不能自更新（开发态与只读位置在这里被挡掉）
-        let Some(info) = self.primitives.shell_info().await else { return Ok(()) };
+        let Some(info) = self.primitives.shell_info().await else {
+            return Ok(self.set_app_update_hint(None, "shell-unavailable").await);
+        };
         if info.get("canSelfUpdate").and_then(Value::as_bool) != Some(true) {
-            return Ok(());
+            return Ok(self.set_app_update_hint(None, "not-self-updatable").await);
         }
         let current = info.get("shellVersion").and_then(Value::as_str).unwrap_or_default().to_string();
         let hot = info.get("shellHotVersion").and_then(Value::as_str).unwrap_or_default().to_string();
         if current.is_empty() {
-            return Ok(());
+            return Ok(self.set_app_update_hint(None, "no-version").await);
         }
 
         let checked = self
@@ -1385,23 +1417,111 @@ impl Kernel {
             .await?;
         if checked.get("ok").and_then(Value::as_bool) != Some(true) {
             let detail = checked.get("error").and_then(Value::as_str).unwrap_or("索引不可用");
-            crate::log_warn!("应用自动更新：检查失败（{detail}）");
-            return Ok(());
+            // 手动路径（「关于」页）要把失败暴露给用户；守护路径会吞掉并记日志 ——
+            // 「查不动」绝不能伪装成「已是最新」。
+            return Err(KernelError::new("UPDATE_CHECK_FAILED", detail.to_string()));
         }
-        let Some(update) = checked.get("update").filter(|value| !value.is_null()) else {
-            // 绝大多数轮次都停在这里：已是最新
-            return Ok(());
-        };
-        let latest = update.get("latest").and_then(Value::as_str).unwrap_or_default().to_string();
-        if update.get("hotOk").and_then(Value::as_bool) == Some(false) {
-            self.log(
-                "warn",
-                &format!("应用有新版本 {latest}，但当前壳的自更新机制版本过低：请手动换包（App 通道 v*）"),
-            );
-            return Ok(());
-        }
-        self.log("info", &format!("应用有新版本 {current} → {latest}：开始下载"));
 
+        // 缓存精简后的提示信息（asset 等下载细节不存：用户确认后会重新按索引下载）。
+        // hotOk=false 也照常提示：由「关于」页显示「需手动换包」，而不是静默吞掉。
+        let hint = checked.get("update").filter(|value| !value.is_null()).map(|update| {
+            json!({
+                "current": update.get("current").cloned().unwrap_or(Value::Null),
+                "latest": update.get("latest").cloned().unwrap_or(Value::Null),
+                "notes": update.get("notes").cloned().unwrap_or(Value::Null),
+                "hotOk": update.get("hotOk").cloned().unwrap_or(Value::Bool(true)),
+                "checkedAt": crate::util::now_ms(),
+            })
+        });
+        if let Some(update) = &hint {
+            let latest = update.get("latest").and_then(Value::as_str).unwrap_or_default();
+            if update.get("hotOk").and_then(Value::as_bool) == Some(false) {
+                self.log(
+                    "warn",
+                    &format!("应用有新版本 {latest}，但当前壳的自更新机制版本过低：请手动换包（App 通道 v*）"),
+                );
+            } else {
+                self.log("info", &format!("应用有新版本 {current} → {latest}（等待用户确认更新）"));
+            }
+        }
+        Ok(self.set_app_update_hint(hint, "ok").await)
+    }
+
+    /// 落提示状态 + 刷新托盘。
+    ///
+    /// 幂等考虑：检查是每 6h 一轮的常规动作，**状态没变就不重发菜单** ——
+    /// 反复重设托盘菜单会让 macOS 的菜单在展开时闪烁。
+    async fn set_app_update_hint(self: &Arc<Self>, hint: Option<Value>, reason: &str) -> Value {
+        let changed = {
+            let mut guard = match self.app_update.write() {
+                Ok(guard) => guard,
+                Err(_) => return self.app_update_status(),
+            };
+            let changed = guard.as_ref().map(|value| value.get("latest")) != hint.as_ref().map(|value| value.get("latest"));
+            *guard = hint;
+            changed
+        };
+        if changed {
+            self.refresh_tray().await;
+        }
+        let mut status = self.app_update_status();
+        if let Some(object) = status.as_object_mut() {
+            object.insert("reason".to_string(), Value::String(reason.to_string()));
+        }
+        status
+    }
+
+    /// 更新提示的当前状态（只读缓存，不触发检查）——「关于」页与托盘共用。
+    pub fn app_update_status(&self) -> Value {
+        let busy = self.app_update_busy.load(Ordering::SeqCst);
+        match self.app_update.read().ok().and_then(|guard| guard.clone()) {
+            Some(update) => {
+                let mut value = update;
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("available".to_string(), Value::Bool(true));
+                    object.insert("busy".to_string(), Value::Bool(busy));
+                }
+                value
+            }
+            None => json!({ "available": false, "busy": busy }),
+        }
+    }
+
+    /// 执行应用更新（**用户确认后**才走到这里）：下载 → 交壳替换 → 重启整个应用。
+    ///
+    /// 与更新页的手动链路同一套（下载 / 校验在 `internal-store`，替换 / 回滚在壳的 helper）；
+    /// 差别只在触发者（托盘 / 「关于」页 / 更新页的按钮）。执行中先把托盘菜单标成
+    /// 「正在更新…」；失败复位 busy 并恢复提示（下载 / 校验失败发生在落盘之前，
+    /// 替换失败由壳侧回滚兜底 —— 任何失败都保持旧版本原样）。
+    pub async fn apply_app_update(self: &Arc<Self>) -> Result<Value> {
+        if self.app_update_busy.swap(true, Ordering::SeqCst) {
+            return Err(KernelError::bad_args("应用更新已在进行中"));
+        }
+        self.refresh_tray().await;
+        let result = self.run_app_update().await;
+        if let Err(err) = &result {
+            self.app_update_busy.store(false, Ordering::SeqCst);
+            self.refresh_tray().await;
+            self.log("warn", &format!("应用更新失败：{}", err.message));
+        }
+        result
+    }
+
+    /// 下载 + 交壳（`apply_app_update` 的主体；成功路径上壳会退出重启，本进程随之结束）。
+    async fn run_app_update(self: &Arc<Self>) -> Result<Value> {
+        let Some(info) = self.primitives.shell_info().await else {
+            return Err(KernelError::new("UPDATE_FAILED", "壳未连接：无法自更新"));
+        };
+        if info.get("canSelfUpdate").and_then(Value::as_bool) != Some(true) {
+            return Err(KernelError::new("UPDATE_FAILED", "当前壳不可自更新（开发态 / 只读安装位置 / 非 macOS）"));
+        }
+        let current = info.get("shellVersion").and_then(Value::as_str).unwrap_or_default().to_string();
+        let hot = info.get("shellHotVersion").and_then(Value::as_str).unwrap_or_default().to_string();
+        if current.is_empty() {
+            return Err(KernelError::new("UPDATE_FAILED", "拿不到壳版本"));
+        }
+
+        self.log("info", "应用更新（用户确认）：开始下载…");
         let downloaded = self
             .exec
             .run(
@@ -1413,30 +1533,14 @@ impl Kernel {
             .await?;
         if downloaded.get("ok").and_then(Value::as_bool) != Some(true) {
             let detail = downloaded.get("error").and_then(Value::as_str).unwrap_or("下载失败");
-            crate::log_warn!("应用自动更新：下载失败（{detail}）");
-            return Ok(());
+            return Err(KernelError::new("UPDATE_FAILED", detail.to_string()));
         }
         let Some(app_path) = downloaded.get("appPath").and_then(Value::as_str) else {
-            return Ok(());
+            return Err(KernelError::new("UPDATE_FAILED", "下载结果缺少 appPath"));
         };
-
-        // 等一个安静的时刻再重启：用户正在输入时窗口是可见的，这是我们唯一的「空闲」信号
-        self.wait_for_quiet().await;
-        self.log("info", &format!("应用更新就绪：正在重启换上 v{latest}（{app_path}）"));
-        self.apply_shell_update(&json!({ "appPath": app_path })).await?;
-        Ok(())
-    }
-
-    /// 等窗口不处于「可见」状态（最多 `APP_UPDATE_QUIET_WAIT`）。
-    /// 问不到可见性（壳未连接等）⇒ 直接放行：更新本来就由壳执行，链路上它一定在。
-    async fn wait_for_quiet(&self) {
-        let started = std::time::Instant::now();
-        while self.primitives.is_visible().await == Some(true) {
-            if started.elapsed() >= APP_UPDATE_QUIET_WAIT {
-                return;
-            }
-            tokio::time::sleep(APP_UPDATE_QUIET_POLL).await;
-        }
+        let latest = downloaded.get("version").and_then(Value::as_str).unwrap_or_default().to_string();
+        self.log("info", &format!("应用更新就绪：正在重启换上 v{latest}"));
+        self.apply_shell_update(&json!({ "appPath": app_path })).await
     }
 
     // ── 剪贴板监听（plugin-spec §8.1）───────────────────────────
@@ -1513,21 +1617,26 @@ impl Kernel {
     }
 
     /// 托盘菜单由内核提供（便于插件加项），壳只负责渲染。
-    pub async fn register_tray(&self) {
-        let items = json!([
-            { "id": "show", "label": "唤出启动台" },
-            { "id": "separator-1", "label": "", "type": "separator" },
-            { "id": "settings", "label": "设置…" },
-            { "id": "plugins", "label": "插件管理…" },
-            { "id": "reload", "label": "重载全部插件" },
-            { "id": "separator-2", "label": "", "type": "separator" },
-            { "id": "quit", "label": "退出" },
-        ]);
-        let _ = self.primitives.set_tray_menu(items).await;
+    ///
+    /// 有应用更新待确认时，菜单顶部插入「更新到 vX.Y.Z…」——点击即执行
+    /// （`handle_tray_menu("app-update")`）；执行中该项变「正在更新…」并禁用。
+    /// 这是「不自动更新」后的提示入口之一（另一个是「关于」页的更新提示）。
+    pub async fn refresh_tray(&self) {
+        let update = self.app_update.read().ok().and_then(|guard| guard.clone());
+        let items = tray_items(update.as_ref(), self.app_update_busy.load(Ordering::SeqCst));
+        let _ = self.primitives.set_tray_menu(Value::Array(items)).await;
     }
 
     pub async fn handle_tray_menu(self: &Arc<Self>, id: &str) {
         match id {
+            "app-update" => {
+                // 用户确认执行更新：下载 + 交壳可能花上几十秒 —— 放到后台任务里，
+                // 别堵住托盘点击的处理路径（这条通知之后还有别的消息要处理）。
+                let kernel = Arc::clone(self);
+                tokio::spawn(async move {
+                    let _ = kernel.apply_app_update().await;
+                });
+            }
             "show" => {
                 let _ = self.show_window_animated(true).await;
             }
@@ -1548,6 +1657,33 @@ impl Kernel {
             _ => {}
         }
     }
+}
+
+/// 托盘菜单 items：应用更新**待确认 / 执行中**时在顶部插入一项（点击 = 用户确认更新）。
+///
+/// 抽成纯函数是为了单测 —— 这是「不自动更新」策略的主要提示入口，错一天用户就看不到更新。
+fn tray_items(update: Option<&Value>, busy: bool) -> Vec<Value> {
+    let mut items: Vec<Value> = Vec::new();
+    match (busy, update) {
+        (true, _) => {
+            items.push(json!({ "id": "app-update", "label": "正在更新应用…（完成后自动重启）", "enabled": false }));
+            items.push(json!({ "id": "sep-update", "label": "", "type": "separator" }));
+        }
+        (false, Some(update)) => {
+            let latest = update.get("latest").and_then(Value::as_str).unwrap_or_default();
+            items.push(json!({ "id": "app-update", "label": format!("更新到 v{latest}…") }));
+            items.push(json!({ "id": "sep-update", "label": "", "type": "separator" }));
+        }
+        (false, None) => {}
+    }
+    items.push(json!({ "id": "show", "label": "唤出启动台" }));
+    items.push(json!({ "id": "separator-1", "label": "", "type": "separator" }));
+    items.push(json!({ "id": "settings", "label": "设置…" }));
+    items.push(json!({ "id": "plugins", "label": "插件管理…" }));
+    items.push(json!({ "id": "reload", "label": "重载全部插件" }));
+    items.push(json!({ "id": "separator-2", "label": "", "type": "separator" }));
+    items.push(json!({ "id": "quit", "label": "退出" }));
+    items
 }
 
 fn platform_string() -> String {
@@ -1574,4 +1710,34 @@ fn url_encode(value: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(items: &[Value]) -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|item| item.get("id").and_then(Value::as_str).map(str::to_string))
+            .collect()
+    }
+
+    /// 托盘是「不自动更新」策略的主提示入口：无提示不打扰、有提示置顶带版本号、执行中禁点。
+    #[test]
+    fn tray_items_surface_update_only_when_needed() {
+        let idle = tray_items(None, false);
+        assert!(!ids(&idle).contains(&"app-update".to_string()), "无更新提示时不该出现更新项：{idle:?}");
+
+        let hinted = tray_items(Some(&json!({ "latest": "0.2.0" })), false);
+        assert_eq!(hinted[0].get("id").and_then(Value::as_str), Some("app-update"), "有提示时更新项应置顶");
+        let label = hinted[0].get("label").and_then(Value::as_str).unwrap_or_default();
+        assert!(label.contains("0.2.0"), "文案要带版本号：{label}");
+
+        let busy = tray_items(Some(&json!({ "latest": "0.2.0" })), true);
+        assert_eq!(busy[0].get("enabled").and_then(Value::as_bool), Some(false), "执行中该项要禁点（防重入）");
+        for id in ["show", "settings", "plugins", "reload", "quit"] {
+            assert!(ids(&busy).contains(&id.to_string()), "基础项 {id} 不能丢：{:?}", ids(&busy));
+        }
+    }
 }

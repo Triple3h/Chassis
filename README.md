@@ -105,7 +105,7 @@ pnpm dev          # 内核（standalone）+ UI（vite dev，HMR）
 
 - **插件**：除 3 个底座基础能力（`app-launcher` / `file-search` / `internal-settings`）外的出厂插件都可被覆盖更新；来源是固定 tag `plugins-latest` 的 GitHub Release，不接受自定义源。契约与发版流程见 [`docs/plugin-spec.md`](docs/plugin-spec.md) §6.4 与附录 C。
 - **内核**：固定 tag `kernel-latest`，内核 + UI 同包更新、优雅重启；打包版内核以数据目录外置副本运行，不触碰 App 的代码签名。机制与边界见 [`docs/kernel-hot-update.md`](docs/kernel-hot-update.md)。
-- **应用（壳）**：固定 tag `app-latest`，整包替换——**发版后自动检查、下载，在空闲时自动重启换上**（也可在更新页手动更新）；候选包先跑 `--hot-probe` 自检，连续两次启动未就绪自动回滚。仅 macOS（Windows 的运行中 exe 无法替换，走安装包）。机制与签名前提见 [`docs/shell-hot-update.md`](docs/shell-hot-update.md)。
+- **应用（壳）**：固定 tag `app-latest`，整包替换——**自动检查并在托盘菜单与「关于」页提示新版本，由你决定何时更新**（更新页也可手动更新）；候选包先跑 `--hot-probe` 自检，连续两次启动未就绪自动回滚。仅 macOS（Windows 的运行中 exe 无法替换，走安装包）。机制与签名前提见 [`docs/shell-hot-update.md`](docs/shell-hot-update.md)。
 
 ## 写插件
 
@@ -176,7 +176,7 @@ macOS 上自用可用：热键唤出、搜索、应用启动、文件搜索、�
 | 项 | 说明 |
 |---|---|
 | Windows 10/11 收尾 | 实机验收（托盘 / 透明窗口观感 / 通知 / 拖动缩放）、UWP 应用扫描、NSIS 安装包 |
-| 分发链路 | 代码签名 / 公证、自动更新、dmg 打包 |
+| 分发链路 | 代码签名 / 公证、Windows 自动更新（安装器）、dmg 打包 |
 | 更新收尾 | Windows 实机更新正在使用的插件（rename 重试）、更新页自动检查与商店页 |
 | 测试补齐 | Playwright E2E、zip 安装的自动化用例、万条历史性能基准 |
 

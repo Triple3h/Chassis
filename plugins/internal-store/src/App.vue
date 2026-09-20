@@ -380,9 +380,9 @@ onMounted(async () => {
                     当前壳的自更新机制版本过低（需要 {{ appUpdate.minShellHotVersion ?? '—' }}），请手动换包
                   </p>
                   <p v-else-if="appUpdate" class="mt-1 text-[11px] text-faint">
-                    更新会重启整个应用（含内核）；发现新版本会自动下载并在空闲时自动换上，也可以现在更新。
+                    更新会重启整个应用（含内核）；由你决定何时更新（托盘菜单与「关于」页也会提示）。
                   </p>
-                  <p v-else class="mt-1 text-[11px] text-faint">已是最新（发现新版本会自动下载并在空闲时换上）。</p>
+                  <p v-else class="mt-1 text-[11px] text-faint">已是最新（发现新版本会在托盘与「关于」页提示）。</p>
                 </div>
                 <button
                   v-if="appUpdate"

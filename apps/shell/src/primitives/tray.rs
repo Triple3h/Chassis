@@ -101,7 +101,9 @@ pub fn set_menu(app: &AppHandle, params: &Value) -> Result<Value, String> {
             owned.push(Box::new(separator));
             continue;
         }
-        let entry = MenuItem::with_id(app, id, label, true, None::<&str>).map_err(|err| err.to_string())?;
+        // `enabled: false` 用于「正在更新应用…」这类进行中的项：可见但不可点
+        let enabled = item.get("enabled").and_then(|value| value.as_bool()).unwrap_or(true);
+        let entry = MenuItem::with_id(app, id, label, enabled, None::<&str>).map_err(|err| err.to_string())?;
         owned.push(Box::new(entry));
     }
 

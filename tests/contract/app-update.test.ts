@@ -54,6 +54,35 @@ test('applyShellUpdate：缺 appPath ⇒ BAD_ARGS 且不打扰壳', async () => 
   )
 })
 
+test('appUpdateStatus：没检查过就不提示、不忙碌（托盘与关于页都靠它）', async () => {
+  const res = (await h.pluginAction('appUpdateStatus', {})) as { available?: boolean; busy?: boolean }
+  assertEqual(res.available, false, `没有检查结果时不该提示更新：${JSON.stringify(res)}`)
+  assertEqual(res.busy, false, '空闲状态')
+})
+
+test('checkAppUpdate：通道插件不可用 ⇒ 明确失败，不伪装成「已是最新」', async () => {
+  const res = (await h.pluginAction('checkAppUpdate', {})) as { ok?: boolean; error?: { message?: string } }
+  assertEqual(res.ok, false, `检查失败必须可见：${JSON.stringify(res)}`)
+  assert(!!res.error?.message, `要有可读的错误信息：${JSON.stringify(res.error)}`)
+  assert(shell.sent.includes('app.info'), '检查前应先问壳要版本 / 能否自更新')
+})
+
+test('applyAppUpdate：用户确认后才执行；失败复位 busy 并收回托盘入口（可再试）', async () => {
+  shell.calls.length = 0
+  const res = (await h.pluginAction('applyAppUpdate', {})) as { ok?: boolean; error?: { message?: string } }
+  assertEqual(res.ok, false, `没有可用的下载通道时必须失败：${JSON.stringify(res)}`)
+
+  const status = (await h.pluginAction('appUpdateStatus', {})) as { busy?: boolean }
+  assertEqual(status.busy, false, '失败后必须复位：用户还能再试')
+
+  // 执行开始与失败恢复都会重发托盘菜单 —— 最后一份必须回到「无提示」形态
+  await shell.waitFor('tray.setMenu', 3000)
+  const menus = shell.calls.filter((item) => item.method === 'tray.setMenu')
+  const items = (menus[menus.length - 1]?.params.items ?? []) as Array<{ id?: string }>
+  assert(!items.some((item) => item.id === 'app-update'), `失败后菜单不该留更新入口：${JSON.stringify(items)}`)
+  assert(items.some((item) => item.id === 'quit'), `基础菜单项要还在：${JSON.stringify(items)}`)
+})
+
 const failed = await run('应用（壳）自更新')
 await h.stop()
 if (failed > 0) process.exit(1)

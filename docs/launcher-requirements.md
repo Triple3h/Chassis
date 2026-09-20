@@ -561,14 +561,14 @@ interface AuditRecord {
 
 ### 7.9 应用（壳）自更新（2026-09-19 立项，机制版本 0.1.0）
 
-目标：GitHub Action 发版后，**壳自动识别并更新自己**（人不需要手动换包）；替换失败自动回滚；全程留痕。
+目标：GitHub Action 发版后，**壳自动检查并在托盘菜单与「关于」页提示新版本**，由用户确认后更新（不自动下载 / 替换 / 重启）；替换失败自动回滚；全程留痕。
 机制与签名前提见 [`docs/shell-hot-update.md`](shell-hot-update.md)。
 
 | 面 | 规格 |
 |---|---|
 | 通道 | 固定 tag **`app-latest`**：`app-registry.json`（schema 1，含 sha256 与 `minShellHotVersion`）+ `Chassis-<版本>-macos-<架构>.zip`（整包 `.app`）。与 `v*`（给人下载的换包通道）/ `plugins-latest` / `kernel-latest` 三方独立 |
 | 角色分工 | 检查 / 下载 / 解压 = 内核侧编排 `internal-store` 命令（`check-app` / `download-app`，复用代理降级 + 域名白名单 + sha256）；**候选包自检 / 台账 / 替换 / 重启 = 壳**（`shell.applyUpdate` 原语 + 脱离壳进程树的 helper） |
-| 自动 | 内核守护：启动 90s 后检查一次，之后每 6h；发现新版 → 下载 → 等窗口收起（≤120s，给「正在输入」让路）→ 交壳替换重启。`config.autoUpdateApp`（默认 true）可关；关掉后仍可在更新页手动更新 |
+| 检查与提示 | 内核守护：启动 90s 后检查一次，之后每 6h —— **只检查**；发现新版在托盘菜单（顶部「更新到 vX.Y.Z」）与「关于」页提示，由用户确认后才下载 / 替换 / 重启。`config.autoUpdateCheck`（默认 true，≤0.1.3 旧键 `autoUpdateApp` 兼容）可关；关掉后仍可在「关于」页 / 更新页手动检查 |
 | 候选包自检 | 壳跑 `--hot-probe`：结构（`Contents/MacOS/launcher-shell` + `Info.plist`）→ **版本自洽**（plist 的 `CFBundleShortVersionString` 与二进制自报一致，不一致即拒 —— 抓包拼装事故）→ 自检能跑通。三道全过才写台账 |
 | 替换 | 写 `<dataRoot>/hot/shell/pending.json` → 生成 helper（`swap.sh`）→ 壳退出 → helper 等壳完全退出 → 备份旧 `.app`（同卷 rename）→ 落新包 → `xattr -dr` → `lsregister -f` → `open`。任一步失败都回到「原包在原位」 |
 | 回滚（三重） | ① helper 的 8 秒窗口：新实例没起来 ⇒ 自动换回备份再 open；② 启动守卫：台账 `attempts ≥2` ⇒ 交 helper `restore`；③ 台账版本校验：候选版本 ≠ 当前版本 ⇒ 视为过期台账丢弃；开发态（非 `.app`）完全不参与记账 |
@@ -847,7 +847,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 
 ### M4 — 分发（2–3 周）
 **交付**：打包、签名、公证、`tauri-plugin-updater` + minisign、CI（macOS arm64 + x64）、`docs/plugin-spec.md`。
-**验收**：另一台机器下载 `.dmg` 安装 → 首次启动不报安全警告 → 装插件 → 自动更新到下一版。
+**验收**：另一台机器下载 `.dmg` 安装 → 首次启动不报安全警告 → 装插件 → 在托盘 / 「关于」页确认后更新到下一版。
 
 ### M5 — Rust 内核（2–3 周，2026-09-17 立项）
 **交付**：`ADR-0005`（内核语言决策）、`packages/plugin-sdk-rs`（Rust 插件 SDK）、`apps/kernel`（bin `launcher-kernel`）、5 个出厂插件的逻辑层 Rust 化、构建与打包链路改造（免 Node）。
@@ -900,11 +900,11 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 
 ### M9 — 应用（壳）自更新（2026-09-19 立项，机制版本 0.1.0）
 **交付**：`app-latest` 通道（`app-release.yml` + `gen-app-registry.mjs` + `pack-app.mjs`，CI 用 secrets 里的固定证书签名）、
-`internal-store` 的 `check-app` / `download-app`、内核自动更新守护（`spawn_app_update_watch` + `config.autoUpdateApp`）、
+`internal-store` 的 `check-app` / `download-app`、内核更新检查守护（`spawn_app_update_check` + `config.autoUpdateCheck`；只检查提示，不自动更新）、
 壳侧自更新（`--hot-probe` 自检 / `pending.json` / 启动守卫 / 独立 helper 替换与回滚 / `shell.applyUpdate` 原语）、
 更新页「应用」区块。
 **验收**：
-- CI 发 `app-latest` 后，客户端在守护轮次内**自动**发现新版本、下载、校验、空闲时自动重启换上（无人工介入）
+- CI 发 `app-latest` 后，客户端在守护轮次内**自动检查**，新版本在托盘菜单与「关于」页提示；用户确认后完成下载 / 校验 / 替换 / 重启（更新动作必须人工触发）
 - 候选包不完整 / 版本自洽性不过 / 自检跑不起来 ⇒ 拒绝安装，当前版本一动不动
 - 新包启动失败：helper 8 秒内没看到实例 ⇒ 自动换回备份；连续两次未就绪 ⇒ 启动守卫回滚（台账清理，无需人工修）
 - 开发态（非 `.app`）与只读安装位置：不检查、不提示、不记账（`canSelfUpdate=false`）

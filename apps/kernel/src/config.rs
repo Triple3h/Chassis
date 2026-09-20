@@ -61,9 +61,10 @@ pub struct Config {
     pub hide_on_blur: bool,
     /// 唤出时保留上次输入
     pub keep_query: bool,
-    /// 应用（壳）自更新：后台发现新版本就下载、空闲时自动重启换上（默认开）。
-    /// 只有 macOS 打包态会真的动作 —— 开发态与只读安装位置由壳侧的 `canSelfUpdate` 挡掉。
-    pub auto_update_app: bool,
+    /// 应用（壳）更新**检查**：后台定期查索引，有新版本时在托盘与「关于」页提示（默认开）。
+    /// **不会自动下载 / 替换 / 重启** —— 更新由用户从提示处确认后才执行。
+    /// 只有 macOS 打包态会真的检查 —— 开发态与只读安装位置由壳侧的 `canSelfUpdate` 挡掉。
+    pub auto_update_check: bool,
     pub language: String,
     /// `system` | `light` | `dark`
     pub theme: String,
@@ -91,7 +92,7 @@ impl Default for Config {
             autostart: false,
             hide_on_blur: true,
             keep_query: false,
-            auto_update_app: true,
+            auto_update_check: true,
             language: "zh-CN".to_string(),
             theme: "system".to_string(),
             accent: "#4f8cff".to_string(),
@@ -122,8 +123,14 @@ pub fn migrate_config(raw: &Value) -> Config {
     if let Some(value) = raw.get("hideOnBlur").and_then(Value::as_bool) {
         config.hide_on_blur = value;
     }
-    if let Some(value) = raw.get("autoUpdateApp").and_then(Value::as_bool) {
-        config.auto_update_app = value;
+    // `autoUpdateCheck`（现名）与 `autoUpdateApp`（≤0.1.3 的旧键）都认：语义已收敛为
+    // 「只检查、提示，不自动更新」，旧用户的取值沿用（默认开）。
+    if let Some(value) = raw
+        .get("autoUpdateCheck")
+        .or_else(|| raw.get("autoUpdateApp"))
+        .and_then(Value::as_bool)
+    {
+        config.auto_update_check = value;
     }
     if let Some(value) = raw.get("keepQuery").and_then(Value::as_bool) {
         config.keep_query = value;
@@ -332,6 +339,21 @@ mod tests {
         assert_eq!(config.history_limit, 500);
         assert!(config.history_in_search);
         assert!(config.disabled.is_empty() && config.window_sizes.is_empty());
+        assert!(config.auto_update_check, "默认自动检查更新（只提示，不自动更新）");
+    }
+
+    /// 版本键迁移：`autoUpdateApp`（≤0.1.3）→ `autoUpdateCheck`（语义收敛为「只检查、提示」）。
+    #[test]
+    fn auto_update_check_migrates_from_legacy_key() {
+        assert!(!migrate_config(&json!({ "autoUpdateApp": false })).auto_update_check, "旧键的关闭要沿用");
+        assert!(migrate_config(&json!({ "autoUpdateApp": true })).auto_update_check);
+        assert!(migrate_config(&json!({ "autoUpdateCheck": true })).auto_update_check);
+        assert!(!migrate_config(&json!({ "autoUpdateCheck": false })).auto_update_check);
+        assert!(
+            migrate_config(&json!({ "autoUpdateApp": false, "autoUpdateCheck": true })).auto_update_check,
+            "两个键都在时以新键为准"
+        );
+        assert!(migrate_config(&json!({})).auto_update_check, "都没给 = 默认开");
     }
 
     #[test]

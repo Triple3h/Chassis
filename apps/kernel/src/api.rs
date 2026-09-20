@@ -115,7 +115,7 @@ fn ok_json(payload: Value) -> Response {
 fn error_json(err: KernelError) -> Response {
     let status = match err.code {
         "BAD_ARGS" | "PROBE_FAILED" => StatusCode::BAD_REQUEST,
-        "NO_PREVIOUS" | "SIGNED_BUNDLE" | "UPDATE_FAILED" | "ROLLED_BACK" => StatusCode::CONFLICT,
+        "NO_PREVIOUS" | "SIGNED_BUNDLE" | "UPDATE_FAILED" | "UPDATE_CHECK_FAILED" | "ROLLED_BACK" => StatusCode::CONFLICT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     (status, Json(json!({ "ok": false, "error": { "code": err.code, "message": err.message } }))).into_response()

@@ -782,12 +782,16 @@ function renderAbout(): string {
   const exported = lastExport
     ? `<div class="hint" style="margin-top:8px">上次导出：${escapeHtml(lastExport.summary)}<br><span class="path">${escapeHtml(lastExport.path)}</span></div>`
     : ''
+  // 「应用」与「内核」是**两个版本**：应用 = 壳（可自更新），内核 = 包内/外置的内核二进制。
+  // 别再合成一个字段渲染（曾经两行都显示内核版本，应用明明已自动更新，关于页却停在旧号）。
   return `
     <h2>关于</h2>
-    <div class="row"><div class="label">版本</div><span class="muted">${escapeHtml(info.version)}</span></div>
+    <div class="row"><div class="label">应用</div><span class="muted">v${escapeHtml(info.version || '未知')}${info.canSelfUpdate ? '' : ' · 手动更新'}</span></div>
     <div class="row"><div class="label">平台</div><span class="muted">${escapeHtml(info.platform)}</span></div>
-    <div class="row"><div class="label">内核</div><span class="muted">Rust · v${escapeHtml(info.version)}</span></div>
+    <div class="row"><div class="label">内核</div><span class="muted">Rust · v${escapeHtml(info.kernelVersion || '未知')}</span></div>
     <div class="row"><div class="label">数据目录</div><span class="muted">${escapeHtml(info.dataRoot)}</span></div>
+    ${info.bundlePath ? `<div class="row"><div class="label">安装位置</div><span class="muted">${escapeHtml(info.bundlePath)}</span></div>` : ''}
+    ${renderAboutUpdate()}
     <div class="card">
       <strong>底座原则</strong>
       <div class="hint">底座零能力：内核里不出现任何具体能力，所有能力（含「启动应用」本身）都以插件形式集成。</div>
@@ -814,9 +818,107 @@ function renderAbout(): string {
   `
 }
 
-let aboutInfo = { version: '', platform: '', node: '', dataRoot: '' }
+/**
+ * 关于页的更新卡片：**应用更新只提示、不自动执行**（用户在这里决定是否更新）。
+ *
+ * 数据来自内核缓存（`appUpdateStatus`）——守护启动 90s 后 / 每 6h 检查一次，托盘菜单同源。
+ * 壳不可自更新（开发态 / 只读安装位置）时不显示卡片：查了也装不上。
+ */
+function renderAboutUpdate(): string {
+  if (!aboutInfo.canSelfUpdate) return ''
+  if (aboutUpdate?.available) {
+    const latest = aboutUpdate.latest ?? ''
+    const current = aboutUpdate.current ?? aboutInfo.version
+    const notes = aboutUpdate.notes ? `<div class="hint">${escapeHtml(aboutUpdate.notes)}</div>` : ''
+    const blocked =
+      aboutUpdate.hotOk === false
+        ? '<div class="hint">当前壳的自更新机制版本过低：请手动换包（App 通道 v*）。</div>'
+        : ''
+    const busy = aboutUpdate.busy === true
+    const disabled = busy || aboutUpdate.hotOk === false
+    return `
+      <div class="card" style="margin-top:12px">
+        <strong>发现新版本 v${escapeHtml(latest)}</strong>
+        <div class="hint">当前 v${escapeHtml(current)}；更新会重启整个应用（含内核），由你决定何时执行。</div>
+        ${notes}${blocked}
+        <div class="dactions" style="margin-top:8px">
+          <button class="btn primary" id="about-apply-update" ${disabled ? 'disabled' : ''}>${busy ? '更新中…' : '立即更新'}</button>
+          <button class="btn" id="about-check-update" ${busy ? 'disabled' : ''}>重新检查</button>
+        </div>
+      </div>`
+  }
+  const hintText = aboutUpdate ? '已是最新版本。' : '尚未检查过更新。'
+  return `
+    <div class="card" style="margin-top:12px">
+      <strong>更新</strong>
+      <div class="hint">${hintText}</div>
+      <div class="dactions" style="margin-top:8px">
+        <button class="btn" id="about-check-update">检查更新</button>
+      </div>
+    </div>`
+}
+
+/** 「检查更新」：手动触发一次内核检查（结果同时刷新托盘菜单的提示）。 */
+async function checkAppUpdate(): Promise<void> {
+  toast('正在检查更新…')
+  const status = (await guard(() => settings.pluginAction('checkAppUpdate', {}), null)) as AppUpdateHint | null
+  if (status) aboutUpdate = status
+  toast(status?.available ? `发现新版本 v${status.latest}` : '已是最新版本')
+  render()
+}
+
+/** 「立即更新」：下载 → 交壳替换 → 重启整个应用；失败留在当前版本，可再试。 */
+async function applyAppUpdate(): Promise<void> {
+  if (!window.confirm('更新会重启整个应用（含内核），现在执行？')) return
+  toast('正在下载更新…完成后应用会自动重启')
+  const result = (await guard(() => settings.pluginAction('applyAppUpdate', {}), null)) as
+    | { ok?: boolean }
+    | null
+  // 成功路径上壳随即退出重启（这条请求回不来）；能走到这里说明失败了（错误已由 guard toast）
+  if (result) {
+    aboutUpdate = (await guard(() => settings.pluginAction('appUpdateStatus', {}), null)) as AppUpdateHint | null
+    render()
+  }
+}
+
+let aboutInfo = {
+  /** 应用（壳）版本（`shellInfo` 口径），不是内核版本 */
+  version: '',
+  /** 内核版本（`settings.info()` 口径）：与应用版本是两个来源，各显示各的 */
+  kernelVersion: '',
+  platform: '',
+  node: '',
+  dataRoot: '',
+  /** 应用安装位置（`/Applications/Chassis.app`；开发态为空） */
+  bundlePath: '',
+  /** 打包态 + 安装位置可写才为 true：false 时关于页标注「手动更新」 */
+  canSelfUpdate: false,
+}
 /** 上次导出的日志（路径 + 摘要）：留在「关于」页，方便用户回头再找到那个文件 */
 let lastExport: { path: string; summary: string } | null = null
+
+/** 应用更新提示（内核 `pluginAction('appUpdateStatus' / 'checkAppUpdate')` 的返回） */
+interface AppUpdateHint {
+  /** 有可提示的新版本（未检查 / 已最新 / 检查失败都是 false） */
+  available: boolean
+  /** 更新正在执行（内核侧防重入状态） */
+  busy?: boolean
+  current?: string
+  latest?: string
+  notes?: string | null
+  /** 壳的自更新机制版本是否满足（false ⇒ 自更新装不上，只能手动换包） */
+  hotOk?: boolean
+  /** 没有可提示更新的原因：shell-unavailable / not-self-updatable / no-version / ok */
+  reason?: string
+}
+
+/**
+ * 当前更新提示（`null` = 还没拉过状态）。
+ *
+ * 内核守护（启动 90s 后 / 每 6h）检查并缓存，「关于」页与**托盘菜单**同源 ——
+ * 更新只提示、不自动执行：下载 / 替换 / 重启都由用户在这里（或托盘）确认后才发生。
+ */
+let aboutUpdate: AppUpdateHint | null = null
 
 // ── 诊断日志导出 ───────────────────────────────────────────────
 function formatBytes(bytes: number): string {
@@ -907,6 +1009,10 @@ function bind(): void {
       if (activeTab === 'data') void refreshAudit()
     })
   }
+
+  // 应用更新：检查 / 立即更新（关于页的更新卡片；与托盘菜单共用内核的同一份状态）
+  on('about-check-update', 'click', () => void checkAppUpdate())
+  on('about-apply-update', 'click', () => void applyAppUpdate())
 
   on('apply-hotkey', 'click', () => {
     const value = (document.getElementById('hotkey') as HTMLInputElement | null)?.value?.trim()
@@ -1529,15 +1635,50 @@ async function boot(): Promise<void> {
   const info = await guard(() => host.info(), null)
   aboutInfo = {
     version: info?.version ?? '',
+    kernelVersion: '',
     platform: info?.platform ?? '',
     node: '—',
     dataRoot: info?.dataRoot ?? '',
+    bundlePath: '',
+    canSelfUpdate: false,
   }
   const cfg = await guard(() => settings.get(), null)
   config = cfg as ConfigLike | null
   applyAppearance()
-  const hostInfo = await guard(() => settings.info(), null)
-  if (hostInfo) aboutInfo = { ...aboutInfo, ...hostInfo }
+  // 内核信息：只取内核自己的字段 —— **不要再整包合并**（`{ ...aboutInfo, ...hostInfo }`
+  // 会把内核版本灌进「应用」行：用户看到旧号以为没更新，其实应用早已自动升级）。
+  const hostInfo = (await guard(() => settings.info(), null)) as {
+    version?: string
+    platform?: string
+    dataRoot?: string
+  } | null
+  if (hostInfo) {
+    aboutInfo = {
+      ...aboutInfo,
+      kernelVersion: hostInfo.version ?? '',
+      platform: hostInfo.platform || aboutInfo.platform,
+      dataRoot: hostInfo.dataRoot || aboutInfo.dataRoot,
+    }
+  }
+  // 应用（壳）版本以 `shellInfo` 为准（壳自报，附带安装位置与可自更新状态）；
+  // 壳未连接 / 老壳不认这个动作时，退回 `app.info` 的版本。
+  const shell = (await guard(() => settings.pluginAction('shellInfo', {}), null)) as {
+    available?: boolean
+    version?: string
+    bundlePath?: string | null
+    canSelfUpdate?: boolean
+  } | null
+  if (shell?.available) {
+    aboutInfo = {
+      ...aboutInfo,
+      version: shell.version || aboutInfo.version,
+      bundlePath: shell.bundlePath ?? '',
+      canSelfUpdate: shell.canSelfUpdate === true,
+    }
+  }
+  // 更新提示：读内核缓存的检查结果（守护启动 90s 后 / 每 6h 刷新；托盘菜单同源）。
+  // 只读缓存不触发检查 —— 检查由「检查更新」按钮或守护轮次执行。
+  aboutUpdate = (await guard(() => settings.pluginAction('appUpdateStatus', {}), null)) as AppUpdateHint | null
 
   await loadPlugins()
   await loadAudit()

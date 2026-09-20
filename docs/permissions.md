@@ -8,7 +8,7 @@
 - Apple Silicon 上**未签名的可执行文件会被内核直接杀掉**（`Killed: 9`）—— 这是系统的强制签名策略，不是可选项。
 - 打包脚本（`pnpm app:local`）的签名顺序：**本机自签名证书**（`node scripts/make-signing-cert.mjs` 一次性创建，免费、仅本机有效）→ 找不到证书时回落 `codesign --sign -` 的 **ad-hoc** 签名。
 - 为什么优先固定证书而不是 ad-hoc：macOS 的 TCC 授权（辅助功能 / 屏幕录制 / 自动化 / 通知）按**代码签名身份**记账。ad-hoc 的身份就是二进制哈希 —— **每次重新打包都变**，已经给过的授权会失配、重新弹框；固定证书的身份跨重新打包稳定，一次授权长期有效。
-- 自用不需要 Apple Developer、公证或自动更新；本地构建的 `.app` 不带 quarantine 属性，双击即可运行。
+- 自用不需要 Apple Developer、公证或 dmg 打包；本地构建的 `.app` 不带 quarantine 属性，双击即可运行。
 
 ### CI 上的签名（应用自更新通道，2026-09-19 起）
 

@@ -4,7 +4,8 @@
 > 相关：`docs/kernel-hot-update.md`（内核通道，与本通道同构）｜`docs/permissions.md`（签名与 TCC）
 
 壳（`Chassis.app`）是**唯一不能由内核替换的一层** —— 它就是应用本体。这条通道让它在
-GitHub Action 发版后**自动发现、自动下载、自动替换、自动重启**：人是旁观者，不是执行者。
+GitHub Action 发版后**自动检查并在托盘菜单与「关于」页提示新版本**；
+下载 / 替换 / 重启只在用户确认后发生（**更新绝不自动执行**）。
 
 ---
 
@@ -17,7 +18,7 @@ GitHub Action 发版后**自动发现、自动下载、自动替换、自动重�
 | App 换包（给人） | `v*` | `Chassis-macos-arm64.zip` | 新机器安装 / 手动换包 |
 | 插件 | `plugins-latest` | `registry.json` + 插件 zip | 「更新」页 → 插件 |
 | 内核 | `kernel-latest` | `kernel-registry.json` + 内核 zip | 「更新」页 → 内核 |
-| **应用（壳）** | **`app-latest`** | **`app-registry.json` + `Chassis-<版本>-macos-<架构>.zip`** | **自动更新 + 「更新」页 → 应用** |
+| **应用（壳）** | **`app-latest`** | **`app-registry.json` + `Chassis-<版本>-macos-<架构>.zip`** | **自动检查 → 托盘菜单 / 「关于」页提示 + 「更新」页 → 应用** |
 
 索引（schema 1）与内核那份同形：
 
@@ -62,11 +63,12 @@ helper（脱离壳进程树的 /bin/sh）：等壳退出 → 备份旧 .app → 
 | 环节 | 归谁 | 落点 |
 |---|---|---|
 | 检查 / 下载 / 解压 | 内核 → `internal-store` 的 `update` 命令（同一套代理降级 / 域名白名单 / sha256） | `plugins/internal-store/src/bin/update.rs`（`check-app` / `download-app`） |
-| 编排与时机 | 内核守护（`spawn_app_update_watch`） | `apps/kernel/src/kernel.rs` |
-| 候选包校验 / 台账 / 替换 / 重启 | 壳 | `apps/shell/src/update.rs` |
-| 界面（状态 + 手动更新） | 更新页「应用」区块 | `plugins/internal-store/src/App.vue` |
+| 检查与提示 | 内核守护（`spawn_app_update_check`）：启动 90s 后 / 每 6h **只检查**，结果进托盘菜单（`tray_items`）与「关于」页 | `apps/kernel/src/kernel.rs` |
+| 候选包校验 / 台账 / 替换 / 重启 | 壳（**用户确认后**才走到这里） | `apps/shell/src/update.rs` |
+| 界面（提示 + 手动更新） | 「关于」页更新卡片（`checkAppUpdate` / `applyAppUpdate`）与更新页「应用」区块 | `plugins/internal-settings/src/view/main.ts`、`plugins/internal-store/src/App.vue` |
 
-自动更新可在 `config.json` 用 `autoUpdateApp: false` 关掉；关掉后「更新」页仍可手动更新。
+自动检查可在 `config.json` 用 `autoUpdateCheck: false` 关掉（≤0.1.3 的旧键 `autoUpdateApp` 兼容）；
+关掉后仍可在「关于」页 / 更新页手动检查。**更新（下载 / 替换 / 重启）只在用户确认后执行。**
 
 ## 4. 三重保险（失败不会让应用消失）
 
@@ -109,17 +111,24 @@ gh secret set MACOS_SIGN_P12_PASSWORD --body '<导出时的密码>'
 
 ## 7. 发版
 
+版本只改**一处**：根 `version.json`（`app` = 应用/壳版本，`kernel` = 内核版本），
+由 `scripts/version.mjs` 同步到三个位点（`tauri.conf.json`、`shell/Cargo.toml`、`kernel/Cargo.toml`），
+`pnpm version:check`（本地与全部发版 workflow）拦漂移 —— 手改位点文件的后果是自更新**静默失效**。
+
 ```bash
-# 改版本（唯一源；build.rs 与打包脚本都读它）
-#   apps/shell/tauri.conf.json 的 version → 例如 0.1.1
+pnpm version:set app 0.1.4      # 改版本（自动同步三处位点；内核同号时再 version:set kernel 0.1.4）
 gh workflow run app-release.yml --ref main -f notes="…"     # 或推 app/* tag
 ```
 
-客户端会在下一次守护轮次（启动 90s 后 / 每 6h）自动更新；
-「更新」页的「应用」区块也可以立刻手动更新。
+客户端会在下一次守护轮次（启动 90s 后 / 每 6h）**检查**，新版本在托盘菜单与「关于」页提示；
+用户在任一处确认后才下载、替换、重启（「更新」页的「应用」区块也可以立刻手动更新）。
+
+机制版本（`SHELL_HOT_VERSION` / `HOT_UPDATE_VERSION`）与插件版本**不在** `version.json` 里，各自独立演进。
 
 ## 8. 有意不做
 
+- **自动应用更新**：更新只**检查 + 提示**（托盘菜单 / 「关于」页），下载 / 替换 / 重启一律等用户确认 ——
+  不做静默下载与无人值守替换（更新时机由用户自己决定）。
 - **Windows 自更新**：运行中 exe 无法替换，走 NSIS 安装器（`pack-win.mjs` / `release.yml`）。
 - **增量包 / dmg / 公证**：整包替换足够（17 MB 级），公证与分发面的事随 `v*` 通道另议。
 - **多版本回退历史**：只留 1 份备份（与内核 / 插件热更新同口径）。
