@@ -335,8 +335,26 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 
 ### 4.4 主题与设计令牌
 
-`packages/ui/styles/theme.css`：`:root` / `[data-theme="dark"]` 两套 CSS 变量 → `@theme inline` 桥接成 Tailwind 工具类（`bg-panel` / `text-muted` / `border-line` …）。
+`packages/ui/styles/theme.css`：一套 CSS 变量 → `@theme inline` 桥接成 Tailwind 工具类（`bg-panel` / `text-muted` / `border-line` …）。
 视觉基调对齐宿主：8px 圆角、低饱和描边、`padding: 10px` 的行高、14px 正文。
+
+**主题由宿主裁决**：插件页内不提供切换、也不把主题写进 `localStorage`（`useTheme()` 只跟随）。
+判定顺序 `?theme=` → `data-theme` → `prefers-color-scheme`；已打开的插件页不跟随切换，**重开会话才生效**。
+
+**颜色：一个语义一行、明暗成对。** 引了 `theme.css` 就有整套语义色、深浅自动切换 ——
+**不需要自己实现深色模式**。要加插件专有色（语法高亮、块色号这类只有本插件懂的语义）时这样写：
+
+```css
+:root {
+  --my-key: var(--launcher-if-light, #1d4ed8) var(--launcher-if-dark, #82b1ff);
+}
+```
+
+`--launcher-if-light` / `--launcher-if-dark` 由 `theme.css` 提供，深色主题下两者互换。因此：
+
+- **不要**写 `:root` + `[data-theme="dark"]` 两个块 —— 分开写迟早漏改深色那半边
+- **不要**在样式规则里直接写 hex / rgba 字面量 —— 那个值不会跟着主题变
+- 与主题无关的装饰色（半透明叠加、遮罩渐变）可以只写一个值，注明「深浅通用」
 
 动效同样有令牌，**不要自己写死时长和缓动**（与宿主 `apps/launcher-ui/src/styles/app.css` 同值同档，见 ADR-0004）：
 

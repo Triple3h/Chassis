@@ -3,8 +3,11 @@ import { onMounted, onUnmounted } from 'vue'
 import { useTheme } from '../lib/theme'
 import { useToast } from '../lib/toast'
 
-/** 统一页面骨架：铺满 iframe、应用主题、渲染轻提示 */
-const { theme, toggle } = useTheme()
+/**
+ * 统一页面骨架：铺满 iframe、应用主题、渲染轻提示。
+ * 主题只读 —— 插件页内不提供切换（plugin-spec §5.3），切换是宿主的职责。
+ */
+const { theme } = useTheme()
 const { items } = useToast()
 
 let observer: MutationObserver | null = null
@@ -19,8 +22,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => observer?.disconnect())
-
-defineExpose({ toggleTheme: toggle })
 </script>
 
 <template>

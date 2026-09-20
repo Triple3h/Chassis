@@ -47,7 +47,8 @@ const hotpCodes = shallowRef(new Map<string, string>())
 const searchEl = ref<HTMLInputElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 const toast = useToast()
-const { theme, toggle: toggleTheme } = useTheme()
+// 主题由宿主裁决（会话 URL 的 ?theme=），本页只跟随、不提供切换
+useTheme()
 const cache = new TotpCache()
 
 let clearTimer = 0
@@ -479,7 +480,6 @@ async function syncFooter() {
           name: settings.value.hideCodes ? '关闭隐私模式' : '开启隐私模式',
           onSelect: () => void updateSettings({ ...settings.value, hideCodes: !settings.value.hideCodes }),
         },
-        { id: 'theme', name: '切换主题', onSelect: toggleTheme },
         { id: 'export', name: '导出备份', onSelect: exportAccounts },
       ],
     },
@@ -593,9 +593,6 @@ watch(selected, (i) => {
         </button>
         <button class="launcher-btn ghost" title="设置（⌘,）" @click="dialog = 'settings'">
           <UiIcon name="sliders" :size="13" />
-        </button>
-        <button class="launcher-btn ghost" :title="theme === 'dark' ? '切换到浅色' : '切换到深色'" @click="toggleTheme">
-          <UiIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="13" />
         </button>
       </div>
     </header>

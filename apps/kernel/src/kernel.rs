@@ -1034,6 +1034,9 @@ impl Kernel {
             ("sid".to_string(), session.sid.clone()),
             ("cmd".to_string(), command.to_string()),
             ("theme".to_string(), self.host_ui.theme()),
+            // 用户主题色：插件页与启动台同色（plugin-spec §5.3）。`#` 由 url_encode 编成 %23。
+            // 插件侧自己校验格式，非法值当没给（不能让 URL 上的脏数据写进 CSS 变量）。
+            ("accent".to_string(), self.config.get().accent),
             ("token".to_string(), session.token.clone()),
         ];
         if let Some(args) = args.as_ref() {

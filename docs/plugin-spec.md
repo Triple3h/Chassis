@@ -388,7 +388,7 @@ fn main() {
 ### 5.1 会话 URL 契约
 
 ```
-http://127.0.0.1:<port>/index.html?sid=<uuid>&cmd=<command>&theme=dark|light&token=<token>
+http://127.0.0.1:<port>/index.html?sid=<uuid>&cmd=<command>&theme=dark|light&accent=%23rrggbb&token=<token>
 ```
 
 | 参数 | 说明 |
@@ -396,6 +396,7 @@ http://127.0.0.1:<port>/index.html?sid=<uuid>&cmd=<command>&theme=dark|light&tok
 | `sid` | 会话 id，用于日志与审计关联 |
 | `cmd` | 当前 view 命令名 |
 | `theme` | 宿主主题（`dark` / `light`） |
+| `accent` | 宿主主题色（`#rgb` / `#rrggbb`，已 URL 编码）；非法时**应当**当没给，用内置值 |
 | `token` | 每会话一次性 token，宿主 API 调用必须携带（SDK 已处理） |
 
 **必须**：不要缓存/复用 `token`；不要把它写进日志或存储。
@@ -406,13 +407,42 @@ http://127.0.0.1:<port>/index.html?sid=<uuid>&cmd=<command>&theme=dark|light&tok
 
 ### 5.3 主题
 
-- 宿主通过 `?theme=` 传入（**每次开会话都重新带**，代表宿主当前的主题），并在文档根设 `data-theme="dark|light"`
-- **应当**按四级探测，`@launcher/ui/theme` 的 `useTheme()` 已实现，直接用即可：
-  插件内**手动选过**的主题 → `?theme=` → `data-theme` → `prefers-color-scheme`
-- 只有**手动切换**（`toggle()` / `set()`）才把主题记进 `localStorage`。自动判定出来的值**一律不落盘** ——
-  否则「第一次打开这个插件页时恰好是什么主题」会被永久钉死，宿主之后换了主题也跟不上
-- 宿主给了主题、或用户手动选过时**不要**跟随系统主题变化，否则插件页会和宿主界面不一致
-- 推荐直接引 `@launcher/ui` 的设计令牌（`theme.css`），不要自造色板
+- 宿主通过 `?theme=` / `?accent=` 传入（**每次开会话都重新带**，代表宿主当前的外观），插件页在文档根设 `data-theme="dark|light"`
+- **应当**按三级探测，`@launcher/ui/theme` 的 `useTheme()` 已实现，直接用即可：
+  `?theme=` → `data-theme` → `prefers-color-scheme`
+- **不应**在插件页内提供主题切换，也不应把主题写进 `localStorage`：**主题由宿主唯一裁决**。
+  页内一旦能钉住主题，宿主换了它也不跟，而「哪个插件忘了跟」在界面上根本看不出来
+- 只有来源是系统偏好时才跟随系统外观变化；宿主给了主题时不跟，否则插件页会和宿主界面不一致
+- **主题切换对已打开的插件页不生效**：主题随会话 URL 一次性下发，宿主没有向已开 iframe 推送的通道。
+  切换后**新开的**会话是新主题，**已开的那张页要重开才变**
+- 主题色 `?accent=` 同理（跟随与否都只影响此后新开的会话）。它会被写进 CSS 变量，
+  **必须**校验成 `#rgb` / `#rrggbb` 再用，非法值一律当没给
+
+#### 5.3.1 颜色：全局语义色与插件专有色
+
+`theme.css` 是插件页颜色的唯一入口：**引了它就有整套语义色，深浅两态自动切换，不需要自己写深色模式。**
+
+| 类别 | 归谁 | 要求 |
+|---|---|---|
+| 全局语义色 `--launcher-*`（bg / panel / fg / muted / line / hover / accent / danger / success / warn / 滚动条 / 阴影） | 底座维护 | 插件只读；要整体覆盖时**明暗两值必须成对给出**，不允许只改浅色那半边 |
+| 插件专有色（语法高亮、块色号这类只有本插件懂的语义） | 插件维护 | **一个语义一行、明暗成对** |
+| 与主题无关的装饰色（半透明叠加、遮罩渐变等 alpha 派生色） | 插件维护 | 单值即可，**应当**注明「深浅通用」的理由 |
+
+成对写法 —— `theme.css` 提供 `--launcher-if-light` / `--launcher-if-dark`（深色主题下两者互换），
+插件写一行即可，**不要写 `:root` + `[data-theme="dark"]` 两个块**：分开写迟早漏改深色那半边。
+
+```css
+:root {
+  --my-key: var(--launcher-if-light, #1d4ed8) var(--launcher-if-dark, #82b1ff);
+}
+```
+
+**不应**在样式规则里直接写 hex / rgba 字面量：那个值在另一个主题下不会变，
+而漏改在界面上只看得见「这个颜色怪」。
+
+**深浅主题的兼容性判定**（与 UI 是不是自己画的无关）：①引了 `theme.css`
+②页面上所有颜色都来自 `var()`（无裸字面量）③自新增变量已按上表归类。
+三条全满足即自动跟随，**不需要为深色模式写任何代码**。
 
 ### 5.4 网络
 

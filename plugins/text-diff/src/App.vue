@@ -25,7 +25,8 @@ const result = shallowRef<DiffResult | null>(null)
 const busy = ref(false)
 const seedNotice = ref('')
 const toast = useToast()
-const { theme, toggle: toggleTheme } = useTheme()
+// 主题由宿主裁决（会话 URL 的 ?theme=），本页只跟随、不提供切换
+useTheme()
 
 const options = computed<DiffOptions>(() => ({
   ignoreCase: ignoreCase.value,
@@ -340,9 +341,6 @@ watch([ignoreCase, ignoreWhitespace, collapse], () => void syncFooter())
         </button>
         <button class="launcher-btn ghost" title="载入示例" @click="loadSample"><UiIcon name="wand" :size="13" /></button>
         <button class="launcher-btn ghost" title="清空" @click="clearAll"><UiIcon name="trash" :size="13" /></button>
-        <button class="launcher-btn ghost" :title="theme === 'dark' ? '切换到浅色' : '切换到深色'" @click="toggleTheme">
-          <UiIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="13" />
-        </button>
       </div>
     </header>
 
