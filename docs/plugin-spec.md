@@ -925,5 +925,6 @@ fn main() {
 - `sig` 字段为**预留**（后续版本的签名，`null` 表示未启用）。v1 的信任模型是「固定仓库 + HTTPS + sha256」。
 - 客户端**只接受插件 id 作为入参**，下载地址一律从本索引取 —— URL 不可被外部注入。
 - 索引与产物发布在**固定 tag**（`plugins-latest`）的 Release 上；各平台各发一份 zip，sha256 必须逐字节一致于构建产物。
+- **主源 + 国内镜像**：客户端对索引里的每个 URL 同时推导镜像地址（`github.com/triple3h/Chassis` → `gitee.com/triple3h/Chassis`，大小写不敏感 —— CI 用 `GITHUB_REPOSITORY` 拼索引）并**先试镜像**；镜像拿不到（连不上 / HTTP 错 / sha256 不符）或校验不过再回落主源，两级都失败才报错。索引本身同样镜像优先。镜像由 CI 的 `scripts/sync-release-to-gitee.mjs` 同步（同名 tag / 同名文件名），两个地址都是编译期常量 —— 仍然「不接受自定义源」。
 - **索引永远整份发布**：单独发某个插件（workflow 的 `plugins` 输入）时，`gen-plugin-registry.mjs --merge-registry <上一版 registry.json>` 负责合并 —— 没打包的插件整条沿用上一版（版本 / 说明 / 门槛 / 资产都不动），打包的插件按平台替换资产、未重建平台的资产只在版本一致时保留（版本变了就丢弃 + 告警，避免客户端装到旧版本）。少了这一步，索引里只剩本次打包的插件，其余插件对客户端等于「不存在」（`collect_updates` 查不到即跳过，静默不再提示更新）。守卫见 `tests/unit/plugin-registry-merge.test.ts`。
 - essential 出厂插件（app-launcher / file-search / internal-settings）**不在索引里**：它们随 App 包发布。

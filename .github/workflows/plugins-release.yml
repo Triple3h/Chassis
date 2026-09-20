@@ -137,3 +137,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/prune-release-assets.mjs --tag plugins-latest --registry plugins/release/registry.json
+
+      # 国内镜像：把本次的索引与 zip 同步到 Gitee 固定 tag 的 Release（同名 tag / 同名文件，
+      # 客户端只需把下载域名换成 gitee.com 即可命中，见 scripts/sync-release-to-gitee.mjs）。
+      # 单独发布某个插件时，索引经 --merge-registry 合并成全量 ⇒ 未重发的插件包不会被误删。
+      # 需要仓库 secret `GITEE_TOKEN`（Gitee 私人令牌，projects 权限）：未配置则跳过本步；
+      # 同步失败也不阻塞主通道（continue-on-error）—— 客户端回落 GitHub 主源。
+      - name: 同步到 Gitee（国内镜像）
+        continue-on-error: true
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: node scripts/sync-release-to-gitee.mjs --tag plugins-latest --dir plugins/release
