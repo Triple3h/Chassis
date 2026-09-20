@@ -18,6 +18,7 @@
       "subtitle": "检查出厂插件与内核的新版本",
       "mode": "view",
       "searchable": true,
+      "hidden": true,
       "keywords": ["更新", "插件更新", "内核更新", "内核", "升级", "update", "upgrade", "kernel", "新版本", "gengxin"],
       "icon": "refresh"
     },

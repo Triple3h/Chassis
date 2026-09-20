@@ -1490,7 +1490,8 @@ impl Kernel {
     /// 执行应用更新（**用户确认后**才走到这里）：下载 → 交壳替换 → 重启整个应用。
     ///
     /// 与更新页的手动链路同一套（下载 / 校验在 `internal-store`，替换 / 回滚在壳的 helper）；
-    /// 差别只在触发者（托盘 / 「关于」页 / 更新页的按钮）。执行中先把托盘菜单标成
+    /// 触发者只有两处：更新页与「关于」页的「立即更新」按钮（托盘只负责打开更新页）。
+    /// 执行中先把托盘菜单标成
     /// 「正在更新…」；失败复位 busy 并恢复提示（下载 / 校验失败发生在落盘之前，
     /// 替换失败由壳侧回滚兜底 —— 任何失败都保持旧版本原样）。
     pub async fn apply_app_update(self: &Arc<Self>) -> Result<Value> {
@@ -1618,9 +1619,9 @@ impl Kernel {
 
     /// 托盘菜单由内核提供（便于插件加项），壳只负责渲染。
     ///
-    /// 有应用更新待确认时，菜单顶部插入「更新到 vX.Y.Z…」——点击即执行
-    /// （`handle_tray_menu("app-update")`）；执行中该项变「正在更新…」并禁用。
-    /// 这是「不自动更新」后的提示入口之一（另一个是「关于」页的更新提示）。
+    /// 「检查更新…」是**常驻**第一项（`handle_tray_menu("app-update")`）：点击打开更新页，
+    /// 更新由用户在那页上决定；有新版时标签带上版本号，执行中变「正在更新…」并禁用。
+    /// 这是「不自动更新」策略的提示入口之一（另一个是「关于」页的更新卡片）。
     pub async fn refresh_tray(&self) {
         let update = self.app_update.read().ok().and_then(|guard| guard.clone());
         let items = tray_items(update.as_ref(), self.app_update_busy.load(Ordering::SeqCst));
@@ -1629,22 +1630,24 @@ impl Kernel {
 
     pub async fn handle_tray_menu(self: &Arc<Self>, id: &str) {
         match id {
-            "app-update" => {
-                // 用户确认执行更新：下载 + 交壳可能花上几十秒 —— 放到后台任务里，
-                // 别堵住托盘点击的处理路径（这条通知之后还有别的消息要处理）。
-                let kernel = Arc::clone(self);
-                tokio::spawn(async move {
-                    let _ = kernel.apply_app_update().await;
-                });
-            }
             "show" => {
                 let _ = self.show_window_animated(true).await;
             }
-            "settings" | "plugins" => {
+            // 三个「打开某个页面」的入口：先唤出窗口，再 invoke 拿会话，最后广播 ui/openView。
+            // `app-update` 打开的是更新页（应用 / 内核 / 插件三条通道都在那一页）—— 托盘
+            // **不再直接执行更新**：它只把用户送到那一页，更不更由用户在那里决定（下载 +
+            // 替换 + 重启可能花几十秒，放在托盘点击路径上还会堵住后续消息）。
+            // 这三条命令在清单里都声明了 `hidden`（首页与搜索都不出现），托盘 / 齿轮 /
+            // ⌘, 就是它们的固定入口。
+            "settings" | "plugins" | "app-update" => {
                 // 托盘点菜单时窗口多半藏着：先唤出，再打开对应页面。
                 let _ = self.show_window_animated(true).await;
-                let command = if id == "settings" { "settings" } else { "manage" };
-                let result = self.invoke(&format!("internal-settings:{command}"), None, "host").await;
+                let command = match id {
+                    "settings" => "internal-settings:settings".to_string(),
+                    "plugins" => "internal-settings:manage".to_string(),
+                    _ => format!("{APP_UPDATE_STORE_PLUGIN}:updates"),
+                };
+                let result = self.invoke(&command, None, "host").await;
                 // UI 打开插件页靠的是 invoke 的返回值（HTTP 路径由调用方处理）；
                 // 托盘这条路没有调用方，结果不广播 = 点了没反应。带上完整
                 // ActionResult 广播，UI 端复用同一条 handleResult（失败也能 toast）。
@@ -1659,23 +1662,24 @@ impl Kernel {
     }
 }
 
-/// 托盘菜单 items：应用更新**待确认 / 执行中**时在顶部插入一项（点击 = 用户确认更新）。
+/// 托盘菜单 items。
 ///
-/// 抽成纯函数是为了单测 —— 这是「不自动更新」策略的主要提示入口，错一天用户就看不到更新。
+/// 「检查更新…」是**常驻**第一项（2026-09-20 起）：点击打开更新页（`internal-store:updates`），
+/// 由用户在那页决定要不要更 —— 托盘不再自己执行更新；有新版时标签带上版本号，
+/// 执行中变「正在更新…」并禁点（防重入）。
+///
+/// 抽成纯函数是为了单测 —— 这是「用户手动决定更新」策略的主要提示入口，错一天用户就看不到更新。
 fn tray_items(update: Option<&Value>, busy: bool) -> Vec<Value> {
     let mut items: Vec<Value> = Vec::new();
-    match (busy, update) {
-        (true, _) => {
-            items.push(json!({ "id": "app-update", "label": "正在更新应用…（完成后自动重启）", "enabled": false }));
-            items.push(json!({ "id": "sep-update", "label": "", "type": "separator" }));
-        }
-        (false, Some(update)) => {
-            let latest = update.get("latest").and_then(Value::as_str).unwrap_or_default();
-            items.push(json!({ "id": "app-update", "label": format!("更新到 v{latest}…") }));
-            items.push(json!({ "id": "sep-update", "label": "", "type": "separator" }));
-        }
-        (false, None) => {}
+    if busy {
+        items.push(json!({ "id": "app-update", "label": "正在更新应用…（完成后自动重启）", "enabled": false }));
+    } else if let Some(update) = update {
+        let latest = update.get("latest").and_then(Value::as_str).unwrap_or_default();
+        items.push(json!({ "id": "app-update", "label": format!("发现新版本 v{latest} · 打开更新页…") }));
+    } else {
+        items.push(json!({ "id": "app-update", "label": "检查更新…" }));
     }
+    items.push(json!({ "id": "sep-update", "label": "", "type": "separator" }));
     items.push(json!({ "id": "show", "label": "唤出启动台" }));
     items.push(json!({ "id": "separator-1", "label": "", "type": "separator" }));
     items.push(json!({ "id": "settings", "label": "设置…" }));
@@ -1723,18 +1727,24 @@ mod tests {
             .collect()
     }
 
-    /// 托盘是「不自动更新」策略的主提示入口：无提示不打扰、有提示置顶带版本号、执行中禁点。
+    /// 托盘是「用户手动决定更新」策略的主入口：更新项**常驻**（点击打开更新页），
+    /// 有新版时标签带版本号，执行中禁点。
     #[test]
-    fn tray_items_surface_update_only_when_needed() {
+    fn tray_items_always_surface_update_entry() {
         let idle = tray_items(None, false);
-        assert!(!ids(&idle).contains(&"app-update".to_string()), "无更新提示时不该出现更新项：{idle:?}");
+        assert_eq!(idle[0].get("id").and_then(Value::as_str), Some("app-update"), "无更新时更新项也在（常驻）");
+        let idle_label = idle[0].get("label").and_then(Value::as_str).unwrap_or_default();
+        assert!(idle_label.contains("检查更新"), "无更新时文案要说清是「检查更新」：{idle_label}");
 
         let hinted = tray_items(Some(&json!({ "latest": "0.2.0" })), false);
-        assert_eq!(hinted[0].get("id").and_then(Value::as_str), Some("app-update"), "有提示时更新项应置顶");
+        assert_eq!(hinted[0].get("id").and_then(Value::as_str), Some("app-update"), "有提示时更新项置顶");
         let label = hinted[0].get("label").and_then(Value::as_str).unwrap_or_default();
         assert!(label.contains("0.2.0"), "文案要带版本号：{label}");
+        assert!(label.contains("更新页"), "点击是打开更新页，文案要说出来：{label}");
 
+        // 执行中：仍然常驻，但禁点（防重入）
         let busy = tray_items(Some(&json!({ "latest": "0.2.0" })), true);
+        assert_eq!(busy[0].get("id").and_then(Value::as_str), Some("app-update"), "执行中该项还在");
         assert_eq!(busy[0].get("enabled").and_then(Value::as_bool), Some(false), "执行中该项要禁点（防重入）");
         for id in ["show", "settings", "plugins", "reload", "quit"] {
             assert!(ids(&busy).contains(&id.to_string()), "基础项 {id} 不能丢：{:?}", ids(&busy));

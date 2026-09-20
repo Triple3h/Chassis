@@ -33,6 +33,28 @@ await fsp.writeFile(
 )
 await fsp.writeFile(path.join(dir, 'index.html'), '<!doctype html><title>settings</title>')
 
+// internal-store 的最小替身：更新页。命令声明 `hidden`（首页与搜索都不出现）——
+// 托盘「检查更新…」正是它的固定入口，这条用例顺带证明 hidden 的 view 命令仍可 invoke。
+const storeDir = path.join(builtinRoot, 'internal-store', 'dist')
+await fsp.mkdir(storeDir, { recursive: true })
+await fsp.writeFile(
+  path.join(storeDir, 'package.json'),
+  JSON.stringify(
+    {
+      name: 'internal-store',
+      title: '底座更新',
+      version: '0.1.0',
+      type: 'module',
+      apiVersion: '1',
+      capabilities: ['hostUi'],
+      commands: [{ name: 'updates', title: '更新', mode: 'view', searchable: true, hidden: true }],
+    },
+    null,
+    2,
+  ),
+)
+await fsp.writeFile(path.join(storeDir, 'index.html'), '<!doctype html><title>updates</title>')
+
 const h = await createHarness({ label: 'tray-menu', fakeShell: true, builtinRoots: [builtinRoot] })
 const shell = h.shell
 if (!shell) throw new Error('fakeShell 未启用')
@@ -77,6 +99,18 @@ test('tray/menu(plugins)：广播的是插件管理页（manage）', async () =>
   assert(sent.includes('window.show'), '同样先唤出窗口')
   assertEqual(openView.length, 1, 'ui/openView 恰好一条')
   assertEqual(openView[0]!.data?.command, 'manage', '命令')
+})
+
+test('tray/menu(app-update)：常驻项，点击打开更新页（不直接执行更新）', async () => {
+  const { sent, openView } = await clickTray('app-update')
+  assert(sent.includes('window.show'), '先唤出窗口')
+  assertEqual(openView.length, 1, 'ui/openView 恰好一条')
+  const result = openView[0]!
+  assertEqual(result.ok, true, 'ActionResult.ok')
+  assertEqual(result.data?.pluginId, 'internal-store', '打开的是更新页那个插件')
+  assertEqual(result.data?.command, 'updates', '打开的是更新页')
+  assert(!!result.data?.sid, '带会话 sid（UI 要靠它开 iframe）')
+  assert(!sent.includes('shell.applyUpdate'), `托盘只负责送到更新页，不该直接换包：${sent.join(', ')}`)
 })
 
 test('tray/menu(reload)：内核执行重载（plugin/reloaded 可见）且插件回到 active', async () => {

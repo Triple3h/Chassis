@@ -487,6 +487,10 @@ impl SearchEngine {
 /// 清单顺序里第一条 `searchable` 的（都没有可搜索的才兜底取第一条）—— 保证每插件恰好一格。
 /// 只有贡献型 / 脚本命令的插件（应用启动器、文件搜索、网址直达这类"搜索结果来源"）
 /// 没有入口，不出现在列表里：它们不是"打开一个页面"的插件。
+///
+/// 管理面插件（`internal-settings` 的 settings / manage、`internal-store` 的 updates）就是
+/// `hidden: true` 的 view 命令：**首页不占格、搜索也搜不到**，但它们仍可 `invoke` ——
+/// 只能从各自的固定入口打开（⌘, / 搜索栏齿轮 / 托盘「检查更新…」「设置…」「插件管理…」）。
 fn entry_commands(commands: Vec<Arc<RegisteredCommand>>) -> Vec<Arc<RegisteredCommand>> {
     let mut ordered = commands;
     // marker = 注册序号 = 清单顺序（`PluginManager` 按 commands 数组逐个注册）
@@ -650,6 +654,19 @@ mod tests {
         let picked: Vec<(String, String)> =
             entry_commands(entries).iter().map(|entry| (entry.plugin_id.clone(), entry.decl.name.clone())).collect();
         assert_eq!(picked, vec![("a".to_string(), "open".to_string())], "hidden 的 view 命令不算入口");
+    }
+
+    /// 管理面插件（设置 / 更新）的形态：**全部** view 命令都 `hidden` ⇒ 首页不占格、搜索也搜不到。
+    #[test]
+    fn entry_commands_skip_all_hidden_view_commands() {
+        let entries = vec![
+            command("internal-settings", "settings", CommandMode::View, true, true, 1),
+            command("internal-settings", "manage", CommandMode::View, true, true, 2),
+            command("demo", "open", CommandMode::View, true, false, 3),
+        ];
+        let picked: Vec<(String, String)> =
+            entry_commands(entries).iter().map(|entry| (entry.plugin_id.clone(), entry.decl.name.clone())).collect();
+        assert_eq!(picked, vec![("demo".to_string(), "open".to_string())], "全 hidden 的插件不出现在首页插件格");
     }
 
     #[test]

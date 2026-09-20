@@ -4,7 +4,7 @@
 > 相关：`docs/kernel-hot-update.md`（内核通道，与本通道同构）｜`docs/permissions.md`（签名与 TCC）
 
 壳（`Chassis.app`）是**唯一不能由内核替换的一层** —— 它就是应用本体。这条通道让它在
-GitHub Action 发版后**自动检查并在托盘菜单与「关于」页提示新版本**；
+GitHub Action 发版后**自动检查并提示新版本**（托盘常驻「检查更新…」入口 +「关于」页更新卡片）；
 下载 / 替换 / 重启只在用户确认后发生（**更新绝不自动执行**）。
 
 ---
@@ -18,7 +18,7 @@ GitHub Action 发版后**自动检查并在托盘菜单与「关于」页提示�
 | App 换包（给人） | `v*` | `Chassis-macos-arm64.zip` | 新机器安装 / 手动换包 |
 | 插件 | `plugins-latest` | `registry.json` + 插件 zip | 「更新」页 → 插件 |
 | 内核 | `kernel-latest` | `kernel-registry.json` + 内核 zip | 「更新」页 → 内核 |
-| **应用（壳）** | **`app-latest`** | **`app-registry.json` + `Chassis-<版本>-macos-<架构>.zip`** | **自动检查 → 托盘菜单 / 「关于」页提示 + 「更新」页 → 应用** |
+| **应用（壳）** | **`app-latest`** | **`app-registry.json` + `Chassis-<版本>-macos-<架构>.zip`** | **自动检查 → 托盘「检查更新…」/「关于」页提示 → 「更新」页 → 应用** |
 
 > 三条固定 tag 通道（`app-latest` / `kernel-latest` / `plugins-latest`）发布时会**只保留索引指向的资产**：
 > 工作流在 `action-gh-release` 之后跑 `scripts/prune-release-assets.mjs`，清掉同名覆盖没带走的旧 `.zip`
@@ -67,7 +67,7 @@ helper（脱离壳进程树的 /bin/sh）：等壳退出 → 备份旧 .app → 
 | 环节 | 归谁 | 落点 |
 |---|---|---|
 | 检查 / 下载 / 解压 | 内核 → `internal-store` 的 `update` 命令（同一套代理降级 / 域名白名单 / sha256） | `plugins/internal-store/src/bin/update.rs`（`check-app` / `download-app`） |
-| 检查与提示 | 内核守护（`spawn_app_update_check`）：启动 90s 后 / 每 6h **只检查**，结果进托盘菜单（`tray_items`）与「关于」页 | `apps/kernel/src/kernel.rs` |
+| 检查与提示 | 内核守护（`spawn_app_update_check`）：启动 90s 后 / 每 6h **只检查**；托盘菜单第一项（`tray_items`）**常驻** —— 无新版是「检查更新…」、有新版带版本号，点击一律**打开更新页**（`handle_tray_menu("app-update")`，托盘自己不执行更新）；「关于」页另有更新卡片 | `apps/kernel/src/kernel.rs` |
 | 候选包校验 / 台账 / 替换 / 重启 | 壳（**用户确认后**才走到这里） | `apps/shell/src/update.rs` |
 | 界面（提示 + 手动更新） | 「关于」页更新卡片（`checkAppUpdate` / `applyAppUpdate`）与更新页「应用」区块 | `plugins/internal-settings/src/view/main.ts`、`plugins/internal-store/src/App.vue` |
 
@@ -124,14 +124,18 @@ pnpm version:set app 0.1.4      # 改版本（自动同步三处位点；内核�
 gh workflow run app-release.yml --ref main -f notes="…"     # 或推 app/* tag
 ```
 
-客户端会在下一次守护轮次（启动 90s 后 / 每 6h）**检查**，新版本在托盘菜单与「关于」页提示；
-用户在任一处确认后才下载、替换、重启（「更新」页的「应用」区块也可以立刻手动更新）。
+客户端会在下一次守护轮次（启动 90s 后 / 每 6h）**检查**，新版本在托盘菜单（「检查更新…」→
+「发现新版本 vX.Y.Z · 打开更新页…」）与「关于」页提示；下载 / 替换 / 重启只在用户在**更新页**或
+「关于」页确认后发生（托盘只负责把用户送到更新页）。
+
+> 管理面两个页面（`internal-store` 的更新页、`internal-settings` 的设置 / 插件管理）在清单里声明
+> `hidden`：首页与搜索都不出现它们，固定入口是托盘（「检查更新…」「设置…」「插件管理…」）/ 搜索栏齿轮 / `⌘,`。
 
 机制版本（`SHELL_HOT_VERSION` / `HOT_UPDATE_VERSION`）与插件版本**不在** `version.json` 里，各自独立演进。
 
 ## 8. 有意不做
 
-- **自动应用更新**：更新只**检查 + 提示**（托盘菜单 / 「关于」页），下载 / 替换 / 重启一律等用户确认 ——
+- **自动应用更新**：更新只**检查 + 提示**（托盘常驻入口 / 「关于」页），下载 / 替换 / 重启一律等用户确认 ——
   不做静默下载与无人值守替换（更新时机由用户自己决定）。
 - **Windows 自更新**：运行中 exe 无法替换，走 NSIS 安装器（`pack-win.mjs` / `release.yml`）。
 - **增量包 / dmg / 公证**：整包替换足够（17 MB 级），公证与分发面的事随 `v*` 通道另议。

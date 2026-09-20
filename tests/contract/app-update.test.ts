@@ -67,7 +67,7 @@ test('checkAppUpdate：通道插件不可用 ⇒ 明确失败，不伪装成「�
   assert(shell.sent.includes('app.info'), '检查前应先问壳要版本 / 能否自更新')
 })
 
-test('applyAppUpdate：用户确认后才执行；失败复位 busy 并收回托盘入口（可再试）', async () => {
+test('applyAppUpdate：用户确认后才执行；失败复位 busy（托盘更新入口常驻，可再点）', async () => {
   shell.calls.length = 0
   const res = (await h.pluginAction('applyAppUpdate', {})) as { ok?: boolean; error?: { message?: string } }
   assertEqual(res.ok, false, `没有可用的下载通道时必须失败：${JSON.stringify(res)}`)
@@ -75,11 +75,14 @@ test('applyAppUpdate：用户确认后才执行；失败复位 busy 并收回托
   const status = (await h.pluginAction('appUpdateStatus', {})) as { busy?: boolean }
   assertEqual(status.busy, false, '失败后必须复位：用户还能再试')
 
-  // 执行开始与失败恢复都会重发托盘菜单 —— 最后一份必须回到「无提示」形态
+  // 执行开始与失败恢复都会重发托盘菜单 —— 更新入口是**常驻**第一项，失败后要回到「检查更新…」文案
   await shell.waitFor('tray.setMenu', 3000)
   const menus = shell.calls.filter((item) => item.method === 'tray.setMenu')
-  const items = (menus[menus.length - 1]?.params.items ?? []) as Array<{ id?: string }>
-  assert(!items.some((item) => item.id === 'app-update'), `失败后菜单不该留更新入口：${JSON.stringify(items)}`)
+  const items = (menus[menus.length - 1]?.params.items ?? []) as Array<{ id?: string; label?: string; enabled?: boolean }>
+  const entry = items.find((item) => item.id === 'app-update')
+  assert(!!entry, `更新入口常驻，不该消失：${JSON.stringify(items)}`)
+  assert(String(entry.label).includes('检查更新'), `失败后回到「检查更新…」：${JSON.stringify(entry)}`)
+  assert(entry.enabled !== false, '失败后不留在禁用态（能再点）')
   assert(items.some((item) => item.id === 'quit'), `基础菜单项要还在：${JSON.stringify(items)}`)
 })
 

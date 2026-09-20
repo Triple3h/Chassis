@@ -79,6 +79,10 @@
 1. **已固定**（`PinnedItem`，按用户拖拽顺序；默认露 1 行，超出时标题右侧显示「展开 (N)」）
 2. **已安装插件**（首页 = 插件的入口清单：每个插件一条，取 `mode: view`、未 `hidden` 的入口命令 —— 同插件有多条时取清单顺序里第一条 `searchable` 的；按该插件**最近一次使用**倒序，没用过的排在后面按标题；已固定在上一分区的入口不重复出现；默认露 2 行，超出同上）
 
+   > 管理面插件（设置 / 更新）在清单里把**全部** view 命令声明为 `hidden`（plugin-spec §3.2）：
+   > 首页不占格、搜索也搜不到，但仍可 `invoke` —— 入口只有固定位置（⌘, / 搜索栏齿轮 / 托盘
+   > 「检查更新…」「设置…」「插件管理…」）。
+
 空输入的首页**不展示最近使用** —— 它只在有输入时作为命中分区出现（见下）；`ResultItem` 里的应用 / 文件 / 网址这类条目仍可通过固定或搜索直达。
 
 **有输入时**展示：
@@ -561,14 +565,14 @@ interface AuditRecord {
 
 ### 7.9 应用（壳）自更新（2026-09-19 立项，机制版本 0.1.0）
 
-目标：GitHub Action 发版后，**壳自动检查并在托盘菜单与「关于」页提示新版本**，由用户确认后更新（不自动下载 / 替换 / 重启）；替换失败自动回滚；全程留痕。
+目标：GitHub Action 发版后，**壳自动检查并提示新版本**（托盘常驻「检查更新…」入口 +「关于」页更新卡片），由用户确认后更新（不自动下载 / 替换 / 重启）；替换失败自动回滚；全程留痕。
 机制与签名前提见 [`docs/shell-hot-update.md`](shell-hot-update.md)。
 
 | 面 | 规格 |
 |---|---|
 | 通道 | 固定 tag **`app-latest`**：`app-registry.json`（schema 1，含 sha256 与 `minShellHotVersion`）+ `Chassis-<版本>-macos-<架构>.zip`（整包 `.app`）。与 `v*`（给人下载的换包通道）/ `plugins-latest` / `kernel-latest` 三方独立 |
 | 角色分工 | 检查 / 下载 / 解压 = 内核侧编排 `internal-store` 命令（`check-app` / `download-app`，复用代理降级 + 域名白名单 + sha256）；**候选包自检 / 台账 / 替换 / 重启 = 壳**（`shell.applyUpdate` 原语 + 脱离壳进程树的 helper） |
-| 检查与提示 | 内核守护：启动 90s 后检查一次，之后每 6h —— **只检查**；发现新版在托盘菜单（顶部「更新到 vX.Y.Z」）与「关于」页提示，由用户确认后才下载 / 替换 / 重启。`config.autoUpdateCheck`（默认 true，≤0.1.3 旧键 `autoUpdateApp` 兼容）可关；关掉后仍可在「关于」页 / 更新页手动检查 |
+| 检查与提示 | 内核守护：启动 90s 后检查一次，之后每 6h —— **只检查**；托盘菜单第一项**常驻**（无新版「检查更新…」/ 有新版带版本号），点击**打开更新页**（托盘自己不执行更新）；「关于」页另有更新卡片。下载 / 替换 / 重启由用户在更新页或「关于」页确认后触发。`config.autoUpdateCheck`（默认 true，≤0.1.3 旧键 `autoUpdateApp` 兼容）可关；关掉后仍可在「关于」页 / 更新页手动检查 |
 | 候选包自检 | 壳跑 `--hot-probe`：结构（`Contents/MacOS/launcher-shell` + `Info.plist`）→ **版本自洽**（plist 的 `CFBundleShortVersionString` 与二进制自报一致，不一致即拒 —— 抓包拼装事故）→ 自检能跑通。三道全过才写台账 |
 | 替换 | 写 `<dataRoot>/hot/shell/pending.json` → 生成 helper（`swap.sh`）→ 壳退出 → helper 等壳完全退出 → 备份旧 `.app`（同卷 rename）→ 落新包 → `xattr -dr` → `lsregister -f` → `open`。任一步失败都回到「原包在原位」 |
 | 回滚（三重） | ① helper 的 8 秒窗口：新实例没起来 ⇒ 自动换回备份再 open；② 启动守卫：台账 `attempts ≥2` ⇒ 交 helper `restore`；③ 台账版本校验：候选版本 ≠ 当前版本 ⇒ 视为过期台账丢弃；开发态（非 `.app`）完全不参与记账 |
@@ -847,7 +851,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 
 ### M4 — 分发（2–3 周）
 **交付**：打包、签名、公证、`tauri-plugin-updater` + minisign、CI（macOS arm64 + x64）、`docs/plugin-spec.md`。
-**验收**：另一台机器下载 `.dmg` 安装 → 首次启动不报安全警告 → 装插件 → 在托盘 / 「关于」页确认后更新到下一版。
+**验收**：另一台机器下载 `.dmg` 安装 → 首次启动不报安全警告 → 装插件 → 在「关于」页确认后更新到下一版（入口也能从托盘「检查更新…」进更新页）。
 
 ### M5 — Rust 内核（2–3 周，2026-09-17 立项）
 **交付**：`ADR-0005`（内核语言决策）、`packages/plugin-sdk-rs`（Rust 插件 SDK）、`apps/kernel`（bin `launcher-kernel`）、5 个出厂插件的逻辑层 Rust 化、构建与打包链路改造（免 Node）。
@@ -904,7 +908,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 壳侧自更新（`--hot-probe` 自检 / `pending.json` / 启动守卫 / 独立 helper 替换与回滚 / `shell.applyUpdate` 原语）、
 更新页「应用」区块。
 **验收**：
-- CI 发 `app-latest` 后，客户端在守护轮次内**自动检查**，新版本在托盘菜单与「关于」页提示；用户确认后完成下载 / 校验 / 替换 / 重启（更新动作必须人工触发）
+- CI 发 `app-latest` 后，客户端在守护轮次内**自动检查**；托盘菜单第一项常驻（有新版带版本号，点击打开更新页），「关于」页提示同一份状态；用户确认后完成下载 / 校验 / 替换 / 重启（更新动作必须人工触发）
 - 候选包不完整 / 版本自洽性不过 / 自检跑不起来 ⇒ 拒绝安装，当前版本一动不动
 - 新包启动失败：helper 8 秒内没看到实例 ⇒ 自动换回备份；连续两次未就绪 ⇒ 启动守卫回滚（台账清理，无需人工修）
 - 开发态（非 `.app`）与只读安装位置：不检查、不提示、不记账（`canSelfUpdate=false`）

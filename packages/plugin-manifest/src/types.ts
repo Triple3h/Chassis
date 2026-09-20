@@ -27,7 +27,7 @@ export interface CommandDecl {
   contributes?: boolean
   /** 覆盖插件级声明（并入，取并集） */
   capabilities?: string[]
-  /** 不出现在搜索结果（仍可被 invoke） */
+  /** 不出现在搜索结果与首页「已安装插件」清单（仍可被 invoke） */
   hidden?: boolean
 }
 

@@ -121,7 +121,12 @@ my-plugin/
 | `keywords` | 可选 | string[] ≤ 10 | 该命令的别名 |
 | `contributes` | 可选 | boolean，默认 `false` | 贡献型搜索（§9.1）：搜索过程中由插件返回结果项 |
 | `capabilities` | 可选 | string[] | 该命令的额外能力（并入插件级，取并集） |
-| `hidden` | 可选 | boolean，默认 `false` | 不出现在搜索结果（仍可被 `invoke` 调用） |
+| `hidden` | 可选 | boolean，默认 `false` | 不出现在搜索结果**与首页「已安装插件」清单**（仍可被 `invoke` 调用） |
+
+> `hidden` 是**双向**的：既退搜索结果、也退首页那一格 —— 管理面插件（`internal-settings` 的 `settings` / `manage`、
+> `internal-store` 的 `updates`）用它把入口收进固定位置（⌘, / 搜索栏齿轮 / 托盘「检查更新…」「设置…」「插件管理…」），
+> 页面本身仍可 `invoke` 打开。想整插件退干净，要把它的**全部** `view` 命令都标上
+> （否则同插件的下一条 `view` 命令会顺位顶上首页格）。
 
 > `essential` **只有出厂 bundle 的声明生效**：内核按 `builtin && essential` 判定，第三方插件在清单里写 `true` 也不会获得
 > 「用户关不掉」的待遇（那是权限提升）。出厂插件的 id 与数据布局见 §2。
