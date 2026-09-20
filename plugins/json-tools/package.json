@@ -2,8 +2,8 @@
   "name": "json-tools",
   "title": "JSON 工具箱",
   "author": "triple3h",
-  "description": "无损格式化 / 压缩 / 键排序 / 错误定位 / 中文转Unicode、整篇 \\ 转义与还原；对齐 bejson：左栏是带行号 + 高亮 + 折叠的编辑器（格式化与缩进原地改写、Tab 缩进、⌘Z 可撤销），右栏树视图有括号计数、收尾括号行、行内改键改值与增删成员，10MB 级 JSON 也不卡",
-  "version": "0.3.0",
+  "description": "无损格式化 / 压缩 / 键排序 / 错误定位 / 中文转Unicode、整篇 \\ 转义与还原；左栏是带行号 + 高亮 + 折叠的编辑器（原地改写、Tab 缩进、⌘Z 可撤销），右栏树视图可改键改值与增删成员，10MB 级 JSON 也不卡；最多 8 个子标签页并行处理多份 JSON，最近 20 份自动进历史随时回溯",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "apiVersion": "1",
@@ -13,7 +13,8 @@
     "tool"
   ],
   "capabilities": [
-    "hostUi"
+    "hostUi",
+    "storage"
   ],
   "commands": [
     {

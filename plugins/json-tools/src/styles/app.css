@@ -391,3 +391,78 @@ span.jchev {
 .jmenu-caret {
   color: var(--launcher-muted);
 }
+
+/* ------------------------------------------------- 标签栏（多份文档并行） */
+
+.jtabbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--launcher-line);
+}
+
+/* 标签多了只让这一条横滚，右边的新建按钮始终看得见 */
+.jtablist {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.jtabnew {
+  flex: none;
+}
+
+.jtab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 3px 3px 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--launcher-muted);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  user-select: none;
+}
+.jtab:hover {
+  background: var(--launcher-active);
+}
+.jtab.is-active {
+  border-color: var(--launcher-line);
+  background: var(--launcher-panel);
+  color: var(--launcher-fg);
+  font-weight: 600;
+}
+
+.jtab-title {
+  max-width: 120px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.jtab-x {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--launcher-faint);
+  cursor: pointer;
+}
+.jtab-x:hover {
+  background: var(--launcher-line);
+  color: var(--launcher-fg);
+}

@@ -28,6 +28,14 @@ import {
   lineEndOffset,
   lineOfOffset,
 } from '../src/core/editorOps'
+import {
+  addHistoryEntry,
+  HISTORY_LIMIT,
+  HISTORY_MAX_ENTRY_BYTES,
+  previewOf,
+  sanitizeHistory,
+  type HistoryEntry,
+} from '../src/core/history'
 
 let passed = 0
 function test(name: string, fn: () => void) {
@@ -628,6 +636,69 @@ test('20 万节点建树 < 1.5s', () => {
   const dt = performance.now() - t0
   console.log(`    ${tree.nodeCount} 节点，耗时 ${dt.toFixed(0)}ms`)
   assert.ok(dt < 1500, `耗时 ${dt.toFixed(0)}ms`)
+})
+
+console.log('历史记录')
+
+test('上限 20 条：超出的从最旧开始丢', () => {
+  let list: HistoryEntry[] = []
+  for (let i = 1; i <= 25; i++) {
+    list = addHistoryEntry(list, { id: `e${i}`, owner: `t${i}`, at: i, text: `{"i":${i}}` })
+  }
+  assert.equal(list.length, HISTORY_LIMIT)
+  assert.equal(list[0].text, '{"i":25}')
+  assert.equal(list.at(-1)?.text, '{"i":6}')
+})
+
+test('同一标签页的内容变化是 upsert，不是新记录', () => {
+  let list: HistoryEntry[] = []
+  list = addHistoryEntry(list, { id: 'a', owner: 't1', at: 1, text: '{"a":1}' })
+  list = addHistoryEntry(list, { id: 'b', owner: 't1', at: 2, text: '{"a":2}' })
+  assert.equal(list.length, 1)
+  assert.equal(list[0].text, '{"a":2}')
+  // 内容没变 ⇒ 返回原数组（调用方可据此跳过落盘）
+  assert.equal(addHistoryEntry(list, { id: 'c', owner: 't1', at: 3, text: '{"a":2}' }), list)
+})
+
+test('别处的同一份内容不会重复留两条', () => {
+  let list: HistoryEntry[] = []
+  list = addHistoryEntry(list, { id: 'a', owner: 't1', at: 1, text: '{"a":1}' })
+  list = addHistoryEntry(list, { id: 'b', owner: 't2', at: 2, text: '{"a":1}' })
+  assert.equal(list.length, 1)
+  assert.equal(list[0].owner, 't2')
+})
+
+test('空白与超大内容不入库', () => {
+  let list: HistoryEntry[] = addHistoryEntry([], { id: 'a', owner: 't1', at: 1, text: '   ' })
+  assert.equal(list.length, 0)
+  const huge = 'x'.repeat(HISTORY_MAX_ENTRY_BYTES + 1)
+  assert.equal(addHistoryEntry([], { id: 'b', owner: 't2', at: 2, text: huge }).length, 0)
+})
+
+test('总量预算：从最旧一端淘汰到装得下', () => {
+  const chunk = 'y'.repeat(300_000)
+  let list: HistoryEntry[] = []
+  for (let i = 1; i <= 5; i++) {
+    list = addHistoryEntry(list, { id: `e${i}`, owner: `t${i}`, at: i, text: `${chunk}${i}` })
+  }
+  // 每条约 300KB，1MB 预算下只装得下 3 条
+  assert.equal(list.length, 3)
+  assert.equal(list[0].at, 5)
+  assert.equal(list.at(-1)?.at, 3)
+})
+
+test('脏数据清洗：非数组 / 缺字段 / 超量', () => {
+  assert.deepEqual(sanitizeHistory(null), [])
+  assert.deepEqual(sanitizeHistory([{ text: '  ' }, 7, { text: '{"a":1}', at: '9' }]), [
+    { id: '', owner: '', at: 9, text: '{"a":1}' },
+  ])
+  const many = Array.from({ length: 30 }, (_, i) => ({ id: `${i}`, owner: '', at: i, text: `{"i":${i}}` }))
+  assert.equal(sanitizeHistory(many).length, HISTORY_LIMIT)
+})
+
+test('摘要压平空白并截断', () => {
+  assert.equal(previewOf('{\n  "a": 1,\n  "b": 2\n}'), '{ "a": 1, "b": 2 }')
+  assert.equal(previewOf('x'.repeat(200)).length, 91)
 })
 
 console.log(`\n通过 ${passed} 项`)

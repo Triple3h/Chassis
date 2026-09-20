@@ -263,9 +263,21 @@ function onSelectionChange() {
 }
 
 onUpdated(scheduleGeometry)
+
+/**
+ * 视口尺寸变化 ⇒ 重算光标 / 选区。
+ * 多标签页要靠它：非当前页是 `display: none`（撤销栈与折叠状态都留着），重新显示时
+ * 组件本身不 re-render，光标几何会停在上一次「隐藏前」的测量结果上。
+ */
+let ro: ResizeObserver | null = null
+
 onMounted(() => {
   window.addEventListener('resize', scheduleGeometry)
   document.addEventListener('selectionchange', onSelectionChange)
+  if (typeof ResizeObserver !== 'undefined' && scroller.value) {
+    ro = new ResizeObserver(scheduleGeometry)
+    ro.observe(scroller.value)
+  }
   scheduleGeometry()
 })
 onUnmounted(() => {
@@ -273,6 +285,7 @@ onUnmounted(() => {
   window.removeEventListener('mousemove', onDragMove)
   window.removeEventListener('mouseup', onDragEnd)
   document.removeEventListener('selectionchange', onSelectionChange)
+  ro?.disconnect()
   clearTimeout(foldTimer)
   if (rafId) cancelAnimationFrame(rafId)
   if (timerId) clearTimeout(timerId)
