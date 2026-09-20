@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict'
 import { formatJson } from '../src/core/format'
-import { buildTree, childrenOf, matchNodes, pathOf, projectRows, KIND } from '../src/core/tree'
+import {
+  buildTree,
+  childrenOf,
+  countKinds,
+  jsonPath,
+  matchNodes,
+  nodeAtLine,
+  nodeSource,
+  pathOf,
+  pathString,
+  projectRows,
+  KIND,
+} from '../src/core/tree'
+import { escapeUnicode, unescapeUnicode } from '../src/core/unicode'
 import { indexLines, lineAt } from '../src/core/lineIndex'
 import { highlightJsonLine } from '../src/core/highlight'
 
@@ -193,6 +206,105 @@ test('高亮转义与着色', () => {
   assert.ok(!html.includes('<img>'))
   assert.ok(html.includes('launcher-hl-key'))
   assert.ok(html.includes('launcher-hl-num'))
+})
+
+console.log('树定位 / 路径')
+
+test('节点带源码行号与偏移', () => {
+  const src = '{\n  "a": 1,\n  "b": {\n    "c": "x"\n  }\n}'
+  const tree = buildTree(src)
+  // 0 根、1 a、2 b、3 c
+  assert.equal(tree.line[0], 1)
+  assert.equal(tree.line[1], 2)
+  assert.equal(tree.line[2], 3)
+  assert.equal(tree.line[3], 4)
+  assert.equal(src.slice(tree.start[1], tree.end[1]), '1')
+  assert.equal(src.slice(tree.start[3], tree.end[3]), '"x"')
+  assert.equal(src.slice(tree.start[2], tree.end[2]), '{\n    "c": "x"\n  }')
+})
+
+test('行号在多行数组里递增', () => {
+  const src = '[\n  1,\n  2,\n  [\n    3\n  ]\n]'
+  const tree = buildTree(src)
+  assert.deepEqual(Array.from(tree.line), [1, 2, 3, 4, 5])
+})
+
+test('路径拼接：点号 / 下标 / 特殊键', () => {
+  const tree = buildTree('{"user":{"tags":["dev"],"content-type":"x"}}')
+  assert.equal(pathString(tree, 3), 'user.tags[0]')
+  assert.equal(jsonPath(tree, 3), '$.user.tags[0]')
+  assert.equal(jsonPath(tree, 4), '$.user["content-type"]')
+  assert.equal(jsonPath(tree, 0), '$')
+  assert.deepEqual(pathOf(tree, 3), ['user', 'tags', '[0]'])
+})
+
+test('源码行 → 节点（文本视图反向定位）', () => {
+  const tree = buildTree('{\n  "a": 1,\n  "b": [\n    10,\n    20\n  ]\n}')
+  assert.equal(nodeAtLine(tree, 2), 1)
+  assert.equal(nodeAtLine(tree, 4), 3)
+  assert.equal(nodeAtLine(tree, 5), 4)
+  // 闭合括号行没有对应节点，退回最后一个节点
+  assert.equal(nodeAtLine(tree, 7), 4)
+})
+
+test('取节点的原文片段（含键）', () => {
+  const src = '{\n  "a": [1, 2]\n}'
+  const tree = buildTree(src)
+  assert.equal(nodeSource(tree, src, 1), '[1, 2]')
+  assert.equal(nodeSource(tree, src, 1, true), '"a": [1, 2]')
+  // 数组元素不带键
+  assert.equal(nodeSource(tree, src, 2, true), '1')
+})
+
+test('树的类型统计', () => {
+  const tree = buildTree('{"a":1,"b":[true,null,"s"]}')
+  assert.deepEqual(countKinds(tree), { object: 1, array: 1, string: 1, number: 1, boolean: 1, null: 1 })
+})
+
+console.log('类型分布（格式化路径）')
+
+test('stats.kinds 与树统计一致', () => {
+  const res = formatJson('{"a":1,"b":[true,null,"s"]}')
+  assert.deepEqual(res.stats.kinds, { object: 1, array: 1, string: 1, number: 1, boolean: 1, null: 1 })
+  assert.deepEqual(res.stats.kinds, countKinds(buildTree(res.output)))
+})
+
+test('失败时 stats.kinds 归零', () => {
+  const res = formatJson('{"a":}')
+  assert.deepEqual(res.stats.kinds, { object: 0, array: 0, string: 0, number: 0, boolean: 0, null: 0 })
+})
+
+console.log('unicode 转义 / 还原')
+
+test('转义非 ASCII（含代理对）', () => {
+  const r = escapeUnicode('{"n":"中","e":"😀"}')
+  assert.equal(r.text, '{"n":"\\u4e2d","e":"\\ud83d\\ude00"}')
+  assert.equal(r.changed, 3)
+})
+
+test('转义跳过已有的转义序列', () => {
+  const r = escapeUnicode('{"a":"\\\\u4e2d","b":"中"}')
+  assert.equal(r.text, '{"a":"\\\\u4e2d","b":"\\u4e2d"}')
+  assert.equal(r.changed, 1)
+})
+
+test('还原 \\uXXXX（连写的代理对会合成 emoji）', () => {
+  const r = unescapeUnicode('{"n":"\\u4e2d","e":"\\ud83d\\ude00"}')
+  assert.equal(r.text, '{"n":"中","e":"😀"}')
+  assert.equal(r.changed, 3)
+})
+
+test('还原不动会破坏结构的转义（引号 / 反斜杠 / 控制字符）', () => {
+  const r = unescapeUnicode('{"q":"\\u0022","b":"\\\\u0041","c":"\\u0001"}')
+  assert.equal(r.text, '{"q":"\\u0022","b":"\\\\u0041","c":"\\u0001"}')
+  assert.equal(r.changed, 0)
+})
+
+test('转义与还原互为逆操作', () => {
+  const src = '{"中文":"值 😀","emoji":"👍"}'
+  const esc = escapeUnicode(src)
+  assert.ok(esc.changed > 0)
+  assert.equal(unescapeUnicode(esc.text).text, src)
 })
 
 console.log('性能')

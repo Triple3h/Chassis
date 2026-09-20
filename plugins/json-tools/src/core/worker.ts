@@ -43,7 +43,19 @@ scope.onmessage = (e: MessageEvent) => {
       scope.postMessage({
         id: req.id,
         op: 'format',
-        result: { ok: false, output: '', issue, stats: { inChars: req.text.length, outBytes: 0, outLines: 0, nodes: 0, depth: 0 } },
+        result: {
+          ok: false,
+          output: '',
+          issue,
+          stats: {
+            inChars: req.text.length,
+            outBytes: 0,
+            outLines: 0,
+            nodes: 0,
+            depth: 0,
+            kinds: { object: 0, array: 0, string: 0, number: 0, boolean: 0, null: 0 },
+          },
+        },
       })
     } else {
       scope.postMessage({ id: req.id, op: 'tree', issue })

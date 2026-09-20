@@ -47,3 +47,57 @@
   color: var(--launcher-faint);
   user-select: none;
 }
+
+/* 从树里定位过来的那一行（临时高亮） */
+.launcher-code-row.is-hit {
+  background: color-mix(in srgb, var(--launcher-accent) 20%, transparent);
+  border-radius: 3px;
+}
+
+/* 树视图：类型徽标 */
+.launcher-kind {
+  background: var(--launcher-hover);
+  color: var(--launcher-faint);
+}
+
+.launcher-kind-str {
+  color: var(--launcher-string);
+}
+
+.launcher-kind-num {
+  color: var(--launcher-number);
+}
+
+.launcher-kind-bool {
+  color: var(--launcher-code);
+}
+
+.launcher-kind-null {
+  color: var(--launcher-faint);
+}
+
+.launcher-kind-container {
+  color: var(--launcher-muted);
+}
+
+/* 树视图：源码行号列（点击跳回文本视图） */
+.launcher-tree-line {
+  flex: none;
+  text-align: right;
+  padding-right: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--launcher-faint);
+  user-select: none;
+}
+
+.launcher-tree-line:hover {
+  color: var(--launcher-accent);
+}
+
+/* 过滤命中的片段 */
+.launcher-mark {
+  background: color-mix(in srgb, var(--launcher-warn) 40%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}

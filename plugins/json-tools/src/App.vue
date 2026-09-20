@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useToast } from '@launcher/ui/toast'
@@ -10,6 +10,7 @@ import { useTheme } from '@launcher/ui/theme'
 import type { FormatOptions, FormatResult, IndentOption } from './core/format'
 import { runBuildTree, runFormat } from './core/runner'
 import type { FlatTree } from './core/tree'
+import { escapeUnicode, unescapeUnicode } from './core/unicode'
 import OutputPane from './components/OutputPane.vue'
 import TreePane from './components/TreePane.vue'
 
@@ -33,6 +34,9 @@ const split = ref(46)
 const wrapRef = ref<HTMLElement | null>(null)
 const tree = shallowRef<FlatTree | null>(null)
 const treeIssue = ref('')
+/** 从树里定位过来、需要高亮的输出行（1 起，0 = 无） */
+const hitLine = ref(0)
+const outputPane = ref<{ scrollToLine: (line: number) => void } | null>(null)
 const toast = useToast()
 const { theme, toggle: toggleTheme } = useTheme()
 
@@ -65,6 +69,7 @@ async function compute(immediate = false) {
     const res = await runFormat(text, options.value)
     if (mine !== job) return
     result.value = res
+    hitLine.value = 0
     busy.value = false
     if (view.value === 'tree') void refreshTree()
   }
@@ -72,25 +77,40 @@ async function compute(immediate = false) {
   else timer = setTimeout(run, 160) as unknown as number
 }
 
+/**
+ * 树基于「格式化输出」构建（不是原始输入）：这样节点行号就是文本视图里的行号，
+ * 树里的「定位」与文本里的行能一一对上。
+ */
 async function refreshTree() {
   const res = result.value
   if (!res?.ok) {
     tree.value = null
     return
   }
-  if (res.stats.inChars > MAX_TREE_CHARS) {
+  const text = res.output
+  if (text.length > MAX_TREE_CHARS) {
     tree.value = null
-    treeIssue.value = `内容过大（${res.stats.inChars.toLocaleString()} 字符），已停用树视图，请切换到文本视图`
+    treeIssue.value = `内容过大（${text.length.toLocaleString()} 字符），已停用树视图，请改用文本视图`
     return
   }
   treeIssue.value = ''
-  tree.value = await runBuildTree(source.value, { maxNodes: 300_000 })
+  const mine = job
+  const built = await runBuildTree(text, { maxNodes: 300_000 })
+  if (mine !== job) return
+  tree.value = built
 }
 
 watch(source, () => void compute())
 watch(options, () => void compute(true))
-watch(view, (v) => {
-  if (v === 'tree') void refreshTree()
+watch(view, async (v) => {
+  if (v === 'tree') {
+    void refreshTree()
+    return
+  }
+  if (hitLine.value) {
+    await nextTick()
+    outputPane.value?.scrollToLine(hitLine.value)
+  }
 })
 
 /* ------------------------------------------------------------------- 交互 */
@@ -160,6 +180,30 @@ function loadSample() {
 
 function toggleView() {
   view.value = view.value === 'tree' ? 'text' : 'tree'
+}
+
+/** 树视图点行号 / 定位：切到文本视图并滚到那一行 */
+async function revealLine(line: number) {
+  if (!line || line < 1) return
+  hitLine.value = line
+  view.value = 'text'
+  await nextTick()
+  outputPane.value?.scrollToLine(line)
+}
+
+/** 字符串里的非 ASCII 字符 ↔ \uXXXX 互转（作用于输入文本） */
+function applyUnicode(mode: 'escape' | 'unescape') {
+  if (!source.value.trim()) {
+    toast.info('先输入 JSON')
+    return
+  }
+  const res = mode === 'escape' ? escapeUnicode(source.value) : unescapeUnicode(source.value)
+  if (!res.changed) {
+    toast.info(mode === 'escape' ? '没有需要转义的字符' : '没有可还原的 \\uXXXX')
+    return
+  }
+  setSource(res.text)
+  toast.ok(mode === 'escape' ? `已转义 ${res.changed} 个字符` : `已还原 ${res.changed} 处`)
 }
 
 function onDrop(e: DragEvent) {
@@ -246,6 +290,8 @@ async function syncFooter() {
         { id: 'sort', name: '对象键排序', onSelect: () => (sortKeys.value = !sortKeys.value) },
         { id: 'copy', name: '复制结果', onSelect: copyOutput },
         { id: 'download', name: '下载 JSON', onSelect: download },
+        { id: 'escUni', name: 'Unicode 转义（非 ASCII → \\uXXXX）', onSelect: () => applyUnicode('escape') },
+        { id: 'unescUni', name: 'Unicode 还原（\\uXXXX → 字符）', onSelect: () => applyUnicode('unescape') },
         { id: 'clip', name: '读取剪贴板', onSelect: importFromClipboard },
         { id: 'clear', name: '清空', onSelect: clearAll },
       ],
@@ -331,6 +377,15 @@ watch(view, () => void syncFooter())
 
       <div class="mx-1 h-4 w-px bg-line" />
 
+      <button class="launcher-btn ghost" title="把字符串里的非 ASCII 字符转成 \uXXXX" @click="applyUnicode('escape')">
+        <UiIcon name="upload" :size="13" />Unicode 转义
+      </button>
+      <button class="launcher-btn ghost" title="把 \uXXXX 还原成字符" @click="applyUnicode('unescape')">
+        <UiIcon name="download" :size="13" />还原
+      </button>
+
+      <div class="mx-1 h-4 w-px bg-line" />
+
       <button class="launcher-btn ghost" title="复制结果" @click="copyOutput">
         <UiIcon name="copy" :size="13" />复制
       </button>
@@ -407,18 +462,33 @@ watch(view, () => void syncFooter())
           <UiIcon name="info" :size="13" />{{ treeIssue }}
         </div>
 
+        <!-- v-show 而非 v-if：切视图不丢树的展开状态与滚动位置 -->
         <div class="min-h-0 flex-1">
-          <OutputPane v-if="view === 'text'" :text="output" :plain="minify" />
-          <TreePane v-else :tree="tree" />
+          <OutputPane v-show="view === 'text'" ref="outputPane" :text="output" :plain="minify" :hit-line="hitLine" />
+          <TreePane
+            v-show="view === 'tree'"
+            :tree="tree"
+            :source="output"
+            :show-line="!minify"
+            @reveal="revealLine"
+          />
         </div>
       </div>
     </div>
 
     <!-- 状态栏 -->
-    <footer class="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <footer class="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
       <span v-if="issue" class="text-danger">解析失败</span>
       <span v-else-if="output">已格式化</span>
       <span v-else>等待输入</span>
+      <span v-if="stats && stats.nodes" class="flex items-center gap-2.5" title="按类型统计的节点数">
+        <span>对象 {{ stats.kinds.object }}</span>
+        <span>数组 {{ stats.kinds.array }}</span>
+        <span>字符串 {{ stats.kinds.string }}</span>
+        <span>数字 {{ stats.kinds.number }}</span>
+        <span>布尔 {{ stats.kinds.boolean }}</span>
+        <span>空值 {{ stats.kinds.null }}</span>
+      </span>
       <span class="ml-auto flex items-center gap-3">
         <span><span class="launcher-kbd">{{ modLabel }}</span> <span class="launcher-kbd">↵</span> 格式化</span>
         <span><span class="launcher-kbd">{{ modLabel }}</span> <span class="launcher-kbd">E</span> 视图</span>

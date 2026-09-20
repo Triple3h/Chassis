@@ -9,6 +9,7 @@ import {
   scanString,
   skipWs,
 } from './scanner'
+import type { KindCounts } from './tree'
 
 export type IndentOption = 2 | 4 | 'tab'
 
@@ -42,6 +43,8 @@ export interface JsonStats {
   nodes: number
   /** 最大嵌套深度 */
   depth: number
+  /** 按类型分布的节点数 */
+  kinds: KindCounts
 }
 
 export interface FormatResult {
@@ -77,6 +80,7 @@ class Emitter {
 
   nodes = 0
   maxDepth = 0
+  kinds: KindCounts = { object: 0, array: 0, string: 0, number: 0, boolean: 0, null: 0 }
 
   constructor(text: string, opts: FormatOptions) {
     this.s = text
@@ -111,38 +115,43 @@ class Emitter {
     if (c === 45 || (c >= 48 && c <= 57)) return this.number()
     if (this.s.startsWith('true', this.i) && this.boundary(this.i + 4)) {
       this.i += 4
-      this.nodes++
+      this.tick('boolean')
       return 'true'
     }
     if (this.s.startsWith('false', this.i) && this.boundary(this.i + 5)) {
       this.i += 5
-      this.nodes++
+      this.tick('boolean')
       return 'false'
     }
     if (this.s.startsWith('null', this.i) && this.boundary(this.i + 4)) {
       this.i += 4
-      this.nodes++
+      this.tick('null')
       return 'null'
     }
     if (this.lenient) {
       if (this.s.startsWith('NaN', this.i) || this.s.startsWith('Infinity', this.i)) {
         this.i += this.s.startsWith('NaN', this.i) ? 3 : 8
-        this.nodes++
+        this.tick('null')
         return 'null'
       }
       if (this.s.startsWith('-Infinity', this.i)) {
         this.i += 9
-        this.nodes++
+        this.tick('null')
         return 'null'
       }
       const bare = scanBareValue(this.s, this.i)
       if (bare) {
         this.i += bare.length
-        this.nodes++
+        this.tick('string')
         return encodeJsonString(bare)
       }
     }
     throw new JsonError(`这里需要一个值，却读到 ${JSON.stringify(this.s[this.i])}`, this.i)
+  }
+
+  private tick(kind: keyof KindCounts) {
+    this.nodes++
+    this.kinds[kind]++
   }
 
   /** 关键字边界检查，避免 `truex` 被当成 `true` */
@@ -155,7 +164,7 @@ class Emitter {
   private string(): string {
     const res = scanString(this.s, this.i, this.lenient)
     this.i = res.end
-    this.nodes++
+    this.tick('string')
     if (!this.lenient || res.raw.charCodeAt(0) === 34) return res.raw
     return encodeJsonString(decodeString(res.raw))
   }
@@ -163,7 +172,7 @@ class Emitter {
   private number(): string {
     const res = scanNumber(this.s, this.i)
     this.i = res.end
-    this.nodes++
+    this.tick('number')
     return res.raw
   }
 
@@ -215,7 +224,7 @@ class Emitter {
       const value = this.value(depth + 1)
       entries.push({ key, raw, value })
     }
-    this.nodes++
+    this.tick('object')
     if (entries.length === 0) return '{}'
     if (this.sortKeys) entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     if (this.nl === '') {
@@ -258,7 +267,7 @@ class Emitter {
       }
       items.push(this.value(depth + 1))
     }
-    this.nodes++
+    this.tick('array')
     if (items.length === 0) return '[]'
     if (this.nl === '') return '[' + items.join(',') + ']'
     const pad = this.indentUnit.repeat(depth + 1)
@@ -273,6 +282,10 @@ class Emitter {
     if (depth > MAX_DEPTH) throw new JsonError(`嵌套层级超过 ${MAX_DEPTH} 层`, this.i)
     if (depth > this.maxDepth) this.maxDepth = depth
   }
+}
+
+function zeroKinds(): KindCounts {
+  return { object: 0, array: 0, string: 0, number: 0, boolean: 0, null: 0 }
 }
 
 function countLines(s: string): number {
@@ -315,6 +328,7 @@ export function formatJson(text: string, opts: FormatOptions = {}): FormatResult
     outLines: 0,
     nodes: 0,
     depth: 0,
+    kinds: zeroKinds(),
   }
   if (!text.trim()) {
     return { ok: false, output: '', issue: { message: '内容为空', index: 0, line: 1, column: 1, snippet: '' }, stats: emptyStats }
@@ -333,6 +347,7 @@ export function formatJson(text: string, opts: FormatOptions = {}): FormatResult
         outLines: countLines(output),
         nodes: em.nodes,
         depth: em.maxDepth,
+        kinds: em.kinds,
       },
     }
   } catch (err) {
@@ -353,6 +368,7 @@ export function formatJson(text: string, opts: FormatOptions = {}): FormatResult
           outLines: countLines(output),
           nodes: em.nodes,
           depth: em.maxDepth,
+          kinds: em.kinds,
         },
       }
     } catch {

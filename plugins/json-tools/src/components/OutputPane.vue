@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useVirtualList } from '@launcher/ui/virtual'
 import { highlightJsonLine } from '../core/highlight'
 import { indexLines, lineAt } from '../core/lineIndex'
@@ -8,6 +8,8 @@ const props = defineProps<{
   text: string
   /** 压缩模式下是超长单行，跳过着色直接纯文本渲染 */
   plain?: boolean
+  /** 高亮行（1 起；来自树视图的「定位」） */
+  hitLine?: number
 }>()
 
 const ROW = 20
@@ -41,6 +43,14 @@ const rows = computed<Row[]>(() => {
 /** 用最长行的字符数撑开横向宽度，避免滚动条随可视行抖动 */
 const widthCh = computed(() => Math.max(index.value.maxLen + 4, 40))
 
+/** 高亮行下标（0 起），-1 表示无 */
+const hit = computed(() => (props.hitLine && props.hitLine > 0 ? props.hitLine - 1 : -1))
+
+function scrollToLine(line: number) {
+  const row = Math.max(0, Math.min(index.value.count - 1, line - 1))
+  scrollToIndex(row, 'start')
+}
+
 watch(
   () => props.text,
   () => {
@@ -48,7 +58,18 @@ watch(
   },
 )
 
-defineExpose({ scrollToIndex })
+onMounted(() => {
+  if (hit.value >= 0) scrollToLine(props.hitLine as number)
+})
+
+watch(
+  () => props.hitLine,
+  (v) => {
+    if (v && v > 0) scrollToLine(v)
+  },
+)
+
+defineExpose({ scrollToIndex, scrollToLine })
 </script>
 
 <template>
@@ -60,6 +81,7 @@ defineExpose({ scrollToIndex })
           v-for="row in rows"
           :key="row.no"
           class="launcher-code-row"
+          :class="{ 'is-hit': row.no === hit }"
           :style="{ top: row.no * ROW + 'px' }"
         >
           <template v-if="plain">{{ row.line }}</template>
