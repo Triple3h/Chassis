@@ -30,6 +30,8 @@ export interface ZipEntry {
   /** zip 内的相对路径（目录以 `/` 结尾）；**必须**用 `/` 分隔 */
   name: string
   data?: Buffer | string
+  /** unix 权限位（如 `0o755`）；写进 external attrs，解压方应据此还原可执行位 */
+  mode?: number
 }
 
 export function makeZip(entries: ZipEntry[]): Buffer {
@@ -72,7 +74,7 @@ export function makeZip(entries: ZipEntry[]): Buffer {
     central.writeUInt16LE(0, 32) // comment
     central.writeUInt16LE(0, 34) // disk
     central.writeUInt16LE(0, 36) // internal attrs
-    central.writeUInt32LE(0, 38) // external attrs
+    central.writeUInt32LE(((0o100000 | (entry.mode ?? 0o644)) * 0x10000) >>> 0, 38) // external attrs（高 16 位 = unix mode）
     central.writeUInt32LE(offset, 42)
     centrals.push(central, name)
 

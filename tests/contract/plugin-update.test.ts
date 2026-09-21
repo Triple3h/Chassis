@@ -142,6 +142,35 @@ test('revertToBuiltin 回到 App 自带的那份', async () => {
   assertEqual((again as { reverted?: boolean }).reverted, false)
 })
 
+test('zip 安装还原可执行位：逻辑层二进制装完起得来', async () => {
+  if (process.platform === 'win32') return // Windows 没有 unix 权限位
+  const file = path.join(h.dataRoot, 'downloads', 'demo-4.0.0.zip')
+  const manifest = JSON.stringify({
+    name: 'demo',
+    title: '出厂示例',
+    version: '4.0.0',
+    type: 'module',
+    apiVersion: '2',
+    capabilities: [],
+    commands: [
+      { name: 'show', title: '示例页', mode: 'view', searchable: true },
+      { name: 'hello', title: '示例命令', mode: 'no-view', searchable: false },
+    ],
+  })
+  await fsp.writeFile(
+    file,
+    makeZip([
+      { name: 'package.json', data: manifest },
+      { name: 'index.html', data: '<!doctype html><title>示例</title>' },
+      { name: 'hello', data: '#!/bin/sh\nexit 0\n', mode: 0o755 },
+    ]),
+  )
+  const installed = await h.pluginAction('installZip', { path: file, overwrite: true })
+  assert(installed.ok, `安装应当成功：${JSON.stringify(installed.error ?? {})}`)
+  const mode = (await fsp.stat(path.join(h.dataRoot, 'extensions', 'demo', 'hello'))).mode
+  assert((mode & 0o111) !== 0, `装完必须保留可执行位（当前 0o${(mode & 0o777).toString(8)}）`)
+})
+
 test('出厂插件不可卸载（恢复出厂是它的等价动作）', async () => {
   const result = await h.pluginAction('uninstall', { id: 'demo' })
   assertEqual(result.ok, false)

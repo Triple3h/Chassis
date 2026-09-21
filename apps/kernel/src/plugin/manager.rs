@@ -1163,6 +1163,15 @@ impl PluginManager {
                 let mut out = std::fs::File::create(&destination)
                     .map_err(|err| KernelError::new("INTERNAL", format!("写入失败：{err}")))?;
                 std::io::copy(&mut entry, &mut out).map_err(|err| KernelError::new("INTERNAL", format!("解压失败：{err}")))?;
+                drop(out);
+                // zip 记着权限位，不恢复则逻辑层二进制装完起不来（`Permission denied (os error 13)`）
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Some(mode) = entry.unix_mode() {
+                        let _ = std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(mode));
+                    }
+                }
             }
             // 解压结果已经是插件根（包裹层已在上面剥掉）⇒ 直接走原子替换，不再拷一次
             let manifest = read_manifest(&staging).await.map_err(|issue| KernelError::new(issue.code, issue.message))?;
