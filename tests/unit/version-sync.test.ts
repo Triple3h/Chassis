@@ -26,7 +26,7 @@ function cli(root: string, ...args: string[]): { code: number; out: string } {
   }
 }
 
-/** 最小仓库骨架：三个位点 + version.json */
+/** 最小仓库骨架：五个位点 + version.json */
 function makeFixture(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'version-sync-'))
   fs.mkdirSync(path.join(dir, 'apps', 'shell'), { recursive: true })
@@ -39,7 +39,15 @@ function makeFixture(): string {
     path.join(dir, 'apps', 'shell', 'Cargo.toml'),
     `[package]\nname = "launcher-shell"\nversion = "0.1.3"\nedition = "2021"\n\n[dependencies]\nserde = { version = "1" }\n`,
   )
+  fs.writeFileSync(
+    path.join(dir, 'apps', 'shell', 'Cargo.lock'),
+    `version = 4\n\n[[package]]\nname = "launcher-shell"\nversion = "0.1.3"\ndependencies = [\n "serde",\n]\n\n[[package]]\nname = "serde"\nversion = "1.0.200"\n`,
+  )
   fs.writeFileSync(path.join(dir, 'apps', 'kernel', 'Cargo.toml'), `[package]\nname = "launcher-kernel"\nversion = "0.1.0"\n`)
+  fs.writeFileSync(
+    path.join(dir, 'Cargo.lock'),
+    `version = 4\n\n[[package]]\nname = "launcher-kernel"\nversion = "0.1.0"\ndependencies = [\n "launcher-shell",\n]\n`,
+  )
   fs.writeFileSync(path.join(dir, 'version.json'), `{\n  "app": "0.1.3",\n  "kernel": "0.1.0"\n}\n`)
   return dir
 }
@@ -57,7 +65,7 @@ test('check：一致时通过；任何一处漂移都点名文件并给实际值
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
-test('sync：清单写进三处；只动 [package] 的 version，不碰依赖声明', () => {
+test('sync：清单写进五处；只动 [package] 的 version，不碰依赖声明', () => {
   const dir = makeFixture()
   fs.writeFileSync(path.join(dir, 'version.json'), `{\n  "app": "0.2.0",\n  "kernel": "0.2.0"\n}\n`)
   assertEqual(cli(dir, 'sync').code, 0)
@@ -70,6 +78,32 @@ test('sync：清单写进三处；只动 [package] 的 version，不碰依赖声
   assert(shellCargo.includes('serde = { version = "1" }'), `依赖声明不许被动：${shellCargo}`)
   const kernelCargo = fs.readFileSync(path.join(dir, 'apps', 'kernel', 'Cargo.toml'), 'utf8')
   assert(kernelCargo.includes('version = "0.2.0"'), kernelCargo)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('lock 位点：包版本跟着走，别的包与依赖列表都不许被碰', () => {
+  const dir = makeFixture()
+  assertEqual(cli(dir, 'set', 'app', '0.4.0').code, 0)
+  assertEqual(cli(dir, 'set', 'kernel', '0.4.0').code, 0)
+
+  const shellLock = fs.readFileSync(path.join(dir, 'apps', 'shell', 'Cargo.lock'), 'utf8')
+  assert(shellLock.includes('name = "launcher-shell"\nversion = "0.4.0"'), `壳 lock 的包版本要跟上：${shellLock}`)
+  assert(shellLock.includes('name = "serde"\nversion = "1.0.200"'), `别的包不许动：${shellLock}`)
+
+  const rootLock = fs.readFileSync(path.join(dir, 'Cargo.lock'), 'utf8')
+  assert(rootLock.includes('name = "launcher-kernel"\nversion = "0.4.0"'), `根 lock 的包版本要跟上：${rootLock}`)
+  // 名字出现在别人的 dependencies 列表里（`"launcher-shell",`）不算位点，别被一起改掉
+  assert(rootLock.includes('"launcher-shell",'), `依赖列表不许动：${rootLock}`)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('lock 里没有那个包：明确报红（不静默跳过）', () => {
+  const dir = makeFixture()
+  const lock = path.join(dir, 'apps', 'shell', 'Cargo.lock')
+  fs.writeFileSync(lock, `version = 4\n\n[[package]]\nname = "serde"\nversion = "1.0.200"\n`)
+  const result = cli(dir, 'check')
+  assertEqual(result.code, 1, '找不到包必须红')
+  assert(result.out.includes('launcher-shell'), `报错要点名包：${result.out}`)
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
@@ -94,7 +128,7 @@ test('位点文件缺失：check 明确报红（不静默跳过）', () => {
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
-test('真实仓库：三处位点与根 version.json 一致（手改位点文件被拦下）', () => {
+test('真实仓库：五处位点与根 version.json 一致（手改位点文件被拦下）', () => {
   const result = cli(repoRoot, 'check')
   assertEqual(result.code, 0, `版本漂移（跑 pnpm version:sync 同步）：\n${result.out}`)
 })

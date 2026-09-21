@@ -16,7 +16,9 @@
  * 位点（都由本脚本写，别手改这些文件里的 version）：
  *   app    → apps/shell/tauri.conf.json 的顶层 version（build.rs 注入 SHELL_VERSION = `--hot-probe` 自报；pack-local 写 Info.plist）
  *   app    → apps/shell/Cargo.toml 的 [package] version
+ *   app    → apps/shell/Cargo.lock 的 launcher-shell 包版本（cargo 构建时也会写，但那次写在提交之后 ⇒ 每次都留一个未提交改动，交给本脚本一次到位）
  *   kernel → apps/kernel/Cargo.toml 的 [package] version（pack-kernel 打包 / 内核 host_info 上报）
+ *   kernel → 根 Cargo.lock 的 launcher-kernel 包版本（同上）
  *
  * 刻意**不在**这里的版本（各自独立演进，别往清单里塞）：
  *   - 机制版本 `SHELL_HOT_VERSION` / `HOT_UPDATE_VERSION`：自更新机制自身的版本，只在机制变化时单独 bump；
@@ -29,13 +31,17 @@ import { fileURLToPath } from 'node:url'
 
 const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 位点表：manifest 的键 → 要同步的文件与读写方式 */
+/** 位点表：manifest 的键 → 要同步的文件与读写方式（`lock` 要额外给包名 pkg） */
 const SITES = {
   app: [
     { file: 'apps/shell/tauri.conf.json', label: '壳（tauri.conf.json）', kind: 'json' },
     { file: 'apps/shell/Cargo.toml', label: '壳（Cargo.toml）', kind: 'toml' },
+    { file: 'apps/shell/Cargo.lock', label: '壳（Cargo.lock）', kind: 'lock', pkg: 'launcher-shell' },
   ],
-  kernel: [{ file: 'apps/kernel/Cargo.toml', label: '内核（Cargo.toml）', kind: 'toml' }],
+  kernel: [
+    { file: 'apps/kernel/Cargo.toml', label: '内核（Cargo.toml）', kind: 'toml' },
+    { file: 'Cargo.lock', label: '内核（Cargo.lock）', kind: 'lock', pkg: 'launcher-kernel' },
+  ],
 }
 
 const SEMVER = /^\d+\.\d+\.\d+$/
@@ -80,6 +86,14 @@ function readFileOrFail(root, file) {
   }
 }
 
+/**
+ * `Cargo.lock` 里某个包的 `[[package]]` 段：`name` 与 `version` 各占一行、紧挨着。
+ * 包名在 lock 里唯一，且 dependencies 列表里只出现 `"名字",` 形式 ⇒ 不会误伤。
+ */
+function lockPackagePattern(pkg) {
+  return new RegExp(`(\\[\\[package\\]\\]\\r?\\nname = "${pkg}"\\r?\\nversion = ")([^"]+)(")`)
+}
+
 /** 读位点当前值 */
 function readSite(root, site) {
   const text = readFileOrFail(root, site.file)
@@ -87,6 +101,11 @@ function readSite(root, site) {
     const match = text.match(/"version"\s*:\s*"([^"]*)"/)
     if (!match) fail(`读不到顶层 version：${site.file}`)
     return match[1]
+  }
+  if (site.kind === 'lock') {
+    const match = text.match(lockPackagePattern(site.pkg))
+    if (!match) fail(`Cargo.lock 里找不到包 ${site.pkg}：${site.file}`)
+    return match[2]
   }
   const block = tomlPackageBlock(text, site.file)
   const match = block.match(/^version\s*=\s*"([^"]*)"/m)
@@ -101,6 +120,10 @@ function writeSite(root, site, value) {
   let next
   if (site.kind === 'json') {
     next = text.replace(/"version"\s*:\s*"[^"]*"/, `"version": "${value}"`)
+  } else if (site.kind === 'lock') {
+    const pattern = lockPackagePattern(site.pkg)
+    if (!pattern.test(text)) fail(`Cargo.lock 里找不到包 ${site.pkg}：${site.file}`)
+    next = text.replace(pattern, `$1${value}$3`)
   } else {
     // 只动 [package] 段里的 version —— 依赖声明里的 version（`serde = { version = "1" }`）绝不能碰
     const parts = text.split(/^\[/m)
