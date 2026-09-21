@@ -33,15 +33,41 @@ pub const PRIMARY_BASE: &str = "https://github.com/triple3h/Chassis";
 /// 客户端**优先走镜像**，拿不到（连不上 / HTTP 错 / sha256 不符）再降级主源 —— 见 `bin/update.rs`。
 pub const MIRROR_BASE: &str = "https://gitee.com/triple3h/Chassis";
 
-/// 把主源 URL 换成镜像 URL；不是主源 URL（含将来可能出现的其它域）返回 `None`。
+/// GitHub 加速代理：把主源 URL 原样拼在代理域名后面（`https://<代理>/https://github.com/...`）。
+///
+/// **只给附件用，索引绝不走代理**。索引是信任根 —— 它决定「下载什么、校验值是多少」；
+/// 一旦它能被第三方改写，攻击者就能把 url 指向白名单内的任意仓库（GitHub / Gitee 都免费可建）、
+/// 再配上自己算的 sha256，sha256 校验就形同虚设了。
+/// 附件则反过来：sha256 来自**可信通道的索引**，代理改一个字节都会被拒 ⇒
+/// 「不可信的加速通道 + 可信的哈希」才是安全的组合（`bin/update.rs::asset_candidates`）。
+///
+/// 为什么值得：Gitee 镜像要靠跨境同步（CI 常失败、要本机补），而这几个代理即时可用。
+/// 实测（2026-09-21 国内网络，下 16MB 应用包）：ghfast.top 3.27MB/s（8 秒下完）、gh-proxy.com 309KB/s。
+/// 前者主力、后者备份，都不可用还有 Gitee 镜像与 GitHub 主源兜底。
+pub const PROXY_BASES: [&str; 2] = ["https://ghfast.top", "https://gh-proxy.com"];
+
+/// 主源 URL 的后半段（`/releases/download/...`）；不是主源 URL（含将来可能出现的其它域）返回 `None`。
 /// 大小写不敏感：索引由 CI 用 `GITHUB_REPOSITORY` 拼出，owner 是 `Triple3h`，与这里的 `triple3h` 不同。
-pub fn mirror_url(url: &str) -> Option<String> {
+fn primary_suffix(url: &str) -> Option<&str> {
     let prefix = PRIMARY_BASE.to_lowercase();
     if !url.to_lowercase().starts_with(&prefix) {
         return None;
     }
     // prefix 全是 ASCII ⇒ 前 prefix.len() 字节必然是字符边界
-    Some(format!("{MIRROR_BASE}{}", &url[prefix.len()..]))
+    Some(&url[prefix.len()..])
+}
+
+/// 把主源 URL 换成镜像 URL（非主源 URL 返回 `None`）。
+pub fn mirror_url(url: &str) -> Option<String> {
+    Some(format!("{MIRROR_BASE}{}", primary_suffix(url)?))
+}
+
+/// 主源 URL → 各加速代理的候选（非主源 URL 返回空：索引里的其它域不该被拼到代理后面）。
+pub fn proxy_urls(url: &str) -> Vec<String> {
+    if primary_suffix(url).is_none() {
+        return Vec::new();
+    }
+    PROXY_BASES.iter().map(|base| format!("{base}/{url}")).collect()
 }
 
 /// 下载大小上限：内核侧 zip 解压上限是 200MB / 单文件 50MB，这里卡在 60MB。
@@ -513,7 +539,8 @@ pub fn current_arch() -> &'static str {
     }
 }
 
-/// 传输面白名单：更新源是固定仓库（主源 GitHub / 国内镜像 Gitee），附件会 302 到各自的 CDN。
+/// 传输面白名单：更新源是固定仓库（主源 GitHub / 国内镜像 Gitee）与其加速代理，
+/// 附件会 302 到各自的 CDN。
 /// 命令**不接受 URL 入参**，这条只是最后一道兜底（防止索引被换成别的域）。
 pub fn is_allowed_host(url: &str) -> bool {
     let Some(host) = host_of(url) else {
@@ -524,6 +551,9 @@ pub fn is_allowed_host(url: &str) -> bool {
         || host.ends_with(".githubusercontent.com")
         || host == "gitee.com"
         || host.ends_with(".gitee.com")
+        // 加速代理（只用于附件下载；索引不走它们 —— 见 `PROXY_BASES`）。
+        // **精确匹配**：绝不写成「`.top` 结尾」那种 —— 那是把整个 TLD 放进来当更新源。
+        || PROXY_BASES.iter().any(|base| host_of(base).as_deref() == Some(host.as_str()))
 }
 
 pub fn host_of(url: &str) -> Option<String> {
@@ -667,10 +697,27 @@ mod tests {
         assert!(is_allowed_host("https://objects.githubusercontent.com/x"));
         assert!(is_allowed_host("https://gitee.com/triple3h/Chassis/releases/download/app-latest/x.zip"));
         assert!(is_allowed_host("https://foruda.gitee.com/attach_file/1/x.zip"));
+        // 加速代理（只给附件用）：放行的是**精确域名**
+        assert!(is_allowed_host("https://ghfast.top/https://github.com/o/r/releases/download/x/y.zip"));
+        assert!(is_allowed_host("https://gh-proxy.com/https://github.com/o/r/releases/download/x/y.zip"));
+        assert!(!is_allowed_host("https://ghfast.top.evil.example.com/x.zip"), "后缀伪装不得放行");
+        assert!(!is_allowed_host("https://evil-ghfast.top/x.zip"), "同 TLD 的别的域不得放行");
         assert!(!is_allowed_host("https://evil.example.com/y.zip"));
         assert!(!is_allowed_host("https://github.com.evil.example.com/y.zip"));
         assert!(!is_allowed_host("不是 URL"));
         assert_eq!(host_of("https://github.com:443/a").as_deref(), Some("github.com"));
+    }
+
+    /// 代理候选由主源 URL 推导（形态 = 代理域名 + `/` + 完整主源 URL）；别的域不拼代理。
+    #[test]
+    fn proxy_urls_only_apply_to_primary_urls() {
+        let url = "https://github.com/Triple3h/Chassis/releases/download/app-latest/x.zip";
+        assert_eq!(
+            proxy_urls(url),
+            vec![format!("https://ghfast.top/{url}"), format!("https://gh-proxy.com/{url}")]
+        );
+        assert!(proxy_urls("https://gitee.com/triple3h/Chassis/x").is_empty());
+        assert!(proxy_urls("https://example.com/x.zip").is_empty());
     }
 
     /// 镜像 URL 由主源 URL 推导；索引里的 owner 大小写与常量可能不同（CI 用 `GITHUB_REPOSITORY`）。

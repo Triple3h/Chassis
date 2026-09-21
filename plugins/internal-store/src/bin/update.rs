@@ -21,8 +21,8 @@ use std::time::Duration;
 
 use launcher_plugin_internal_store::{
     collect_app_update, collect_kernel_update, collect_updates, current_arch, current_platform, download_name, host_of,
-    is_allowed_host, mirror_url, parse_app_registry, parse_kernel_registry, parse_registry, pick_asset, sha256_hex,
-    unzip_app_bundle, unzip_kernel_bundle, AppRegistry, InstalledPlugin, KernelRegistry,
+    is_allowed_host, mirror_url, parse_app_registry, parse_kernel_registry, parse_registry, pick_asset, proxy_urls,
+    sha256_hex, unzip_app_bundle, unzip_kernel_bundle, AppRegistry, InstalledPlugin, KernelRegistry,
     APP_REGISTRY_URL, KERNEL_REGISTRY_URL, MAX_DOWNLOAD_BYTES, REGISTRY_URL,
 };
 use launcher_plugin_sdk::{json, proxy, Context, Level, Result, Value};
@@ -387,27 +387,48 @@ fn fetch_index(ctx: &Context) -> std::result::Result<launcher_plugin_internal_st
 }
 
 /// 候选地址：**镜像优先、主源兜底**（非主源 URL 只有它自己）。
-fn candidates(url: &str) -> Vec<String> {
-    match mirror_url(url) {
-        Some(mirror) => vec![mirror, url.to_string()],
-        None => vec![url.to_string()],
+fn candidates(url: &str, with_proxies: bool) -> Vec<String> {
+    let Some(mirror) = mirror_url(url) else {
+        return vec![url.to_string()];
+    };
+    let mut list = vec![mirror];
+    if with_proxies {
+        list.extend(proxy_urls(url));
     }
+    list.push(url.to_string());
+    list
+}
+
+/// 索引的候选：**镜像 → 主源，不含加速代理**。
+///
+/// 索引是信任根（决定「下载什么、校验值是多少」）：让它走第三方通道，攻击者就能把 url 指到
+/// 白名单内的任意仓库、再配上自己算的 sha256 ⇒ 校验形同虚设。所以索引只走我们自己的两个仓。
+fn index_candidates(url: &str) -> Vec<String> {
+    candidates(url, false)
+}
+
+/// 附件的候选：**镜像 → 加速代理 → 主源**。
+///
+/// 代理不可信没关系 —— 每个候选下完都要跟**索引里的 sha256**（可信通道来的）比对，
+/// 篡改 / 半截 / 换包都会被 `fetch_verified` 拒掉并自动换下一个候选。
+fn asset_candidates(url: &str) -> Vec<String> {
+    candidates(url, true)
 }
 
 fn fetch_text(ctx: &Context, url: &str, timeout: Duration) -> std::result::Result<String, String> {
     let mut failures: Vec<String> = Vec::new();
-    for candidate in candidates(url) {
+    for candidate in index_candidates(url) {
         if !is_allowed_host(&candidate) {
             return Err(format!("更新源域名不在白名单：{}", host_of(&candidate).unwrap_or_default()));
         }
         match get(ctx, &candidate, timeout) {
             Ok(response) => {
-                // 走的是镜像还是主源写进日志：真机上排查「国内下载源到底有没有生效」全靠这行
+                // 走的是哪个源写进日志：真机上排查「国内下载源到底有没有生效」全靠这行
                 let host = host_of(&candidate).unwrap_or_default();
                 let note = if failures.is_empty() {
                     (format!("索引来自 {host}"), Level::Info)
                 } else {
-                    (format!("镜像不可用，已退回主源 {host}"), Level::Warn)
+                    (format!("前面的源不可用，索引改用 {host}"), Level::Warn)
                 };
                 let _ = ctx.log(&note.0, None, note.1);
                 return response.into_string().map_err(|err| format!("读取响应失败：{err}"));
@@ -418,16 +439,23 @@ fn fetch_text(ctx: &Context, url: &str, timeout: Duration) -> std::result::Resul
     Err(failures.join("；"))
 }
 
-/// 下载 + 校验：依次尝试候选地址（镜像 → 主源），**校验不过也换下一个** ——
-/// 镜像上的坏包与「拿不到」同等对待，绝不留给安装（也绝不留给下一个候选）。
+/// 下载 + 校验：依次尝试候选地址（镜像 → 加速代理 → 主源），**校验不过也换下一个** ——
+/// 坏包与「拿不到」同等对待，绝不留给安装（也绝不留给下一个候选）。
+///
+/// 这里的 sha256 是整套方案的**安全支点**：加速代理是第三方通道，但每个候选下完都要跟
+/// 索引里的摘要比对，改一个字节就被拒 —— 代理能不能信就不重要了。
 fn fetch_verified(
     ctx: &Context,
     url: &str,
     path: &std::path::Path,
     expected_sha256: &str,
 ) -> std::result::Result<(u64, String), String> {
+    if expected_sha256.trim().is_empty() {
+        // 索引没给摘要 ⇒ 无从校验，宁可不装（fail-closed；不该出现，出现就是索引坏了）
+        return Err("索引里没有 sha256，拒绝下载（无法校验来源）".to_string());
+    }
     let mut failures: Vec<String> = Vec::new();
-    for candidate in candidates(url) {
+    for candidate in asset_candidates(url) {
         let host = host_of(&candidate).unwrap_or_default();
         match fetch_asset(ctx, &candidate, path) {
             Ok(bytes) => match std::fs::read(path) {
@@ -437,7 +465,7 @@ fn fetch_verified(
                         let note = if failures.is_empty() {
                             (format!("更新包来自 {host}"), Level::Info)
                         } else {
-                            (format!("镜像不可用，已退回主源 {host}"), Level::Warn)
+                            (format!("前面的源不可用，更新包改用 {host}"), Level::Warn)
                         };
                         let _ = ctx.log(&note.0, None, note.1);
                         return Ok((bytes, digest));
@@ -487,18 +515,24 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
 
-    /// 镜像优先、主源兜底；非主源 URL 不生成镜像候选。
+    /// 候选顺序：**索引不含加速代理**（信任根只走自家两个仓库），附件才带代理。
     #[test]
-    fn candidates_prefer_mirror_then_primary() {
+    fn only_assets_go_through_proxies() {
         let url = "https://github.com/Triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip";
+        let mirror = "https://gitee.com/triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip";
+        assert_eq!(index_candidates(url), vec![mirror.to_string(), url.to_string()]);
         assert_eq!(
-            candidates(url),
+            asset_candidates(url),
             vec![
-                "https://gitee.com/triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip".to_string(),
+                mirror.to_string(),
+                format!("https://ghfast.top/{url}"),
+                format!("https://gh-proxy.com/{url}"),
                 url.to_string(),
             ]
         );
-        assert_eq!(candidates("https://example.com/x.zip"), vec!["https://example.com/x.zip".to_string()]);
+        // 非主源 URL：既不变镜像、也不拼代理（别的域不该被塞进代理通道）
+        assert_eq!(index_candidates("https://example.com/x.zip"), vec!["https://example.com/x.zip".to_string()]);
+        assert_eq!(asset_candidates("https://example.com/x.zip"), vec!["https://example.com/x.zip".to_string()]);
     }
 
     /// 降级只认「连不上」：HTTP 状态码说明直连已经通了，换代理重试没有意义。
