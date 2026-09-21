@@ -7,11 +7,11 @@
  *
  * 两个字形：
  *   应用图标 = 「输入框」（胶囊外框 + 文字光标 + 上箭头），即"输入即搜、回车即启"
- *   菜单栏   = 放大镜（18pt 下输入框的内里会糊，放大镜轮廓更清楚）
+ *   托盘     = 放大镜（18pt 下输入框的内里会糊，放大镜轮廓更清楚）
  *
  * 依赖：rsvg-convert（brew install librsvg）、iconutil（macOS 自带）
  * 用法：npm run icon
- * 产物：apps/shell/icons/{icon.svg, icon.png, icon.icns, icon.ico, tray.svg, tray.png}
+ * 产物：apps/shell/icons/{icon.svg, icon.png, icon.icns, icon.ico, tray.svg, tray.png, tray-win.svg, tray-win.png}
  *
  * `.ico`：手写封装（PNG-in-ICO，Vista+ 原生支持），不引第三方库 ——
  * 图标链路已经有一个 brew 依赖（rsvg-convert），再加一个 npm 依赖不划算。
@@ -192,6 +192,29 @@ function traySvg() {
   return { svg, width: side, height: side }
 }
 
+/**
+ * Windows 托盘图标：同一个放大镜字形，**彩色**。
+ *
+ * 不能直接用 `tray.png`：那是 macOS 的模板图（只取 alpha，系统按明暗自动反色），
+ * Windows 托盘不反色 —— 纯黑字形在深色任务栏上糊成一团，纯白反过来在浅色主题下消失。
+ * 用与应用图标同族的蓝→紫渐变，浅色 / 深色任务栏都看得清，字形也与 macOS 菜单栏一致。
+ */
+function winTraySvg() {
+  const box = magnifierBox()
+  const canvas = box / MAGNIFIER.fill
+  const side = 64 // Windows 托盘最高用到 32px（200% 缩放），留一档余量
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${side}" height="${side}" viewBox="${(-canvas / 2).toFixed(1)} ${(-canvas / 2).toFixed(1)} ${canvas.toFixed(1)} ${canvas.toFixed(1)}">
+<defs>
+  <linearGradient id="winTray" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="${PALETTE.from}" />
+    <stop offset="1" stop-color="${PALETTE.to}" />
+  </linearGradient>
+</defs>${magnifierMarkup({ size: box, color: 'url(#winTray)' })}
+</svg>
+`
+  return { svg, width: side, height: side }
+}
+
 // ── 光栅化 ───────────────────────────────────────────────────────
 function raster(svgPath, outPath, width, height = width) {
   const result = spawnSync(
@@ -219,10 +242,13 @@ fs.mkdirSync(iconsDir, { recursive: true })
 
 const iconSvgPath = path.join(iconsDir, 'icon.svg')
 const traySvgPath = path.join(iconsDir, 'tray.svg')
+const winTraySvgPath = path.join(iconsDir, 'tray-win.svg')
 const tray = traySvg()
+const winTray = winTraySvg()
 fs.writeFileSync(iconSvgPath, iconSvg())
 fs.writeFileSync(traySvgPath, tray.svg)
-line(`✓ 矢量源：${path.relative(repoRoot, iconSvgPath)} / tray.svg`)
+fs.writeFileSync(winTraySvgPath, winTray.svg)
+line(`✓ 矢量源：${path.relative(repoRoot, iconSvgPath)} / tray.svg / tray-win.svg`)
 
 // 1) iconset（iconutil 要求的固定命名）
 const iconset = path.join(iconsDir, 'icon.iconset')
@@ -248,10 +274,11 @@ execFileSync('iconutil', ['-c', 'icns', iconset, '-o', path.join(iconsDir, 'icon
 fs.rmSync(iconset, { recursive: true, force: true })
 line('✓ icon.icns')
 
-// 3) 壳运行时用的 PNG（tauri.conf 的 icon 列表 + 菜单栏）
+// 3) 壳运行时用的 PNG（tauri.conf 的 icon 列表 + 托盘：macOS 模板图 / Windows 彩色）
 raster(iconSvgPath, path.join(iconsDir, 'icon.png'), 512)
 raster(traySvgPath, path.join(iconsDir, 'tray.png'), tray.width, tray.height)
-line(`✓ icon.png (512) / tray.png (${tray.width}×${tray.height})`)
+raster(winTraySvgPath, path.join(iconsDir, 'tray-win.png'), winTray.width, winTray.height)
+line(`✓ icon.png (512) / tray.png (${tray.width}×${tray.height}) / tray-win.png (${winTray.width}×${winTray.height})`)
 
 // 4) .ico（Windows：窗口图标 / 资源管理器 / NSIS 安装器）
 const icoPath = path.join(iconsDir, 'icon.ico')

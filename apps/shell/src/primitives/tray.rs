@@ -9,9 +9,13 @@ use tauri::{AppHandle, Manager};
 
 pub const TRAY_ID: &str = "launcher-tray";
 
-/// 菜单栏图标：编译进二进制，省掉 dev 与 .app 两种资源路径的差异。
-/// 由 `scripts/make-icon.mjs` 从 `icons/tray.svg` 生成（透明底单色字形）。
+/// 托盘图标：编译进二进制，省掉 dev 与 .app 两种资源路径的差异。
+/// 由 `scripts/make-icon.mjs` 生成（同一个放大镜字形，透明底，平台配色不同）。
+/// macOS 用 `tray.svg` 那版（纯色，模板图）；Windows 用 `tray-win.svg` 那版（彩色）。
+#[cfg(target_os = "macos")]
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/tray.png");
+#[cfg(not(target_os = "macos"))]
+const TRAY_WIN_ICON_PNG: &[u8] = include_bytes!("../../icons/tray-win.png");
 
 pub fn ensure(app: &AppHandle) -> Result<(), String> {
     if app.tray_by_id(TRAY_ID).is_some() {
@@ -51,25 +55,24 @@ pub fn ensure(app: &AppHandle) -> Result<(), String> {
             }
         });
 
-    // 图标分平台：
-    //  - macOS：菜单栏用**模板图**（只取 alpha 通道，系统按明暗自动反色）。
-    //    直接把彩色应用图标塞进菜单栏会又糊又不对味（系统还会把它压到 18pt）。
-    //  - Windows：托盘用**彩色应用图标** —— 模板图是 macOS 的概念，Windows 托盘不做反色，
-    //    单色字形在深色任务栏上会糊成一团。
-    match tauri::image::Image::from_bytes(TRAY_ICON_PNG) {
+    // 图标分平台（字形都是放大镜，配色不同）：
+    //  - macOS：菜单栏用**模板图**（只取 alpha 通道，系统按明暗自动反色）—— 纯色字形即可。
+    //  - Windows：托盘不做反色，模板图在深色任务栏上会糊成一团 ⇒ 用彩色版。
+    #[cfg(target_os = "macos")]
+    let png: &[u8] = TRAY_ICON_PNG;
+    #[cfg(not(target_os = "macos"))]
+    let png: &[u8] = TRAY_WIN_ICON_PNG;
+
+    match tauri::image::Image::from_bytes(png) {
         Ok(icon) => {
+            builder = builder.icon(icon);
             #[cfg(target_os = "macos")]
             {
-                builder = builder.icon(icon).icon_as_template(true);
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let colored = app.default_window_icon().cloned().unwrap_or(icon);
-                builder = builder.icon(colored);
+                builder = builder.icon_as_template(true);
             }
         }
         Err(err) => {
-            eprintln!("[tray] 菜单栏图标解码失败，回落到默认图标：{err}");
+            eprintln!("[tray] 托盘图标解码失败，回落到默认图标：{err}");
             if let Some(icon) = app.default_window_icon().cloned() {
                 builder = builder.icon(icon);
             }
