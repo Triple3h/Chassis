@@ -118,16 +118,20 @@ pub struct InstalledPlugin {
     pub version: String,
 }
 
+/// 一个已装插件的**当前状态**（不只是有更新的那些）：界面默认列出全部当前版本，
+/// 有更新的靠 `has_update` 高亮。产物地址不在这里 —— 下载是 `download` 模式自己重新拉索引
+/// （安装路径不接受 URL 入参，这条口径不能在返回结构里开口子）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateEntry {
+pub struct PluginState {
     pub id: String,
     pub title: String,
     pub current: String,
     pub latest: String,
     pub notes: Option<String>,
+    /// 索引里版本更新**且本平台有产物**（装不上就不算可更新）
+    pub has_update: bool,
     pub min_kernel_ok: bool,
-    pub asset: RegistryAsset,
 }
 
 pub fn parse_registry(raw: &str) -> std::result::Result<Registry, String> {
@@ -172,37 +176,33 @@ pub fn kernel_satisfied(min_kernel: Option<&str>, kernel: Option<&str>) -> bool 
     kernel >= min
 }
 
-/// 只认「已装 ∩ 索引里有」的 id；版本不更新则不出现（essential 的过滤在调用方做）。
-pub fn collect_updates(
+/// 只认「已装 ∩ 索引里有」的 id（索引里查不到的跳过 —— **不猜**；essential 的过滤在调用方做）。
+/// 顺序 = 有更新的在前，其余按 id（界面直接照此渲染）。
+pub fn collect_plugins(
     registry: &Registry,
     installed: &[InstalledPlugin],
     platform: &str,
     arch: &str,
     kernel: Option<&str>,
-) -> Vec<UpdateEntry> {
-    let mut updates: Vec<UpdateEntry> = Vec::new();
+) -> Vec<PluginState> {
+    let mut states: Vec<PluginState> = Vec::new();
     for plugin in installed {
         let Some(entry) = registry.plugins.get(&plugin.id) else {
             continue;
         };
-        if !is_newer(&entry.version, &plugin.version) {
-            continue;
-        }
-        let Some(asset) = pick_asset(entry, platform, arch) else {
-            continue;
-        };
-        updates.push(UpdateEntry {
+        let has_update = is_newer(&entry.version, &plugin.version) && pick_asset(entry, platform, arch).is_some();
+        states.push(PluginState {
             id: plugin.id.clone(),
             title: entry.title.clone(),
             current: plugin.version.clone(),
             latest: entry.version.clone(),
             notes: entry.notes.clone(),
+            has_update,
             min_kernel_ok: kernel_satisfied(entry.min_kernel.as_deref(), kernel),
-            asset: asset.clone(),
         });
     }
-    updates.sort_by(|a, b| a.id.cmp(&b.id));
-    updates
+    states.sort_by(|a, b| b.has_update.cmp(&a.has_update).then_with(|| a.id.cmp(&b.id)));
+    states
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -628,20 +628,34 @@ mod tests {
     }
 
     #[test]
-    fn updates_only_cover_installed_plugins() {
+    fn plugin_states_cover_all_installed_in_registry() {
         let registry = parse_registry(&registry_raw(1)).unwrap();
         let installed = vec![
             InstalledPlugin { id: "totp".to_string(), version: "0.4.0".to_string() },
             InstalledPlugin { id: "snips".to_string(), version: "0.2.0".to_string() },
             InstalledPlugin { id: "not-in-registry".to_string(), version: "0.1.0".to_string() },
         ];
-        let updates = collect_updates(&registry, &installed, "macos", "arm64", Some("0.1.0"));
-        assert_eq!(updates.len(), 1, "只有版本真的更新的那个：{updates:?}");
-        assert_eq!(updates[0].id, "totp");
-        assert_eq!(updates[0].current, "0.4.0");
-        assert_eq!(updates[0].latest, "0.5.0");
-        assert_eq!(updates[0].notes.as_deref(), Some("修复倒计时漂移"));
-        assert!(updates[0].min_kernel_ok);
+        let states = collect_plugins(&registry, &installed, "macos", "arm64", Some("0.1.0"));
+        assert_eq!(states.len(), 2, "全量展示：索引里查得到就列出（不分有没有更新）：{states:?}");
+        assert_eq!(states[0].id, "totp", "有更新的排前面");
+        assert!(states[0].has_update);
+        assert_eq!(states[0].current, "0.4.0");
+        assert_eq!(states[0].latest, "0.5.0");
+        assert_eq!(states[0].notes.as_deref(), Some("修复倒计时漂移"));
+        assert!(states[0].min_kernel_ok);
+        assert_eq!(states[1].id, "snips");
+        assert!(!states[1].has_update, "版本相同 ⇒ 只展示当前版本，不给更新");
+        assert!(!states.iter().any(|item| item.id == "not-in-registry"), "索引里没有的跳过（不猜）");
+    }
+
+    /// 「索引里有新版本、但本平台没有产物」⇒ 不可更新（宁可漏，不可乱装）。
+    #[test]
+    fn no_asset_for_platform_means_not_updatable() {
+        let registry = parse_registry(&registry_raw(1)).unwrap();
+        let installed = vec![InstalledPlugin { id: "totp".to_string(), version: "0.4.0".to_string() }];
+        let states = collect_plugins(&registry, &installed, "linux", "x64", Some("0.1.0"));
+        assert_eq!(states.len(), 1, "仍然列出当前版本");
+        assert!(!states[0].has_update, "没有本平台产物 ⇒ 不给「更新」按钮");
     }
 
     #[test]
@@ -649,36 +663,32 @@ mod tests {
         let mut registry = parse_registry(&registry_raw(1)).unwrap();
         registry.plugins.get_mut("totp").unwrap().min_kernel = Some("9.9.9".to_string());
         let installed = vec![InstalledPlugin { id: "totp".to_string(), version: "0.4.0".to_string() }];
-        let updates = collect_updates(&registry, &installed, "macos", "arm64", Some("0.1.0"));
-        assert_eq!(updates.len(), 1, "仍然列出，但标记 minKernelOk=false");
-        assert!(!updates[0].min_kernel_ok, "内核版本不够 ⇒ 不给「更新」按钮");
+        let states = collect_plugins(&registry, &installed, "macos", "arm64", Some("0.1.0"));
+        assert_eq!(states.len(), 1, "仍然列出，但标记 minKernelOk=false");
+        assert!(states[0].has_update);
+        assert!(!states[0].min_kernel_ok, "内核版本不够 ⇒ 不给「更新」按钮");
 
         // 拿不到内核版本时放行
-        let updates = collect_updates(&registry, &installed, "macos", "arm64", None);
-        assert!(updates[0].min_kernel_ok);
+        let states = collect_plugins(&registry, &installed, "macos", "arm64", None);
+        assert!(states[0].min_kernel_ok);
     }
 
     #[test]
-    fn update_entry_serializes_camel_case() {
-        // view 读的是 `minKernelOk`；曾因漏 rename_all 序列化成 `min_kernel_ok`，
+    fn plugin_state_serializes_camel_case() {
+        // view 读的是 `minKernelOk` / `hasUpdate`；曾因漏 rename_all 序列化成 `min_kernel_ok`，
         // 更新页把每个插件条目都判成「底座版本过低」（插件通道首次真实使用才暴露）
-        let entry = UpdateEntry {
+        let state = PluginState {
             id: "json-tools".to_string(),
             title: "JSON 工具箱".to_string(),
             current: "0.1.0".to_string(),
             latest: "0.2.0".to_string(),
             notes: None,
+            has_update: true,
             min_kernel_ok: true,
-            asset: RegistryAsset {
-                platforms: vec![],
-                arch: vec![],
-                url: "https://github.com/Triple3h/Chassis/releases/download/plugins-latest/x.zip".to_string(),
-                sha256: "ab".to_string(),
-                bytes: 1,
-            },
         };
-        let raw = serde_json::to_string(&entry).unwrap();
+        let raw = serde_json::to_string(&state).unwrap();
         assert!(raw.contains("\"minKernelOk\":true"), "序列化必须是 camelCase：{raw}");
+        assert!(raw.contains("\"hasUpdate\":true"), "序列化必须是 camelCase：{raw}");
         assert!(!raw.contains("min_kernel_ok"), "snake_case 字段 view 读不到：{raw}");
     }
 

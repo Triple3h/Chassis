@@ -1,7 +1,9 @@
 //! 命令 `update`（script，产物名 = `update`，plugin-spec §2.2 的 N1）。
 //!
 //! args:
-//!   `{ mode: 'check', installed: [{ id, version }], kernel }` → 拉插件索引 + 比对，返回可更新列表
+//!   `{ mode: 'check', installed: [{ id, version }], kernel }` → 拉插件索引 + 比对，
+//!                                                            返回**已装插件的全量状态**（`hasUpdate` 标记有没有新版；
+//!                                                            界面默认列出当前版本、有更新的高亮）
 //!   `{ mode: 'download', id }`                                → 下载插件包 + sha256 校验，返回本地 zip 路径
 //!   `{ mode: 'check-kernel', current, hotVersion }`           → 拉内核索引 + 比对（kernel-latest 通道）
 //!   `{ mode: 'download-kernel', current, hotVersion }`        → 下载内核包 + sha256 + 解压（launcher-kernel + ui/）
@@ -20,7 +22,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use launcher_plugin_internal_store::{
-    collect_app_update, collect_kernel_update, collect_updates, current_arch, current_platform, download_name, host_of,
+    collect_app_update, collect_kernel_update, collect_plugins, current_arch, current_platform, download_name, host_of,
     is_allowed_host, mirror_url, parse_app_registry, parse_kernel_registry, parse_registry, pick_asset, proxy_urls,
     sha256_hex, unzip_app_bundle, unzip_kernel_bundle, AppRegistry, InstalledPlugin, KernelRegistry,
     APP_REGISTRY_URL, KERNEL_REGISTRY_URL, MAX_DOWNLOAD_BYTES, REGISTRY_URL,
@@ -151,9 +153,10 @@ fn check(ctx: &Context, args: &Value) -> Result<()> {
             return ctx.done(json!({ "ok": false, "stage": "index", "error": message }));
         }
     };
-    let updates = collect_updates(&registry, &installed, current_platform(), current_arch(), kernel.as_deref());
-    ctx.log(&format!("检查更新完成：{} 个插件有新版本", updates.len()), None, Level::Info)?;
-    ctx.done(json!({ "ok": true, "checkedAt": now_ms(), "updates": updates }))
+    let plugins = collect_plugins(&registry, &installed, current_platform(), current_arch(), kernel.as_deref());
+    let updatable = plugins.iter().filter(|item| item.has_update).count();
+    ctx.log(&format!("检查更新完成：已列 {} 个插件，其中 {updatable} 个有新版本", plugins.len()), None, Level::Info)?;
+    ctx.done(json!({ "ok": true, "checkedAt": now_ms(), "plugins": plugins }))
 }
 
 fn download(ctx: &Context, args: &Value) -> Result<()> {

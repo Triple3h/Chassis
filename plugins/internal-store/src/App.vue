@@ -22,12 +22,14 @@ interface PluginInfo {
   dir?: string
 }
 
-interface UpdateItem {
+/** 逻辑层返回的**全量**状态（已装 ∩ 索引）：`hasUpdate` 标记有没有新版，界面默认列出所有当前版本 */
+interface PluginState {
   id: string
   title: string
   current: string
   latest: string
   notes?: string | null
+  hasUpdate: boolean
   minKernelOk: boolean
 }
 
@@ -35,6 +37,11 @@ interface OverriddenItem {
   id: string
   title: string
   version: string
+}
+
+/** 列表行 = 逻辑层状态 + 本页补充的「装过新版本」（可回到 App 自带的那份） */
+interface PluginRow extends PluginState {
+  overridden: boolean
 }
 
 /** 内核更新（kernel-latest 通道；`hotOk=false` ⇒ 客户端机制版本不够，不给「更新」） */
@@ -76,7 +83,7 @@ const stage = ref<Stage>('idle')
 const error = ref('')
 const notice = ref('')
 const busy = ref('')
-const updates = ref<UpdateItem[]>([])
+const plugins = ref<PluginState[]>([])
 const overridden = ref<OverriddenItem[]>([])
 const checkedAt = ref(0)
 const kernelVersion = ref('')
@@ -84,8 +91,36 @@ const hotVersion = ref('')
 const kernelUpdate = ref<KernelUpdateItem | null>(null)
 const shellInfo = ref<ShellInfo | null>(null)
 const appUpdate = ref<AppUpdateItem | null>(null)
+/** 内核 / 应用通道的检查结果：`null` = 还没查完（「检查中」），false = 没查到（网络不通）—— 两者都不该显示成「已是最新」 */
+const kernelChecked = ref<boolean | null>(null)
+const appChecked = ref<boolean | null>(null)
 
-const updatable = computed(() => updates.value.filter((item) => item.minKernelOk))
+const updatable = computed(() => plugins.value.filter((item) => item.hasUpdate && item.minKernelOk))
+
+/** 列表行：逻辑层给的全量状态 + 本页的覆盖版标记（overridden 本就在全量里，索引查不到的补一行保住还原入口） */
+const pluginRows = computed<PluginRow[]>(() => {
+  const overriddenIds = new Set(overridden.value.map((item) => item.id))
+  const rows: PluginRow[] = plugins.value.map((item) => ({ ...item, overridden: overriddenIds.has(item.id) }))
+  for (const item of overridden.value) {
+    if (rows.some((row) => row.id === item.id)) continue
+    rows.push({
+      id: item.id,
+      title: item.title,
+      current: item.version,
+      latest: item.version,
+      notes: null,
+      hasUpdate: false,
+      minKernelOk: true,
+      overridden: true,
+    })
+  }
+  return rows
+})
+
+/** 顶部「N 项可更新」：应用与内核也计入（「全部更新」不含应用 —— 它会重启整个应用） */
+const updateCount = computed(
+  () => updatable.value.length + (kernelUpdate.value?.hotOk ? 1 : 0) + (appUpdate.value?.hotOk ? 1 : 0),
+)
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -115,6 +150,8 @@ async function check(): Promise<void> {
   stage.value = 'checking'
   error.value = ''
   notice.value = ''
+  kernelChecked.value = null
+  appChecked.value = null
   try {
     const info = await host.info()
     kernelVersion.value = info.version
@@ -124,13 +161,13 @@ async function check(): Promise<void> {
       command: 'update',
       args: { mode: 'check', installed, kernel: info.version },
       timeoutMs: 20000,
-    })) as { ok?: boolean; error?: string; updates?: UpdateItem[]; checkedAt?: number }
+    })) as { ok?: boolean; error?: string; plugins?: PluginState[]; checkedAt?: number }
     if (!result?.ok) {
       error.value = result?.error ?? '无法检查更新'
       stage.value = 'error'
       return
     }
-    updates.value = result.updates ?? []
+    plugins.value = result.plugins ?? []
     checkedAt.value = result.checkedAt ?? Date.now()
     stage.value = 'ready'
     await checkKernel()
@@ -150,8 +187,10 @@ async function checkKernel(): Promise<void> {
       args: { mode: 'check-kernel', current: kernelVersion.value, hotVersion: hotVersion.value },
       timeoutMs: 20000,
     })) as { ok?: boolean; update?: KernelUpdateItem | null }
+    kernelChecked.value = !!result?.ok
     kernelUpdate.value = result?.ok ? (result.update ?? null) : null
   } catch {
+    kernelChecked.value = false
     kernelUpdate.value = null
   }
 }
@@ -179,11 +218,13 @@ async function checkApp(): Promise<void> {
       },
       timeoutMs: 20000,
     })) as { ok?: boolean; update?: AppUpdateItem | null }
+    appChecked.value = !!result?.ok
     appUpdate.value = result?.ok ? (result.update ?? null) : null
   } catch {
     // 壳信息拿不到（老壳 / 未连接）：这一块整体不显示，不影响插件与内核两条通道
     shellInfo.value = null
     appUpdate.value = null
+    appChecked.value = false
   }
 }
 
@@ -255,7 +296,7 @@ async function updateKernel(): Promise<void> {
   }
 }
 
-async function updateOne(item: UpdateItem): Promise<void> {
+async function updateOne(item: PluginState): Promise<void> {
   if (busy.value || !item.minKernelOk) return
   busy.value = item.id
   error.value = ''
@@ -291,9 +332,9 @@ async function updateAll(): Promise<void> {
   if (kernelUpdate.value?.hotOk) await updateKernel()
 }
 
-async function revert(item: OverriddenItem): Promise<void> {
+async function revert(item: { id: string; title: string }): Promise<void> {
   if (busy.value) return
-  busy.value = item.id
+  busy.value = revertKey(item.id)
   error.value = ''
   try {
     await settings.pluginAction('revertToBuiltin', { id: item.id })
@@ -304,6 +345,11 @@ async function revert(item: OverriddenItem): Promise<void> {
   } finally {
     busy.value = ''
   }
+}
+
+/** 恢复出厂版本的忙碌标记：与「更新」的 `busy = id` 区分开（同一行两个按钮，别让另一个也显示「更新中…」） */
+function revertKey(id: string): string {
+  return `revert:${id}`
 }
 
 function formatTime(value: number): string {
@@ -326,6 +372,7 @@ onMounted(async () => {
         <div class="flex items-center gap-2">
           <UiIcon name="refresh" :size="15" class="text-muted" />
           <h1 class="text-[13.5px] font-medium">更新</h1>
+          <span v-if="updateCount" class="launcher-chip text-accent">{{ updateCount }} 项可更新</span>
         </div>
         <div class="text-[11.5px] text-faint">
           <span v-if="shellInfo">应用 v{{ shellInfo.version }}</span>
@@ -352,24 +399,25 @@ onMounted(async () => {
             </button>
           </div>
 
-          <p v-else-if="!updates.length && !overridden.length && !kernelUpdate && !appUpdate" class="text-[12px] text-muted">
-            插件、内核与应用都是最新版本。
-          </p>
-
           <template v-else>
-            <!-- 应用（壳）自身：第三块状态卡。更新会重启整个应用（含内核），所以按钮独立、不并进「全部更新」 -->
-            <section v-if="shellInfo" class="mb-3 rounded-lg border border-line bg-panel px-3 py-2.5">
+            <!-- 三块（应用 / 内核 / 插件）都常显当前版本；有更新的靠 accent 描边 + 「有新版本」高亮 -->
+            <section
+              v-if="shellInfo"
+              class="mb-3 rounded-lg border bg-panel px-3 py-2.5"
+              :class="appUpdate ? 'border-accent/70' : 'border-line'"
+            >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="flex items-center gap-1.5">
                     <UiIcon name="refresh" :size="14" class="text-muted" />
                     <span class="text-[13px]">应用</span>
+                    <span v-if="appUpdate" class="launcher-chip text-accent">有新版本</span>
                   </div>
                   <div class="mt-0.5 text-[11.5px] text-muted">
                     <span>v{{ shellInfo.version }}</span>
                     <template v-if="appUpdate">
                       <span class="mx-1">→</span>
-                      <span class="text-fg">{{ appUpdate.latest }}</span>
+                      <span class="font-medium text-accent">v{{ appUpdate.latest }}</span>
                     </template>
                   </div>
                   <p v-if="appUpdate?.notes" class="mt-1 text-[11.5px] text-faint">{{ appUpdate.notes }}</p>
@@ -382,11 +430,16 @@ onMounted(async () => {
                   <p v-else-if="appUpdate" class="mt-1 text-[11px] text-faint">
                     更新会重启整个应用（含内核）；由你决定何时更新（托盘菜单与「关于」页也会提示）。
                   </p>
+                  <p v-else-if="appChecked === null" class="mt-1 text-[11px] text-faint">检查中…</p>
+                  <p v-else-if="!appChecked" class="mt-1 text-[11px] text-faint">
+                    没查到最新版本（网络不通？可点「检查更新」重试）
+                  </p>
                   <p v-else class="mt-1 text-[11px] text-faint">已是最新（发现新版本会在托盘与「关于」页提示）。</p>
                 </div>
                 <button
                   v-if="appUpdate"
-                  class="shrink-0 rounded-md border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
+                  class="shrink-0 rounded-md border px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
+                  :class="appUpdate.hotOk ? 'border-accent text-accent' : 'border-line'"
                   :disabled="!appUpdate.hotOk || !shellInfo.canSelfUpdate || !!busy"
                   @click="updateApp"
                 >
@@ -395,28 +448,42 @@ onMounted(async () => {
               </div>
             </section>
 
-            <section v-if="kernelUpdate" class="mb-3 rounded-lg border border-line bg-panel px-3 py-2.5">
+            <section
+              v-if="kernelVersion"
+              class="mb-3 rounded-lg border bg-panel px-3 py-2.5"
+              :class="kernelUpdate ? 'border-accent/70' : 'border-line'"
+            >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="flex items-center gap-1.5">
                     <UiIcon name="cpu" :size="14" class="text-muted" />
                     <span class="text-[13px]">内核</span>
+                    <span v-if="kernelUpdate" class="launcher-chip text-accent">有新版本</span>
                   </div>
                   <div class="mt-0.5 text-[11.5px] text-muted">
-                    <span>{{ kernelUpdate.current }}</span>
-                    <span class="mx-1">→</span>
-                    <span class="text-fg">{{ kernelUpdate.latest }}</span>
+                    <span>v{{ kernelVersion }}</span>
+                    <template v-if="kernelUpdate">
+                      <span class="mx-1">→</span>
+                      <span class="font-medium text-accent">v{{ kernelUpdate.latest }}</span>
+                    </template>
                   </div>
-                  <p v-if="kernelUpdate.notes" class="mt-1 text-[11.5px] text-faint">{{ kernelUpdate.notes }}</p>
-                  <p v-if="!kernelUpdate.hotOk" class="mt-1 text-[11.5px] text-danger">
+                  <p v-if="kernelUpdate?.notes" class="mt-1 text-[11.5px] text-faint">{{ kernelUpdate.notes }}</p>
+                  <p v-if="kernelUpdate && !kernelUpdate.hotOk" class="mt-1 text-[11.5px] text-danger">
                     当前热更新机制版本过低（需要 {{ kernelUpdate.minHotVersion ?? '—' }}），请先升级应用
                   </p>
-                  <p v-else class="mt-1 text-[11px] text-faint">
+                  <p v-else-if="kernelUpdate" class="mt-1 text-[11px] text-faint">
                     替换内核与 UI 并优雅重启内核（不重启 App）；连续两次启动失败会自动回滚。
                   </p>
+                  <p v-else-if="kernelChecked === null" class="mt-1 text-[11px] text-faint">检查中…</p>
+                  <p v-else-if="!kernelChecked" class="mt-1 text-[11px] text-faint">
+                    没查到最新版本（网络不通？可点「检查更新」重试）
+                  </p>
+                  <p v-else class="mt-1 text-[11px] text-faint">已是最新。</p>
                 </div>
                 <button
-                  class="shrink-0 rounded-md border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
+                  v-if="kernelUpdate"
+                  class="shrink-0 rounded-md border px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
+                  :class="kernelUpdate.hotOk ? 'border-accent text-accent' : 'border-line'"
                   :disabled="!kernelUpdate.hotOk || !!busy"
                   @click="updateKernel"
                 >
@@ -425,58 +492,57 @@ onMounted(async () => {
               </div>
             </section>
 
-            <ul v-if="updates.length" class="space-y-2">
+            <div v-if="pluginRows.length" class="mb-1.5 text-[11.5px] text-faint">
+              插件 · 共 {{ pluginRows.length }} 个
+            </div>
+            <ul v-if="pluginRows.length" class="space-y-2">
               <li
-                v-for="item in updates"
+                v-for="item in pluginRows"
                 :key="item.id"
-                class="rounded-lg border border-line bg-panel px-3 py-2.5"
+                class="rounded-lg border bg-panel px-3 py-2.5"
+                :class="item.hasUpdate ? 'border-accent/70' : 'border-line'"
               >
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
-                    <div class="truncate text-[13px]">{{ item.title }}</div>
-                    <div class="mt-0.5 text-[11.5px] text-muted">
-                      <span>{{ item.current }}</span>
-                      <span class="mx-1">→</span>
-                      <span class="text-fg">{{ item.latest }}</span>
+                    <div class="flex items-center gap-1.5">
+                      <span class="truncate text-[13px]">{{ item.title }}</span>
+                      <span v-if="item.hasUpdate" class="launcher-chip shrink-0 text-accent">有新版本</span>
                     </div>
-                    <p v-if="item.notes" class="mt-1 text-[11.5px] text-faint">{{ item.notes }}</p>
-                    <p v-if="!item.minKernelOk" class="mt-1 text-[11.5px] text-danger">
+                    <div class="mt-0.5 text-[11.5px] text-muted">
+                      <span>v{{ item.current }}</span>
+                      <template v-if="item.hasUpdate">
+                        <span class="mx-1">→</span>
+                        <span class="font-medium text-accent">v{{ item.latest }}</span>
+                      </template>
+                    </div>
+                    <p v-if="item.hasUpdate && item.notes" class="mt-1 text-[11.5px] text-faint">{{ item.notes }}</p>
+                    <p v-if="item.hasUpdate && !item.minKernelOk" class="mt-1 text-[11.5px] text-danger">
                       当前底座版本过低，请先升级应用
                     </p>
                   </div>
-                  <button
-                    class="shrink-0 rounded-md border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
-                    :disabled="!item.minKernelOk || !!busy"
-                    @click="updateOne(item)"
-                  >
-                    {{ busy === item.id ? '更新中…' : '更新' }}
-                  </button>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    <button
+                      v-if="item.hasUpdate"
+                      class="rounded-md border px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
+                      :class="item.minKernelOk ? 'border-accent text-accent' : 'border-line'"
+                      :disabled="!item.minKernelOk || !!busy"
+                      @click="updateOne(item)"
+                    >
+                      {{ busy === item.id ? '更新中…' : '更新' }}
+                    </button>
+                    <button
+                      v-if="item.overridden"
+                      class="rounded-md border border-line px-2.5 py-1 text-[12px] text-muted hover:bg-hover disabled:opacity-45"
+                      :disabled="!!busy"
+                      @click="revert(item)"
+                    >
+                      {{ busy === revertKey(item.id) ? '处理中…' : '恢复出厂版本' }}
+                    </button>
+                  </div>
                 </div>
               </li>
             </ul>
-
-            <div v-if="overridden.length" class="mt-4">
-              <div class="mb-1.5 text-[11.5px] text-faint">已装新版本（可回到 App 自带的那份）</div>
-              <ul class="space-y-2">
-                <li
-                  v-for="item in overridden"
-                  :key="item.id"
-                  class="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2"
-                >
-                  <div class="min-w-0">
-                    <div class="truncate text-[12.5px]">{{ item.title }}</div>
-                    <div class="text-[11.5px] text-faint">当前 {{ item.version }}</div>
-                  </div>
-                  <button
-                    class="shrink-0 rounded-md border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
-                    :disabled="!!busy"
-                    @click="revert(item)"
-                  >
-                    {{ busy === item.id ? '处理中…' : '恢复出厂版本' }}
-                  </button>
-                </li>
-              </ul>
-            </div>
+            <p v-else class="text-[12px] text-muted">没有可展示的出厂插件。</p>
           </template>
         </template>
       </div>
