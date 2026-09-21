@@ -76,6 +76,31 @@ for (const name of ['kernel', 'ui', 'builtin-plugins']) {
 }
 line(`✓ 组装完成：${path.relative(repoRoot, outDir)}`)
 
+// 静态 CRT 校验：`.cargo/config.toml` 给 windows 目标开了 `+crt-static`。动态链接的产物
+// 导入表里留着 vcruntime140*.dll / msvcp140.dll，干净 Windows 上双击就报「找不到
+// VCRUNTIME140_1.dll」（2026-09-21 同事机器复现）。CI 机器自带 VC++ 运行库、测不出来，
+// 所以打包时扫一遍产物兜底 —— 配置被 RUSTFLAGS 之类覆盖时，这一步就会红。
+function assertStaticCrt(file) {
+  const text = fs.readFileSync(file).toString('latin1').toLowerCase()
+  const hit = ['vcruntime140', 'msvcp140'].find((name) => text.includes(name))
+  if (hit) {
+    fail(`${path.relative(repoRoot, file)} 仍依赖 ${hit}*.dll —— 静态 CRT 未生效（见 .cargo/config.toml）`)
+  }
+}
+
+function collectExe(dir) {
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) return collectExe(full)
+    return entry.name.toLowerCase().endsWith('.exe') ? [full] : []
+  })
+}
+
+const crtExes = [path.join(outDir, `${APP_NAME}.exe`), ...collectExe(path.join(outDir, 'resources'))]
+for (const exe of crtExes) assertStaticCrt(exe)
+line(`✓ 静态 CRT 校验通过（${crtExes.length} 个 .exe 均不依赖 VC++ 运行库）`)
+
 // 3) 压缩（PowerShell 自带 Compress-Archive，不引第三方依赖）
 const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
 const version = appVersion()

@@ -27,6 +27,7 @@ Chassis is a plugin-based macOS launcher: Tauri 2 Rust shell (system primitives 
 - `pnpm app:win` (Windows only) — package the Windows portable zip (`dist-app/Chassis-<version>-win-<arch>.zip`).
 - Windows cross-check from macOS: `cargo check --workspace --exclude launcher-plugin-translate --exclude launcher-plugin-internal-store --target x86_64-pc-windows-msvc`（被排除的两个依赖 `ring`，其 C 代码在 macOS 主机上交叉不到 msvc；真 Windows 上无此问题）。
   The shell (`apps/shell`) additionally needs a resource compiler for `tauri-build` — point `RC` at a stub script (its probe output must start with `OVERVIEW: LLVM Resource Converter`, then exit 0). Real Windows builds run in `.github/workflows/build-windows.yml`.
+- Windows binaries are **statically linked against the MSVC runtime** (`.cargo/config.toml` sets `+crt-static` for both msvc targets): the portable zip ships no VC++ redistributable, so a dynamically linked build fails on a clean machine with「找不到 VCRUNTIME140_1.dll」. `pack-win.mjs` scans the packed `.exe`s and fails the build if the flag ever stops taking effect (CI machines have the runtime installed, so they cannot catch it).
 
 ## Release Channels & Independent Updates
 

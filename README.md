@@ -67,7 +67,7 @@ pnpm app:win      # Windows：release 编译 + 组装绿色版 → dist-app/Chas
 ```
 
 macOS：把 `dist-app/Chassis.app` 拖进 `/Applications` 双击即可。
-Windows：解压 zip 后双击 `Chassis.exe`（首次运行有 SmartScreen 提示，点「更多信息 → 仍要运行」）。
+Windows：解压 zip 后双击 `Chassis.exe`（首次运行有 SmartScreen 提示，点「更多信息 → 仍要运行」；产物静态链接 MSVC 运行时，不需要另装 VC++ 运行库）。
 
 > **为什么会弹系统授权、为什么要签名、怎么让它少弹**（host-manager 免授权写入 / TCC 排障 / 未公证的 quarantine / Windows 对照）
 > 全部在 [`docs/permissions.md`](docs/permissions.md)。

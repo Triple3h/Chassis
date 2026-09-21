@@ -1,0 +1,13 @@
+# Windows 绿色版不带 VC++ 运行库，而 rustc 对 msvc 目标默认**动态链接** CRT（/MD）⇒
+# 干净机器上双击 Chassis.exe 报「找不到 VCRUNTIME140_1.dll」（2026-09-21 同事机器复现，
+# 装过 Visual Studio 的机器看不出来）。静态链接（/MT）后壳 / 内核 / 逻辑层插件都不再
+# 依赖任何可再发行组件。
+#
+# 只作用于 windows-msvc 目标，macOS 构建不受影响。cargo 从调用目录向上查找本文件 ⇒
+# 在仓库根、apps/shell 或 plugins/<id> 里跑 cargo 都命中这一份。
+# 打包时的产物校验见 scripts/pack-win.mjs。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
