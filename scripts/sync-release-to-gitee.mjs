@@ -29,7 +29,9 @@
  * 原先「先删光全部待删项，再按目录顺序传」在跨境链路上翻过车：19MB 的包传了几分钟仍被 abort
  * （`AbortSignal.timeout`），重试期间 **Gitee 侧 app-latest 是空的**（索引与两个包都已删）——
  * 谁把域名切到 gitee 谁就 404。现在最坏情况只是「旧索引 + 少一个包」，绝不会变成空壳；
- * 上传超时也单独放宽（`GITEE_UPLOAD_TIMEOUT_MS`，默认 10 分钟）。
+ * 上传改成**快速失败**（`GITEE_UPLOAD_TIMEOUT_MS`，默认 60 秒）+ 瞬时故障重试 5 次：
+ * 2026-09-21 两次发版里，CI 直连 Gitee 一次「慢到超时」、一次「连接被断」，十几 MB 的跨境
+ * 上传这条路本就不该由 CI 承担 —— 失败后照旧从本机补传（中国 IP 到 Gitee 秒传）。
  *
  * 失败不阻塞发布：workflow 里这步 continue-on-error —— Gitee 挂了主通道仍然可用。
  */
@@ -39,11 +41,15 @@ import path from 'node:path'
 const API = 'https://gitee.com/api/v5'
 /// 匿名限流实测存在（连续请求会 403 Rate Limit Exceeded）⇒ 串行 + 固定间隔 + 退避重试
 const REQUEST_INTERVAL_MS = 800
-const RETRY_DELAYS_MS = [2000, 5000, 10000]
+/// 瞬时故障（连接被断 / 限流）的退避重试：**每个请求最多重试 5 次**。
+/// 为什么不是更多：跨境上传十几 MB 一次就要一分钟起，再长的重试链会把 workflow 拖成"一直转圈"。
+const RETRY_DELAYS_MS = [2000, 5000, 10000, 20000, 30000]
 /// 小请求（列附件 / 建 release）的超时
 const REQUEST_TIMEOUT_MS = 300_000
-/// 附件上传的独立超时：跨境链路上十几 MB 真的会磨很久（300s 实测被 abort 过），可用环境变量加长
-const UPLOAD_TIMEOUT_MS = Number(process.env.GITEE_UPLOAD_TIMEOUT_MS || 600_000)
+/// 附件上传的独立超时：**快速失败优先**。
+/// GitHub runner → Gitee 实测只有 30~60KB/s，十几 MB 的包在 CI 里本来就传不完（磨满过 10 分钟仍失败）——
+/// 与其耗着，不如早点了断交给本机补传（中国 IP 到 Gitee 秒传）。可用环境变量覆盖。
+const UPLOAD_TIMEOUT_MS = Number(process.env.GITEE_UPLOAD_TIMEOUT_MS || 60_000)
 /// 索引（`app-registry.json` / `kernel-registry.json` / `registry.json`）：必须**最后**上传
 const REGISTRY_RE = /(^|-)registry\.json$/
 
@@ -258,9 +264,17 @@ async function api(pathname, init = {}, attempt = 0, timeoutMs = REQUEST_TIMEOUT
       signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (err) {
+    // 超时 = 这条链路带宽不够，重试还是同样慢 ⇒ 直接放弃（外层的本机补传就是它的退路）；
+    // 连接被断 / DNS 抖动这类瞬时故障才值得退避重试。
+    if (isTimeout(err)) {
+      console.warn(`✗ ${pathname} 超时（${Math.round(timeoutMs / 1000)}s）：链路带宽不够，重试也是白等 ⇒ 放弃`)
+      throw err
+    }
     if (attempt < RETRY_DELAYS_MS.length) {
       const wait = RETRY_DELAYS_MS[attempt]
-      console.warn(`网络错误，${wait}ms 后重试：${pathname}（${err instanceof Error ? err.message : err}）`)
+      console.warn(
+        `网络错误，${wait}ms 后重试（第 ${attempt + 1}/${RETRY_DELAYS_MS.length} 次）：${pathname}（${err instanceof Error ? err.message : err}）`
+      )
       await sleep(wait)
       return api(pathname, init, attempt + 1, timeoutMs)
     }
@@ -282,6 +296,12 @@ async function api(pathname, init = {}, attempt = 0, timeoutMs = REQUEST_TIMEOUT
 /// 注意用函数声明：顶层 await 早于 `const` 初始化执行，箭头函数会撞 TDZ（实测踩过）
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/// `AbortSignal.timeout` 到点时 fetch 抛的 DOMException（`name === 'TimeoutError'`）；
+/// 兼容少数实现抛 `AbortError`。用来把「链路太慢」和「连接被断」分开对待。
+function isTimeout(err) {
+  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
 }
 
 function readOptions(argv) {
