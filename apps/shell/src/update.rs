@@ -37,8 +37,9 @@ const SHELL_EXE: &str = "launcher-shell";
 const APP_EXE: &str = "Chassis.exe";
 
 /// `CREATE_NO_WINDOW`（winbase.h）：GUI 进程 spawn 控制台程序时不要闪黑框。
+/// 定义收在 `sidecar`（子进程管理的归属地），内核 / helper / 自检共用一份。
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::sidecar::CREATE_NO_WINDOW;
 
 /// 自检超时：`--hot-probe` 只打印一行 JSON 就退出，正常在几十毫秒内。
 const PROBE_TIMEOUT_MS: u64 = 3_000;

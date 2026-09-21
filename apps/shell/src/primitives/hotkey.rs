@@ -76,6 +76,8 @@ pub fn register(app: &AppHandle, params: &Value) -> Result<Value, String> {
                     ));
                     notify_hotkey_fallback(app, &requested, accelerator);
                 }
+                // 悬停托盘就能看到「该按哪个键」：Windows 上 toast 通知不可靠（见 tray::set_tooltip）
+                super::tray::set_tooltip(app, &format!("Chassis — 按 {accelerator} 唤出"));
                 return Ok(json!({
                     "ok": true,
                     "accelerator": accelerator,
@@ -89,6 +91,8 @@ pub fn register(app: &AppHandle, params: &Value) -> Result<Value, String> {
 
     log(&format!("[hotkey] 所有候选热键都注册失败：{last_error}"));
     notify_hotkey_failure(app, &last_error);
+    // toast 不一定看得见（见 tray::set_tooltip）：至少把「点托盘图标也能唤出」这条退路写明
+    super::tray::set_tooltip(app, "Chassis — 热键注册失败，点此唤出");
     Ok(json!({ "ok": false, "reason": last_error }))
 }
 

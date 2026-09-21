@@ -12,6 +12,13 @@ use tauri::{AppHandle, Manager};
 
 const MAX_RESTARTS: u32 = 3;
 
+/// `CREATE_NO_WINDOW`（winbase.h）：壳是 GUI 子系统、被它拉起的子进程是控制台程序时，
+/// 不显式要这个标志，系统就会替子进程新开一个控制台窗口 ——
+/// 用户双击应用，先弹出来一个黑框（2026-09-21 Windows 实机反馈）。
+/// 自更新链路的 helper / 候选包自检共用同一个常量（见 `update.rs`）。
+#[cfg(windows)]
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// 内核因热更新主动重启（收到 `kernel/restarting` 通知后置位）。
 ///
 /// 语义：**计划内重启** —— 不计入崩溃重启预算（否则连续几次热更新就会撞上 MAX_RESTARTS），
@@ -81,6 +88,28 @@ fn kernel_exe_name() -> &'static str {
     }
 }
 
+/// 打包态资源的定位（`kernel` / `ui` / `builtin-plugins` 三个目录）—— **三个调用点共用这一份**。
+///
+/// 两个候选是因为**打包布局分平台**：
+///  - macOS：`X.app/Contents/Resources/<name>`（`tauri.conf.json` 的 `bundle.resources`
+///    把 `resources/<name>` 摊平到这里）；
+///  - Windows 绿色版：`<exe 目录>/resources/<name>`（`pack-win.mjs` 的布局 ——
+///    未安装时 Tauri 的 `resource_dir()` 就是 exe 所在目录，**不带那层 `resources/`**）。
+///
+/// 2026-09-21 Windows 实机反馈（v0.1.8）：只有 `locate_kernel` 写了两个候选，UI 与出厂插件
+/// 只找了第一种 ⇒ 「插件扫描：发现 0 个」+ 内核托管的 UI 目录不存在（窗口是透明的，
+/// 按了热键像没反应）。内核本身却起得来 —— 这种「一半对一半错」正是最难猜的形态。
+fn packaged_resource(app: &AppHandle, name: &str) -> Option<PathBuf> {
+    pick_resource(&app.path().resource_dir().ok()?, name)
+}
+
+/// `packaged_resource` 的纯函数内核（脱离 `AppHandle` 就能被单测驱动）
+fn pick_resource(root: &Path, name: &str) -> Option<PathBuf> {
+    [root.join(name), root.join("resources").join(name)]
+        .into_iter()
+        .find(|candidate| candidate.exists())
+}
+
 /// 内核定位（优先级从高到低）：
 ///  1. `LAUNCHER_KERNEL_ENTRY`（测试与开发覆盖）
 ///  2. 包内 `Resources/kernel/<exe>`（打包态）
@@ -95,14 +124,10 @@ fn locate_kernel(app: &AppHandle) -> Result<KernelLocation, String> {
     }
 
     let exe_name = kernel_exe_name();
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        for candidate in [
-            resource_dir.join("kernel").join(exe_name),
-            resource_dir.join("resources").join("kernel").join(exe_name),
-        ] {
-            if candidate.exists() {
-                return Ok(KernelLocation::Bundled(candidate));
-            }
+    if let Some(kernel_dir) = packaged_resource(app, "kernel") {
+        let candidate = kernel_dir.join(exe_name);
+        if candidate.exists() {
+            return Ok(KernelLocation::Bundled(candidate));
         }
     }
 
@@ -280,6 +305,21 @@ impl Sidecar {
             KernelLocation::Direct(path) => (path, ui_dist_dir(app)),
         };
 
+        // 资源算错是「窗口空白 / 一个插件都没有」那类事故的第一现场（2026-09-21 Windows 实机）：
+        // 后端会一路静默跑下去（内核照样就绪、热键照样能用），只有这里留一句人话
+        if !ui_dist.join("index.html").exists() {
+            crate::logging::log(&format!(
+                "[shell] 警告：UI 产物不完整（{} 下没有 index.html）—— 唤出的窗口会是空白的",
+                ui_dist.display()
+            ));
+        }
+        if !builtin.is_dir() {
+            crate::logging::log(&format!(
+                "[shell] 警告：出厂插件目录不存在（{}）—— 启动台会一个插件都没有",
+                builtin.display()
+            ));
+        }
+
         // Windows 路线：内核对换核只写台账，壳在「内核已退出、尚未拉起」窗口里照台账执行 / 回滚。
         // macOS 上台账的 swapOwner 不是 shell（内核自己换过了）⇒ 这里什么都不做。
         if let Some(detail) = crate::kernel_swap::apply_pending(&data_root, &entry) {
@@ -298,6 +338,12 @@ impl Sidecar {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // 内核是控制台程序，别让系统给它开窗口（协议与日志都走 pipe，跟控制台无关）
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
 
         let mut child = command
             .spawn()
@@ -535,11 +581,9 @@ fn builtin_plugins_dir(app: &AppHandle) -> PathBuf {
     if let Ok(path) = std::env::var("LAUNCHER_BUILTIN_PLUGINS") {
         return PathBuf::from(path);
     }
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("builtin-plugins");
-        if bundled.exists() {
-            return bundled;
-        }
+    // 打包态：macOS 与 Windows 两种布局都要认（见 `packaged_resource`）
+    if let Some(bundled) = packaged_resource(app, "builtin-plugins") {
+        return bundled;
     }
     if let Ok(exe) = std::env::current_exe() {
         let mut cursor: Option<&Path> = exe.parent();
@@ -564,11 +608,9 @@ fn ui_dist_dir(app: &AppHandle) -> PathBuf {
     if let Ok(path) = std::env::var("LAUNCHER_UI_DIST") {
         return PathBuf::from(path);
     }
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("ui");
-        if bundled.exists() {
-            return bundled;
-        }
+    // 打包态：macOS 与 Windows 两种布局都要认（见 `packaged_resource`）
+    if let Some(bundled) = packaged_resource(app, "ui") {
+        return bundled;
     }
     if let Ok(exe) = std::env::current_exe() {
         let mut cursor: Option<&Path> = exe.parent();
@@ -586,4 +628,33 @@ fn ui_dist_dir(app: &AppHandle) -> PathBuf {
         }
     }
     PathBuf::from("apps/launcher-ui/dist")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 打包资源在**两种布局**下都要能找到 —— 少认一种就是 v0.1.8 那个事故：
+    /// Windows 绿色版上「插件 0 个 + UI 目录不存在」，而内核自己照样起得来。
+    #[test]
+    fn packaged_resource_covers_both_layouts() {
+        let root = std::env::temp_dir().join(format!("shell-resource-layout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        // macOS：`.app/Contents/Resources/<name>`（摊平在资源根下）
+        std::fs::create_dir_all(root.join("ui")).unwrap();
+        assert_eq!(pick_resource(&root, "ui"), Some(root.join("ui")));
+
+        // Windows 绿色版：`<exe 目录>/resources/<name>`（多一层 resources/）
+        std::fs::create_dir_all(root.join("resources").join("builtin-plugins")).unwrap();
+        assert_eq!(
+            pick_resource(&root, "builtin-plugins"),
+            Some(root.join("resources").join("builtin-plugins"))
+        );
+
+        // 两种都没有 ⇒ None（绝不返回一个不存在的路径：那会让内核拿到假目录）
+        assert_eq!(pick_resource(&root, "kernel"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

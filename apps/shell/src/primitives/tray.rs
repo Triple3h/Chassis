@@ -79,6 +79,17 @@ pub fn ensure(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 托盘提示（悬停可见）—— 「现在该按什么键唤出」的落点。
+///
+/// 为什么不只靠系统通知：Windows 上的 toast 对**绿色版**不可靠（没有开始菜单快捷方式 ⇒
+/// 没有 AUMID，toast 会被静默丢弃），而热键注册成功 / 回退这件事只说给过 toast ——
+/// 用户于是「按了没反应，也不知道该按哪个」（2026-09-21 实机反馈）。
+pub fn set_tooltip(app: &AppHandle, text: &str) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(text));
+    }
+}
+
 /// 菜单由内核提供（settings / plugins / reload 由内核处理，show / quit 壳自己处理）
 pub fn set_menu(app: &AppHandle, params: &Value) -> Result<Value, String> {
     ensure(app)?;

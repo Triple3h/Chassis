@@ -89,10 +89,24 @@ pub fn run() {
 
             // ③ 窗口 + 托盘
             if let Err(err) = create_main_window(&handle) {
-                logging::log(&format!("[shell] 创建窗口失败：{err}"));
+                alert_user(
+                    "Chassis 无法创建窗口",
+                    &format!(
+                        "启动台没能创建主窗口：\n{err}\n\n\
+                         最常见的原因是这台机器缺少 Microsoft Edge WebView2 运行时\
+                         （Windows 11 通常自带，精简版 / LTSC 镜像可能被移除）。\n\
+                         装好后再启动即可：https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n\
+                         完整日志：{}",
+                        log_hint()
+                    ),
+                );
             }
             if let Err(err) = primitives::tray::ensure(&handle) {
-                logging::log(&format!("[shell] 托盘初始化失败：{err}"));
+                // 托盘是「窗口没被唤出时唯一看得见的入口」：连它都没了，用户就真的什么都没有了
+                alert_user(
+                    "Chassis 托盘图标初始化失败",
+                    &format!("{err}\n\n启动台仍可能在运行，但没有任何可点的入口。\n完整日志：{}", log_hint()),
+                );
             }
 
             // ③b 选中文本预热：前台 App 一换就替它把无障碍开关打开
@@ -244,14 +258,49 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// 日志文件路径（没初始化出来时给一句人话，别给用户一个空字符串）
+fn log_hint() -> String {
+    logging::log_path()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "（日志未初始化）".to_string())
+}
+
+/// 把「起不来」这件事摆到用户眼前 —— Windows 上只能靠原生对话框。
+///
+/// 为什么必须有：Windows 上壳是 GUI 子系统（没有控制台），日志又躺在数据目录里没人会去翻 ——
+/// 主窗口建不出来时（最典型的原因：机器上没有 WebView2 运行时），
+/// 用户的全部体验就是「双击了，除了一个黑框什么都没发生」（2026-09-21 实机反馈）。
+/// macOS 那边失败路径本来就有窗口错误面板可看，所以这里只在 Windows 上弹。
+///
+/// 对话框跑在独立线程上：模态等待用户点「确定」的是它，不是启动流程（内核 / 热键该起还得起）。
+fn alert_user(title: &str, message: &str) {
+    // 非 Windows 上弹不出东西，但失败原因照样要落日志（macOS 的错误面板显示的是同一段话）
+    logging::log(&format!("[shell] 启动故障：{title} —— {}", message.replace('\n', " ")));
+    #[cfg(windows)]
+    {
+        use windows::core::HSTRING;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            MessageBoxW, MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MB_SYSTEMMODAL,
+        };
+        let caption = HSTRING::from(title);
+        let body = HSTRING::from(message);
+        std::thread::spawn(move || unsafe {
+            MessageBoxW(None, &body, &caption, MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_SYSTEMMODAL);
+        });
+    }
+}
+
 /// 内核起不来时显示可操作的错误面板（不许白屏），并把日志路径写进页面
 fn show_boot_error(app: &AppHandle, message: &str) {
-    let log_hint = logging::log_path()
-        .map(|path| path.display().to_string())
-        .unwrap_or_default();
+    let hint = log_hint();
     logging::log(&format!("[shell] 内核启动失败：{message}"));
-    let Some(window) = app.get_webview_window("main") else { return };
-    let text = format!("内核启动失败：{message}｜日志：{log_hint}");
+    // 窗口压根没建出来（多半就是上面那个 `alert_user` 说的原因）：错误面板无处可注入，
+    // 只能再弹一次对话框 —— 否则用户在「内核也没起来」时依旧什么都看不到
+    let Some(window) = app.get_webview_window("main") else {
+        alert_user("Chassis 内核启动失败", &format!("{message}\n\n完整日志：{hint}"));
+        return;
+    };
+    let text = format!("内核启动失败：{message}｜日志：{hint}");
     let escaped = text.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', " ");
     let script = format!(
         "(function () {{ var el = document.getElementById('text'); if (el) {{ el.textContent = '{escaped}'; }} \
