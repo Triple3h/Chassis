@@ -1,8 +1,8 @@
 [package]
 name = "launcher-plugin-screen-recorder"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "录屏助手（screen-recorder）逻辑层：驱动系统 screencapture 录屏 / 截图，管理录制进程与产物"
+description = "录屏助手（screen-recorder）逻辑层：macOS 驱 screencapture、Windows 驱 ffmpeg(gdigrab) 录制 / 截图，管理录制进程与产物"
 license = "MIT"
 publish = false
 
@@ -21,6 +21,9 @@ path = "src/bin/rec_stop.rs"
 name = "rec-status"
 path = "src/bin/rec_status.rs"
 [[bin]]
+name = "rec-pause"
+path = "src/bin/rec_pause.rs"
+[[bin]]
 name = "rec-shot"
 path = "src/bin/rec_shot.rs"
 [[bin]]
@@ -35,4 +38,24 @@ launcher-plugin-sdk = { path = "../../packages/plugin-sdk-rs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"   # 录屏/截图文件名的时间戳（本地时区）
-libc = "0.2"     # kill(2)：判断录制进程是否还在 + 发 SIGINT 收尾
+
+# macOS：kill(2) 发 SIGINT + libproc（proc_pidpath 验进程身份 / proc_listallpids 找孤儿录制）
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Windows：GDI 截图 + 区域选择框 + 进程查询（ffmpeg 由运行时探测）。
+# 版本与 tauri / 其它插件对齐（0.61），避免同一 crate 编译两份。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+# GDI 位图 → PNG（只在 Windows 截图上用；只开 png，不拉整套编解码）
+image = { version = "0.25", default-features = false, features = ["png"] }

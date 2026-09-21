@@ -134,7 +134,7 @@ try {
 line('')
 line(`✓ 打包完成：${path.relative(repoRoot, outApp)}（v${shellVersion}）`)
 line(`  安装：把 ${APP_NAME}.app 拖进 /Applications，双击运行`)
-line('  权限（都按需弹，不用到就不会问）：辅助功能=读选中文本；屏幕录制=截图；')
+line('  权限（都按需弹，不用到就不会问）：辅助功能=读选中文本；屏幕录制=截图 / 录屏；麦克风=录屏时带声音；')
 line('  自动化（"想控制此 Mac"）=只在 host-manager 写 hosts 时提权；通知=操作提示')
 line('  出可自更新的通道包：node scripts/pack-app.mjs（压 zip + 写分片，CI 汇总成 app-registry.json）')
 
@@ -167,6 +167,7 @@ function infoPlist() {
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppleEventsUsageDescription</key><string>仅在需要管理员权限写入 hosts 文件时使用（弹出系统提权对话框）</string>
+  <key>NSMicrophoneUsageDescription</key><string>录制屏幕时按需采集麦克风声音（录屏助手插件里打开「麦克风」开关才会用到）</string>
 </dict>
 </plist>
 `

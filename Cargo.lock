@@ -814,13 +814,15 @@ dependencies = [
 
 [[package]]
 name = "launcher-plugin-screen-recorder"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
+ "image",
  "launcher-plugin-sdk",
  "libc",
  "serde",
  "serde_json",
+ "windows 0.61.3",
 ]
 
 [[package]]

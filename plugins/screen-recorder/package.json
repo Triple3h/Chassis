@@ -2,8 +2,8 @@
   "name": "screen-recorder",
   "title": "录屏助手",
   "author": "triple3h",
-  "description": "全屏 / 区域 / 窗口三种录制模式，可带麦克风与鼠标点击高亮；顺手也能截图",
-  "version": "0.1.0",
+  "description": "全屏 / 区域 / 窗口三种录制模式，可带麦克风与鼠标点击高亮；顺手也能截图（macOS 走 screencapture，Windows 走 ffmpeg + 原生 GDI）",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "apiVersion": "2",
@@ -12,16 +12,20 @@
     "tool"
   ],
   "platforms": [
-    "macos"
+    "macos",
+    "windows"
   ],
   "capabilities": [
     "hostUi",
     "storage",
     "exec.spawn",
-    "shell.open",
-    "notify.show",
-    "clipboard.write"
+    "shell.open"
   ],
+  "session": {
+    "status": "rec-status",
+    "pause": "rec-pause",
+    "stop": "rec-stop"
+  },
   "commands": [
     {
       "name": "recorder",
@@ -46,13 +50,13 @@
       "name": "rec-start",
       "title": "开始录制（脚本）",
       "mode": "script",
-      "icon": "play"
+      "icon": "power"
     },
     {
       "name": "rec-stop",
       "title": "停止录制（脚本）",
       "mode": "script",
-      "icon": "stop"
+      "icon": "save"
     },
     {
       "name": "rec-status",
@@ -61,16 +65,22 @@
       "icon": "info"
     },
     {
+      "name": "rec-pause",
+      "title": "暂停/继续录制（脚本）",
+      "mode": "script",
+      "icon": "power"
+    },
+    {
       "name": "rec-shot",
       "title": "截图（脚本）",
       "mode": "script",
-      "icon": "camera"
+      "icon": "maximize"
     },
     {
       "name": "rec-permission",
-      "title": "屏幕录制权限（脚本）",
+      "title": "录制环境体检（脚本）",
       "mode": "script",
-      "icon": "shield"
+      "icon": "shield-check"
     },
     {
       "name": "rec-list",

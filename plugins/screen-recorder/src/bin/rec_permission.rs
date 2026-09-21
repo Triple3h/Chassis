@@ -1,5 +1,6 @@
-//! rec-permission：查询 / 申请「屏幕录制」权限（macOS TCC）。
-//! 第一次申请会弹系统提示；用户拒绝过就只能在系统设置里手动勾，这里给出引导文案。
+//! rec-permission：录制环境体检 —— 权限 + 后端就绪度 + 能力矩阵，面板进页面问一次。
+//! macOS：屏幕录制 TCC（`CGPreflightScreenCaptureAccess`，可主动申请）；
+//! Windows：没有系统级「屏幕录制」授权，只探 ffmpeg 在不在。
 
 use launcher_plugin_screen_recorder as rec;
 use launcher_plugin_sdk::{json, Context, Level, Result, Value};
@@ -9,39 +10,35 @@ fn main() {
 }
 
 fn dispatch(ctx: &Context) -> Result<()> {
-    if !rec::platform_supported() {
-        return ctx.done(json!({
-            "supported": false,
-            "granted": false,
-            "hint": "当前平台不支持系统级录屏（macOS 才有 TCC 屏幕录制权限）",
-        }));
-    }
+    // 主动申请：macOS 第一次会弹系统提示（用户拒过就只能去系统设置里勾）
+    let request = ctx.raw_args().get("request").and_then(Value::as_bool).unwrap_or(false);
+    let permission = rec::backend::permission(request);
+    let (ready, ready_hint) = rec::backend::readiness();
+    let features = rec::features();
 
-    let before = rec::screen_capture_granted().unwrap_or(false);
-    let mut requested = false;
-    let mut granted = before;
-    if !before {
-        requested = true;
-        let immediate = rec::request_screen_capture();
-        // 系统提示是异步的：立刻再查一次，多数情况仍是 false，需要用户去设置里勾
-        granted = immediate || rec::screen_capture_granted().unwrap_or(false);
-    }
-
-    let needs_manual = requested && !granted;
     let _ = ctx.log(
-        &format!("rec-permission: granted={granted} requested={requested}"),
+        &format!(
+            "rec-permission: backend={} granted={} ready={} requested={}",
+            rec::backend::backend_name(),
+            permission.granted,
+            ready,
+            permission.requested
+        ),
         None,
         Level::Info,
     );
     ctx.done(json!({
-        "supported": true,
-        "granted": granted,
-        "requested": requested,
-        "needsManual": needs_manual,
-        "hint": if granted {
-            Value::String(String::new())
-        } else {
-            Value::String("到 系统设置 → 隐私与安全性 → 屏幕录制 里勾选 Chassis（勾完请退出并重新打开启动台）".into())
-        },
+        "supported": permission.supported,
+        "granted": permission.granted,
+        "requested": permission.requested,
+        "needsManual": permission.needs_manual,
+        "hint": permission.hint,
+        "settingsUrl": permission.settings_url,
+        "micSettingsUrl": rec::backend::microphone_settings_url(),
+        "backend": rec::backend::backend_name(),
+        "platform": std::env::consts::OS,
+        "ready": ready,
+        "readyHint": ready_hint,
+        "features": features,
     }))
 }

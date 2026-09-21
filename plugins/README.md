@@ -20,7 +20,7 @@
 | `calc-pad` | `calc-pad`（view）+ `calc-eval`（script，贡献型） | Vite + Vue | Rust |
 | `markdown-notes` | `notes`（view） | Vite + Vue | — |
 | `todo` | `todo`（view） | Vite + Vue | — |
-| `screen-recorder`（macOS 专属） | `recorder`（view） + `rec-start` / `rec-stop` / `rec-status` / `rec-shot` / `rec-permission` / `rec-list`（script） | Vite + Vue | Rust |
+| `screen-recorder`（macOS / Windows） | `recorder`（view） + `rec-start` / `rec-stop` / `rec-status` / `rec-shot` / `rec-permission` / `rec-list`（script） | Vite + Vue | Rust |
 | `process-manager`（macOS / Windows） | `panel`（view） + `port-list` / `proc-list` / `proc-detail` / `proc-kill`（script） | Vite + Vue | Rust |
 
 ## 工程形态：视图层两套工具链，逻辑层统一 Rust
