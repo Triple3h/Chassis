@@ -4,7 +4,7 @@ import { hotp, totpAt, TotpCache } from '../src/core/totp'
 import { parseOtpAuthUri, buildOtpAuthUri, parseAccountInput } from '../src/core/otpauth'
 import { decodeMigration, extractMigrationData, parseMigrationUri } from '../src/core/migration'
 import { decryptJson, encryptJson, isVaultBlob, passwordHint, WrongPasswordError } from '../src/core/vault'
-import { normalizeAccount, accountTitle } from '../src/core/types'
+import { normalizeAccount, accountTitle, byName, moveAccount, shiftedSlot, type Account } from '../src/core/types'
 
 let passed = 0
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -319,6 +319,46 @@ await test('normalizeAccount 兜底', () => {
   assert.equal(accountTitle(a), '未命名账户')
   assert.equal(accountTitle({ ...a, issuer: 'GitHub', name: 'ada' }), 'ada')
   assert.equal(accountTitle({ ...a, issuer: 'GitHub', name: '' }), 'GitHub')
+})
+
+await test('moveAccount：挪到目标行所在的位置', () => {
+  const list: Account[] = ['a', 'b', 'c', 'd'].map((id) => normalizeAccount({ id, secret: 'GEZDGNBVGY3TQOJQ' }))
+  assert.deepEqual(
+    moveAccount(list, 'a', 'c').map((x) => x.id),
+    ['b', 'c', 'a', 'd'],
+  )
+  assert.deepEqual(
+    moveAccount(list, 'd', 'b').map((x) => x.id),
+    ['a', 'd', 'b', 'c'],
+  )
+  // 原地 / 找不到：原样返回同一个数组，调用方据此判定「没动、不用落盘」
+  assert.equal(moveAccount(list, 'a', 'a'), list)
+  assert.equal(moveAccount(list, 'a', 'zz'), list)
+})
+
+await test('拖动预览 = 落账结果（穷举 from×to）', () => {
+  const ids = ['a', 'b', 'c', 'd', 'e', 'f']
+  for (let from = 0; from < ids.length; from++) {
+    for (let to = 0; to < ids.length; to++) {
+      const list: Account[] = ids.map((id) => normalizeAccount({ id, secret: 'GEZDGNBVGY3TQOJQ' }))
+      // 落账后的顺序
+      const after = moveAccount(list, ids[from], ids[to]).map((x) => x.id)
+      // 拖动中每一行占的格子：让位的行按 shiftedSlot 落位，被拖的那张最后落在 to 格
+      const preview: string[] = []
+      for (let i = 0; i < ids.length; i++) {
+        if (i === from) continue
+        preview[shiftedSlot(i, from, to)] = ids[i]
+      }
+      preview[to] = ids[from]
+      assert.deepEqual(preview, after, `from=${from} to=${to}`)
+    }
+  }
+})
+
+await test('byName 按服务名排序，没有服务名时退回账号名', () => {
+  const mk = (issuer: string, name: string): Account => normalizeAccount({ issuer, name, secret: 'GEZDGNBVGY3TQOJQ' })
+  const list = [mk('', 'zoe'), mk('Acme', 'bob'), mk('', 'anna')]
+  assert.deepEqual([...list].sort(byName).map((x) => x.issuer || x.name), ['Acme', 'anna', 'zoe'])
 })
 
 console.log(`\n通过 ${passed} 项`)

@@ -28,12 +28,15 @@ export interface Settings {
   showRing: boolean
   /** 隐私模式：只显示选中行的验证码，其余打点（防录屏/旁观） */
   hideCodes: boolean
+  /** 按服务名排序；关掉后按账户表自身顺序（拖动排序改的就是它） */
+  sortByName: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   clearClipboardAfter: 0,
   showRing: true,
   hideCodes: false,
+  sortByName: true,
 }
 
 export const ALGORITHMS: Algorithm[] = ['SHA1', 'SHA256', 'SHA512']
@@ -64,6 +67,32 @@ export function normalizeAccount(input: Partial<Account>): Account {
     note: input.note || '',
     createdAt: input.createdAt || Date.now(),
   }
+}
+
+/** 列表默认排序：按服务名（没有服务名就用账号名） */
+export function byName(a: Account, b: Account): number {
+  return (a.issuer || a.name).localeCompare(b.issuer || b.name, 'zh-Hans-CN')
+}
+
+/** 把 fromId 的账户挪到 toId 所在的位置；找不到或原地不动时原样返回（拖动排序用） */
+export function moveAccount(list: Account[], fromId: string, toId: string): Account[] {
+  const from = list.findIndex((a) => a.id === fromId)
+  const to = list.findIndex((a) => a.id === toId)
+  if (from < 0 || to < 0 || from === to) return list
+  const next = [...list]
+  next.splice(to, 0, ...next.splice(from, 1))
+  return next
+}
+
+/**
+ * 拖动预览里「第 index 行该显示在第几格」：把第 from 行拖到第 to 格时，
+ * 被它跨过的那些行整体让开一格 —— 让位方向与 `moveAccount` 的结果逐格对齐
+ * （`test/core.test.ts` 里有一组穷举 from×to 的对照用例守着这条）。
+ */
+export function shiftedSlot(index: number, from: number, to: number): number {
+  if (from < to && index > from && index <= to) return index - 1
+  if (from > to && index >= to && index < from) return index + 1
+  return index
 }
 
 /** 用于列表展示与搜索的标题 */

@@ -70,6 +70,11 @@ function submitVault() {
           <input type="checkbox" :checked="local.showRing" @change="patch({ showRing: !local.showRing })" />
           显示倒计时圆环
         </label>
+        <label class="flex items-center gap-2 text-[13px]">
+          <input type="checkbox" :checked="local.sortByName" @change="patch({ sortByName: !local.sortByName })" />
+          按名称排序
+          <span class="text-[11.5px] text-faint">关掉后可拖动账户行自定义顺序</span>
+        </label>
         <label class="flex items-center gap-3 text-[13px]">
           复制后自动清空剪贴板
           <UiSelect

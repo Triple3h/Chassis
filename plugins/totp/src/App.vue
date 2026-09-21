@@ -13,7 +13,7 @@ import { isMigrationUri, isOtpAuthUri } from './core/otpauth'
 import { warmupQr } from './core/qr'
 import { decryptJson, encryptJson, type VaultBlob } from './core/vault'
 import { clearVault, loadState, saveAccounts, saveSettings, saveVault } from './core/store'
-import { DEFAULT_SETTINGS, normalizeAccount, newId, type Account, type Settings } from './core/types'
+import { byName, DEFAULT_SETTINGS, moveAccount, normalizeAccount, newId, shiftedSlot, type Account, type Settings } from './core/types'
 import AccountDialog from './components/AccountDialog.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
@@ -46,6 +46,8 @@ const codeMap = shallowRef(new Map<string, string>())
 const hotpCodes = shallowRef(new Map<string, string>())
 const searchEl = ref<HTMLInputElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
+/** 列表内部的定位容器（虚拟滚动的坐标原点，拖动时按它算落点行） */
+const contentEl = ref<HTMLElement | null>(null)
 const toast = useToast()
 // 主题由宿主裁决（会话 URL 的 ?theme=），本页只跟随、不提供切换
 useTheme()
@@ -63,7 +65,7 @@ const filtered = computed(() => {
     if (!q) return true
     return [a.issuer, a.name, a.group, a.note].some((v) => v && v.toLowerCase().includes(q))
   })
-  return [...list].sort((a, b) => (a.issuer || a.name).localeCompare(b.issuer || b.name, 'zh-Hans-CN'))
+  return settings.value.sortByName ? [...list].sort(byName) : list
 })
 
 /** 分组标签（含各自账户数）—— 没有任何账户填过分组时整条标签栏不出现 */
@@ -208,11 +210,176 @@ function setGroup(name: string) {
 /**
  * 整行单击 = 选中 + 复制。
  * 双击的第二次 click 丢掉：`detail > 1` 只让第一次生效，否则 HOTP 行会被扣掉两个计数器。
+ * 刚拖完的那一次 click 也丢掉（指针落回原行时浏览器仍会补一次 click，不丢就变成误复制）。
  */
 function onRowClick(e: MouseEvent, index: number, a: Account) {
+  if (performance.now() - dragEndedAt < 300) return
   selected.value = index
   if (e.detail > 1) return
   void copyAccount(a)
+}
+
+/* ── 拖动排序 ──────────────────────────────────────────────────────
+   HTML5 DnD 在 WebView 里不可靠，改用指针事件（同启动台固定项重排）：
+   超过 5px 才算拖动，落点按「指针在第几行」的几何计算 —— 定高虚拟列表里
+   `elementFromPoint` 会因为行被裁掉而落空，几何反而更稳。
+
+   实时挤压：被拖的那张用 transform 贴住指针（所以它自己不能有过渡），
+   被跨过的行整段让位一格（`slotY`），让位与松手归位都交给 CSS 的同一根弹性曲线
+   （`.launcher-list-moving` 那段，见 app.css）。 */
+
+const drag = ref<{ id: string; from: number; to: number; active: boolean } | null>(null)
+/** 松手后过渡还要跑一会儿：这段时间里得留着「会动」的类，卡片才飞得回去 */
+const settling = ref(false)
+let dragOrigin = { x: 0, y: 0 }
+/** 指针位置（响应式：被拖的那张每帧都要跟着它重排） */
+const dragPoint = ref({ x: 0, y: 0 })
+/** 抓握点距行顶的距离：跟手但不跳 */
+let grabOffset = 0
+let dragRaf = 0
+let settleTimer = 0
+/** 拖动结束的时刻，用于丢掉随之而来的那次 click */
+let dragEndedAt = 0
+
+function startDrag(e: MouseEvent, index: number, a: Account) {
+  // 行内的按钮自己处理按下（复制 / 编辑），别把它们变成拖拽把手
+  if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return
+  stopDrag()
+  const top = contentEl.value?.getBoundingClientRect().top ?? 0
+  dragOrigin = { x: e.clientX, y: e.clientY }
+  dragPoint.value = { x: e.clientX, y: e.clientY }
+  grabOffset = e.clientY - (top + index * ROW)
+  drag.value = { id: a.id, from: index, to: index, active: false }
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', endDrag)
+}
+
+function onDragMove(e: MouseEvent) {
+  const state = drag.value
+  if (!state) return
+  dragPoint.value = { x: e.clientX, y: e.clientY }
+  if (!state.active) {
+    if (Math.abs(e.clientX - dragOrigin.x) < 5 && Math.abs(e.clientY - dragOrigin.y) < 5) return
+    state.active = true
+    document.body.style.userSelect = 'none'
+    dragRaf = requestAnimationFrame(dragAutoScroll)
+  }
+  updateDropTarget()
+}
+
+/**
+ * 每一行的纵坐标：平时就是「第几行 × 行高」；拖动中，被拖的那张贴住指针，
+ * 它跨过的那些行整体让开一格 —— 于是落点处空出一格，松手后卡片正好飞进去。
+ *
+ * 让位方向与 `moveAccount` 的结果一致（挪到第 to 行那一格）：往下拖时
+ * (from, to] 区间的行上移一格，往上拖时 [to, from) 区间的行下移一格。
+ */
+function slotY(index: number, a: Account): number {
+  const state = drag.value
+  if (!state?.active) return index * ROW
+  if (a.id === state.id) {
+    const top = contentEl.value?.getBoundingClientRect().top ?? 0
+    return dragPoint.value.y - grabOffset - top
+  }
+  return shiftedSlot(index, state.from, state.to) * ROW
+}
+
+/** 行的内联 transform：被拖的那张再浮起来一点（缩放只能写在行内，否则会盖掉 translateY） */
+function rowTransform(index: number, a: Account): string {
+  const lifted = drag.value?.active === true && drag.value.id === a.id
+  return `translateY(${slotY(index, a)}px)${lifted ? ' scale(1.02)' : ''}`
+}
+
+/** 指针落在第几行（夹在 0 ~ 最后一行，拖到列表外就等于「挪到首 / 末位」） */
+function rowIndexAt(clientY: number): number {
+  const el = contentEl.value
+  if (!el) return -1
+  const y = clientY - el.getBoundingClientRect().top
+  return Math.max(0, Math.min(filtered.value.length - 1, Math.floor(y / ROW)))
+}
+
+function updateDropTarget() {
+  const state = drag.value
+  if (!state) return
+  state.to = rowIndexAt(dragPoint.value.y)
+}
+
+/** 靠近上下边缘时自动滚动：列表比视口长，拖不到看不见的行 */
+function dragAutoScroll() {
+  const state = drag.value
+  const el = listEl.value
+  if (!state?.active || !el) return
+  const rect = el.getBoundingClientRect()
+  const EDGE = 24
+  const step = dragPoint.value.y < rect.top + EDGE ? -6 : dragPoint.value.y > rect.bottom - EDGE ? 6 : 0
+  if (step) {
+    const before = el.scrollTop
+    el.scrollTop = before + step
+    if (el.scrollTop !== before) updateDropTarget()
+  }
+  dragRaf = requestAnimationFrame(dragAutoScroll)
+}
+
+function endDrag() {
+  const state = drag.value
+  const moved = state?.active === true
+  const fromId = state?.id ?? ''
+  // 落点 = 指针最后停在第几行；拖回原地（to === from）就是一次「弹回去」
+  const toId = moved && state ? (filtered.value[state.to]?.id ?? '') : ''
+  stopDrag()
+  if (!moved || !toId || toId === fromId) return
+  dragEndedAt = performance.now()
+  void applyReorder(fromId, toId)
+}
+
+function stopDrag() {
+  const wasActive = drag.value?.active === true
+  drag.value = null
+  document.body.style.userSelect = ''
+  if (dragRaf) {
+    cancelAnimationFrame(dragRaf)
+    dragRaf = 0
+  }
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', endDrag)
+  if (!wasActive) return
+  // 松手后卡片还要从指针飞回自己的格子：过渡跑完再摘掉「会动」的类
+  settling.value = true
+  clearTimeout(settleTimer)
+  settleTimer = window.setTimeout(() => (settling.value = false), 260)
+}
+
+/**
+ * 落点即「挪到那一行所在的位置」。
+ * 首次拖动会先把「按名称」的当前顺序固化成账户表顺序再改一笔 —— 不固化的话，
+ * 整张表会从名字序跳回录入顺序，只有被拖的那一行看着对。
+ *
+ * 顺序与设置都必须**立刻**上屏：落库（口令模式下还有一轮 PBKDF2）回来得晚，
+ * 等的期间卡片会先朝旧位置飞、到位后再改道 —— 归位动画要一次到位。
+ * 两个状态同一帧落地还有一层原因：只改数组不改设置的话，`filtered` 会按名称
+ * 把刚拖好的顺序当场重排回去。写失败就整体回滚。
+ */
+async function applyReorder(fromId: string, toId: string) {
+  const base = settings.value.sortByName ? [...accounts.value].sort(byName) : accounts.value
+  const next = moveAccount(base, fromId, toId)
+  if (next === accounts.value) return
+  const prevAccounts = accounts.value
+  const prevSettings = settings.value
+  const nextSettings = prevSettings.sortByName ? { ...prevSettings, sortByName: false } : prevSettings
+  accounts.value = next
+  settings.value = nextSettings
+  try {
+    await persist(next)
+    if (nextSettings !== prevSettings) await saveSettings(nextSettings)
+  } catch (err) {
+    accounts.value = prevAccounts
+    settings.value = prevSettings
+    toast.err(`排序保存失败：${errorText(err)}`)
+    return
+  }
+  // 选中跟到被拖走的那一行，否则高亮会留在被人让位的行上
+  const at = filtered.value.findIndex((a) => a.id === fromId)
+  if (at >= 0) selected.value = at
 }
 
 function togglePrivacy() {
@@ -534,6 +701,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  stopDrag()
+  clearTimeout(settleTimer)
   clearTimeout(tickTimer)
   clearTimeout(clearTimer)
   clearTimeout(copiedTimer)
@@ -618,13 +787,23 @@ watch(selected, (i) => {
 
     <!-- ══ 账户卡片列表 ══════════════════════════════════════════ -->
     <div ref="listEl" class="launcher-scroll relative min-h-0 flex-1 px-2.5 py-2">
-      <div class="relative" :style="{ height: totalHeight + 'px' }">
+      <div
+        ref="contentEl"
+        class="relative"
+        :class="{ 'launcher-list-moving': drag?.active === true || settling }"
+        :style="{ height: totalHeight + 'px' }"
+      >
         <div
           v-for="(account, i) in visibleRows"
           :key="account.id"
-          class="launcher-card absolute inset-x-0 flex cursor-pointer items-center gap-3 px-3"
-          :class="{ 'is-selected': startIndex + i === selected, 'is-copied': copiedId === account.id }"
-          :style="{ top: (startIndex + i) * ROW + 'px', height: CARD_H + 'px' }"
+          class="launcher-card absolute inset-x-0 top-0 flex cursor-pointer items-center gap-3 px-3"
+          :class="{
+            'is-selected': startIndex + i === selected,
+            'is-copied': copiedId === account.id,
+            'is-dragging': drag?.active === true && drag.id === account.id,
+          }"
+          :style="{ transform: rowTransform(startIndex + i, account), height: CARD_H + 'px' }"
+          @mousedown="startDrag($event, startIndex + i, account)"
           @click="onRowClick($event, startIndex + i, account)"
         >
           <span class="launcher-avatar" :style="avatarStyle(account)">{{ initial(account) }}</span>

@@ -237,6 +237,33 @@
   border-color: var(--totp-ok-line);
   background: var(--totp-ok-bg);
 }
+/* ── 拖动排序 ──────────────────────────────────────────────────
+   被拖起的那张浮在指针上，被跨过的行整段让位一格，松手后卡片飞回自己的格子 ——
+   让位与归位共用同一根曲线：cubic-bezier 末端大于 1 = 到位时冲过头一点再收回，
+   就是「挤开又弹回」的手感。过渡只在拖动 / 归位那几百毫秒里挂着
+   （`launcher-list-moving`，见 App.vue）：常驻的话，滚动时行号的跳变会拉成拖影。
+
+   贴住指针的那张必须 `transition: none` —— 有过渡就等于拖着一根橡皮筋。 */
+.launcher-card.is-dragging {
+  z-index: 5;
+  cursor: grabbing;
+  border-color: var(--launcher-line-strong);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.16),
+    0 2px 6px rgba(0, 0, 0, 0.1);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .launcher-list-moving .launcher-card {
+    transition:
+      transform 190ms cubic-bezier(0.34, 1.32, 0.64, 1),
+      background var(--launcher-motion-fast) var(--launcher-ease-move),
+      border-color var(--launcher-motion-fast) var(--launcher-ease-move);
+  }
+  .launcher-list-moving .launcher-card.is-dragging {
+    transition: none;
+    will-change: transform;
+  }
+}
 
 /* 头像：底色由服务名散列生成，白字 + 内描边（深浅主题下都不糊） */
 .launcher-avatar {
