@@ -103,6 +103,7 @@ my-plugin/
 | `essential` | 可选 | boolean | 默认 `false` | 底座基础能力：**不可禁用**（设置页不提供开关，内核 `setDisabled` 直接拒绝）。判定标准：禁用它会让启动台基本功能残废（搜应用 / 搜文件），或让用户失去自救入口（设置与插件管理被禁用后，界面上再没有地方能改回来） |
 | `history` | 可选 | boolean | 默认 `true` | 是否计入「最近使用」（§7.5）：声明 `false` 的插件，其条目**不写历史**，启动时还会把已有条目摘掉。底座自身入口（设置 / 插件管理 / 应用启动 / 文件搜索）用它 —— 一用就占满最近使用，而这些入口随时搜得到。只影响最近使用，搜索结果与固定项不受影响 |
 | `settings` | 可选 | SettingDecl[] | ≤ 16 条 | 插件设置声明（§3.4）：设置页渲染成通用表单；用户改过的值单独存，**不写清单** |
+| `session` | 可选 | object | 见 §3.6 | 进行中会话（录屏 / 导出这类有时效的事）：内核据此在**托盘菜单最前面**挂一块控制区（状态行 + 暂停 / 结束）。**省略 = 这个插件没有「进行中」的概念** |
 | `platforms` | 可选 | string[] | `macos` / `windows` / `linux` 的非空数组 | 支持的操作系统白名单（§3.5）；**省略 = 不限制** |
 | `arch` | 可选 | string[] | `x64` / `arm64` 的非空数组 | 支持的 CPU 架构白名单（§3.5）；**省略 = 不限制** |
 | `private` | 可选 | boolean | | 仅源工程用，产物中剥掉 |
@@ -229,7 +230,57 @@ interface SettingDecl {
      探不到则回退自建索引，后者带目录变化增量）；
    - `app-launcher`：macOS = `.app` bundle 扫描；Windows = 开始菜单 / 桌面快捷方式 + 注册表 `App Paths`；
    - `host-manager`：macOS = `osascript` + POSIX ACL；Windows = UAC + `icacls`（免授权写入的等价物）；
-   - `screen-recorder`：`platforms: ["macos"]`（整包依赖 `screencapture` 与屏幕录制权限）。
+   - `screen-recorder`：`platforms: ["macos", "windows"]`，两端后端二选一（编译期决定，见 `src/macos.rs` /
+     `src/windows.rs`）：录制 macOS = 系统 `screencapture -v`、Windows = `ffmpeg -f gdigrab`（运行时探测，
+     未装则 `DEPENDENCY_MISSING` + 引导，截图不依赖它）；停止 macOS = 给录制进程发 SIGINT、
+     Windows = 停止文件通知一个持有 ffmpeg stdin 的录制子进程（`rec-start --worker`）；
+     差异（点击高亮 / 窗口录制 / 委托系统截图工具）由 `rec-permission` 回的 `features` 矩阵交给 UI 呈现，
+     **命令与字段两端完全一致**；
+   - `screen-recorder` 的暂停同理：macOS = `SIGSTOP` 冻住 `screencapture`（画面停在最后一帧，
+     暂停段会留在产物里）、Windows = 挂起 ffmpeg 的线程（暂停段不进视频）；两端**计时口径一致**
+     （托盘与面板显示的都是 `activeMs` = 有效录制时长），差异在界面上如实说明。
+
+### 3.6 `session`（进行中会话 → 托盘控制区）
+
+有些插件会**跑一段有时效的事**（录屏、导出、转码……）。这类事最该出现在用户点开托盘的第一眼：
+「录了多久 / 暂停 / 结束」，而不是先翻过一排应用入口。插件在清单里点名三条**自己已声明的 `script` 命令**，
+内核就把这块控制区挂在托盘菜单**最前面**（菜单里位置见 requirements §3.1）：
+
+```jsonc
+{
+  "session": {
+    "status": "rec-status",   // 必须：回报状态（内核按拍子问它）
+    "pause": "rec-pause",     // 可选：暂停 / 继续（点一下切一次）
+    "stop": "rec-stop"        // 可选：结束
+  }
+}
+```
+
+**`status` 命令的返回**（字段名固定，缺一个就当没有）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `active` | boolean | 这段会话还在跑吗。**不是 `true` ⇒ 内核把整块会话区撤掉**（托盘绝不显示已经结束的会话） |
+| `activeMs` | number | **有效时长**（毫秒，扣掉暂停）；显示的就是它 |
+| `paused` | boolean | 是否暂停：暂停时内核不再给它加本地走字（秒表停住） |
+| `state` | string | 可选的状态词（如「录制中」/「暂停中」），缺省用内核的通用词「进行中」/「已暂停」 |
+
+**内核的行为**：
+
+1. 声明了 `session` 的插件跑完**任意命令** ⇒ 立刻问一次状态（用户在面板里点的开始要马上出现在托盘里）；
+   之后 **1s 一拍本地走字**，每 2 拍才真的拉起一次 `status` —— 显示每秒跳，但不用「每秒 spawn 一个进程」换秒表；
+2. 点「暂停 / 结束」⇒ 内核按清单里的名字拉起对应命令；该动作在飞时这两个项**禁点**（连点 = 堆一串进程）；
+3. 文案是**通用**的：状态行 = `插件 title · 状态词 时长`，动作 = 暂停 / 继续 / 结束。
+   内核不认识「录屏」这两个字 —— 语义全在插件那侧（`state` 词也由插件给）。
+
+**规则**：
+
+1. `status` 必须存在且是 `script` 命令；`pause` / `stop` **至少要有一个**（只有状态行的会话点不动任何东西）
+   ⇒ 否则 `MANIFEST_INVALID`（§3.3）；
+2. 会话区**不需要任何新能力**：内核能做的只有「拉起插件自己声明的命令」与「写托盘菜单」；
+3. 会话**结束由插件负责说清**（`active: false`）—— 到点自动收尾、被系统收走，都走这条；
+   插件不说，托盘就会一直显示「进行中」；
+4. 降级：命令拉不起来 / 状态查询失败 ⇒ 会话区消失（只记日志，不打断用户，也不影响托盘的其它项）。
 
 **执行时机与不匹配时的处理**（两处，语义不同）：
 
@@ -804,6 +855,7 @@ pnpm test                       # 全量测试（含各插件的 core·view 用�
 - [ ] 每个命令有 `title`；逻辑层命令的 `name` 等于产物文件名
 - [ ] `searchable` / `contributes` 按 §9.1 选对，`placeholder` 已写
 - [ ] 只在单一平台可用 ⇒ 声明 `platforms` / `arch`（§3.5）；声明了 `clipboard.watch` ⇒ 有 `record` 命令与「收不到事件也能用」的降级路径（§8.1）
+- [ ] 声明了 `session` ⇒ 三条命令都是 `script` 且真实存在；`status` 在会话结束时如实回报 `active: false`（§3.6）
 
 **产物**
 - [ ] `dist/index.html` + `assets/` 存在，资源路径相对（`base: './'`）
@@ -830,6 +882,8 @@ pnpm test                       # 全量测试（含各插件的 core·view 用�
 | 规范条目 | 校验时机 | 内核行为 | 错误码 |
 |---|---|---|---|
 | §3.3 清单校验 | 加载时 | 拒绝加载 + 设置页显示原因 | `MANIFEST_INVALID` / `API_VERSION_UNSUPPORTED` / `CAPABILITY_UNKNOWN` |
+| §3.6 `session` 引用（命令存在 / 是 `script` / 至少一个动作） | 加载时 | 拒绝加载 + 设置页显示原因 | `MANIFEST_INVALID` |
+| §3.6 会话区状态（`active` / `activeMs` / `paused`） | 运行期 | 每 2 拍拉起一次 `status`；非 `active` ⇒ 撤掉会话区；命令失败 ⇒ 撤掉并记日志 | — |
 | N1 产物名一致（可执行产物存在） | 加载时 | 该命令标记 `error`，其余命令照常 | `ENTRY_MISSING` |
 | §5.1 token | 每次调用 | 丢弃 + 审计 | 静默丢弃（记审计） |
 | §7.4 降级要求 | 无法自动校验 | 评审 + `echo-plugin` 用例覆盖 | — |

@@ -22,7 +22,8 @@ use crate::http::plugin_servers::PluginServerPool;
 use crate::http::server::LogFn;
 use crate::legacy::legacy_data_dir_ids;
 use crate::manifest::{
-    global_command_id, is_command_name, validate_manifest, CommandDecl, CommandMode, ManifestIssue, PluginManifest, SettingValue,
+    global_command_id, is_command_name, validate_manifest, CommandDecl, CommandMode, ManifestIssue, PluginManifest,
+    SessionDecl, SettingValue,
 };
 use crate::overrides::{command_keywords_of, merge_keywords, plugin_keywords_of, OverrideStore, PluginOverride};
 use crate::plugin_settings::{effective_settings, sanitize_setting_values, PluginSettingStore};
@@ -174,6 +175,27 @@ impl PluginManager {
             .collect();
         ids.sort();
         ids
+    }
+
+    /// 声明了「进行中会话」的插件（清单 `session`，plugin-spec §3.6）：
+    /// 内核按它的 `status` 命令去问「还在跑吗」，据此在托盘里挂控制区。
+    pub fn session_plugins(&self) -> Vec<String> {
+        let records = self.records();
+        let mut ids: Vec<String> = records
+            .iter()
+            .filter(|(_, record)| {
+                matches!(record.state, PluginState::Active | PluginState::Degraded)
+                    && record.manifest.as_ref().and_then(|manifest| manifest.session.as_ref()).is_some()
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// 该会话插件的三个入口命令；没声明会话就是 `None`。
+    pub fn session_of(&self, id: &str) -> Option<SessionDecl> {
+        self.records().get(id)?.manifest.as_ref()?.session.clone()
     }
 
     pub fn is_active(&self, id: &str) -> bool {

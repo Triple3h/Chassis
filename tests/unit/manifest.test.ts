@@ -159,8 +159,35 @@ test('supportsRuntime：声明命中运行环境才通过（未声明的维度�
   assert(all.ok && supportsRuntime(all.manifest, win) && supportsRuntime(all.manifest, { platform: 'linux', arch: 'arm64' }))
 })
 
-test('apiVersion "1" 与 "2" 都接受；未知版本报 API_VERSION_UNSUPPORTED', () => {
-  const v1 = validateManifest({ ...VALID, apiVersion: '1' })
+test('session：引用必须是本插件已声明的 script 命令，且至少有一个动作（§3.6）', () => {
+  // 不声明 = 没有「进行中」的概念（现有插件一行都不用改）
+  const absent = validateManifest(VALID)
+  assert(absent.ok && absent.manifest.session === undefined)
+
+  const commands = [
+    { name: 'tick-status', title: '状态', mode: 'script' },
+    { name: 'tick-stop', title: '结束', mode: 'script' },
+    { name: 'hello', title: '打个招呼', mode: 'view' },
+  ]
+  const ok = validateManifest({ ...VALID, commands, session: { status: 'tick-status', stop: 'tick-stop' } })
+  assert(ok.ok, '合法 session 应当通过')
+  assertEqual(ok.manifest.session?.status, 'tick-status')
+  assertEqual(ok.manifest.session?.pause, undefined, '没给 pause = 托盘里只能结束')
+
+  for (const session of [
+    { status: 'tick-status', stop: 'nope' }, // 指向不存在的命令
+    { status: 'hello', stop: 'tick-stop' }, // view 命令拉不起来
+    { status: 'tick-status' }, // 只有状态行，点不动任何东西
+    { stop: 'tick-stop' }, // 缺 status（内核按它问「还在跑吗」）
+    'tick-status', // 不是对象
+  ]) {
+    const bad = validateManifest({ ...VALID, commands, session })
+    assert(!bad.ok, `${JSON.stringify(session)} 应当失败`)
+    assertEqual(bad.code, 'MANIFEST_INVALID', JSON.stringify(session))
+  }
+})
+
+test('apiVersion "1" 与 "2" 都接受；未知版本报 API_VERSION_UNSUPPORTED', () => {  const v1 = validateManifest({ ...VALID, apiVersion: '1' })
   assert(v1.ok, 'apiVersion 1 仍可加载（视图层不受版本影响）')
 
   const v2 = validateManifest({ ...VALID, apiVersion: '2' })

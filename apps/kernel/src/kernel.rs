@@ -63,6 +63,17 @@ const APP_UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(
 const APP_UPDATE_CHECK_TIMEOUT_MS: u64 = 30_000;
 const APP_UPDATE_DOWNLOAD_TIMEOUT_MS: u64 = 180_000;
 
+/// 托盘「进行中会话」区（plugin-spec §3.6）的状态行 id 前缀：`session:<pluginId>:<action>`。
+const SESSION_PREFIX: &str = "session:";
+/// 本地走字的节拍：时长每秒跳一次，但**不**每秒去 spawn 插件（那是拿进程换秒表）
+const SESSION_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+/// 每隔几拍向插件要一次**真状态**（录制可能自己到头 / 被系统收走，托盘不能一直显示在录）
+const SESSION_PROBE_EVERY: u32 = 2;
+/// 状态命令的超时：读状态文件 + 验进程身份，2s 给得很宽
+const SESSION_STATUS_TIMEOUT_MS: u64 = 2_000;
+/// 托盘上的暂停 / 结束动作：结束要等录制进程收尾写完文件（macOS 8s / Windows 15s）
+const SESSION_ACTION_TIMEOUT_MS: u64 = 20_000;
+
 pub struct KernelOptions {
     pub data_root: PathBuf,
     /// 出厂插件根目录（可多个；开发态默认就是仓库根的 `plugins/`）
@@ -117,6 +128,51 @@ pub struct Kernel {
     app_update: std::sync::RwLock<Option<Value>>,
     /// 应用更新执行中（防重入：托盘与「关于」页可能同时触发）
     app_update_busy: AtomicBool,
+    /// 托盘「进行中会话」区：插件 id → 最近一次采样（走字靠内核本地时钟，见 `probe_sessions`）
+    tray_sessions: Mutex<std::collections::HashMap<String, SessionRuntime>>,
+    /// 状态采样在飞（防重入：命令执行的钩子与守护拍子可能撞上）
+    session_probing: AtomicBool,
+}
+
+/// 托盘里一段进行中的会话（plugin-spec §3.6）。
+///
+/// 内核只知道四件事：插件给的**有效时长**、是否暂停、能不能暂停 / 结束、动作是否在飞。
+/// 时长之外的语义全在插件那侧 —— 内核不认识「录屏」这两个字。
+#[derive(Debug, Clone)]
+struct SessionRuntime {
+    /// 采样时刻的有效录制时长（暂停期间不涨）
+    active_ms: u64,
+    paused: bool,
+    /// 状态词（插件自定义，如「录制中」/「录制暂停」）；缺省用内核的通用词
+    state: Option<String>,
+    can_pause: bool,
+    can_stop: bool,
+    /// 采样时刻：两次采样之间由本地时钟接着走，省掉每秒一次 spawn
+    sampled_at: std::time::Instant,
+    /// 暂停 / 结束动作在飞：托盘里禁点（连点 = 堆一串进程）
+    busy: bool,
+}
+
+impl SessionRuntime {
+    /// 此刻该显示的时长（暂停中 = 停住）
+    fn active_ms_now(&self) -> u64 {
+        if self.paused {
+            self.active_ms
+        } else {
+            self.active_ms + self.sampled_at.elapsed().as_millis() as u64
+        }
+    }
+}
+
+/// 托盘会话区的一行（渲染与测试共用的纯数据）
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionRow {
+    plugin: String,
+    label: String,
+    paused: bool,
+    can_pause: bool,
+    can_stop: bool,
+    busy: bool,
 }
 
 /// 管理面特权服务的宿主实现（v1 `services/settingsHost.ts`）。
@@ -477,6 +533,8 @@ impl Kernel {
                 clipboard_watch: AtomicBool::new(false),
                 app_update: std::sync::RwLock::new(None),
                 app_update_busy: AtomicBool::new(false),
+                tray_sessions: Mutex::new(std::collections::HashMap::new()),
+                session_probing: AtomicBool::new(false),
             }
         })
     }
@@ -797,6 +855,7 @@ impl Kernel {
         // 应用（壳）更新的检查守护：启动 90s 后查一次，之后每 6h 一轮。
         // **只检查并提示**（托盘 + 「关于」页），更新由用户手动确认（默认开，见 config.autoUpdateCheck）
         self.spawn_app_update_check();
+        self.spawn_session_watch();
         Ok(())
     }
 
@@ -988,6 +1047,14 @@ impl Kernel {
         };
 
         let result = self.pipeline.run(ctx, terminal).await;
+        // 会话类命令跑完立刻重采一次：用户在面板里起的录，托盘要马上出现控制项
+        // （状态命令自己不用触发 —— 面板轮询它时不必再跟着采一遍）
+        if let Some(decl) = self.plugins.session_of(&entry.plugin_id) {
+            if decl.status != entry.decl.name {
+                self.probe_sessions().await;
+                let _ = self.refresh_tray().await;
+            }
+        }
         // `history: false` 的插件（底座自身入口）不进「最近使用」—— 它们一用就占满整个分区
         if result.ok && result.kind != "host" && !self.plugins.excludes_history(&entry.plugin_id) {
             let key = item_key(&entry.plugin_id, &entry.decl.name, args.as_ref());
@@ -1659,11 +1726,149 @@ impl Kernel {
     /// 这是「不自动更新」策略的提示入口之一（另一个是「关于」页的更新卡片）。
     pub async fn refresh_tray(&self) {
         let update = self.app_update.read().ok().and_then(|guard| guard.clone());
-        let items = tray_items(update.as_ref(), self.app_update_busy.load(Ordering::SeqCst));
+        let items = tray_items(update.as_ref(), self.app_update_busy.load(Ordering::SeqCst), &self.session_rows());
         let _ = self.primitives.set_tray_menu(Value::Array(items)).await;
     }
 
+    /// 托盘会话区的当前行（声明了 `session`、且真的在跑的插件；没有就是空）。
+    ///
+    /// 纯读：不动插件、不发 IPC —— 1s 一拍的重渲染走这里，每秒只花一次哈希表遍历。
+    fn session_rows(&self) -> Vec<SessionRow> {
+        let Ok(tray_sessions) = self.tray_sessions.lock() else { return Vec::new() };
+        let mut plugin_ids: Vec<&String> = tray_sessions.keys().collect();
+        plugin_ids.sort();
+        plugin_ids
+            .into_iter()
+            .filter_map(|plugin_id| {
+                let session = tray_sessions.get(plugin_id)?;
+                Some(SessionRow {
+                    plugin: plugin_id.clone(),
+                    label: format!(
+                        "{} · {} {}",
+                        self.plugins.title_of(plugin_id),
+                        session
+                            .state
+                            .clone()
+                            .unwrap_or_else(|| if session.paused { "已暂停".to_string() } else { "进行中".to_string() }),
+                        format_duration(session.active_ms_now())
+                    ),
+                    paused: session.paused,
+                    can_pause: session.can_pause,
+                    can_stop: session.can_stop,
+                    busy: session.busy,
+                })
+            })
+            .collect()
+    }
+
+    /// 托盘会话区守护（plugin-spec §3.6）：1s 一拍本地走字，每 `SESSION_PROBE_EVERY` 拍要一次真状态。
+    ///
+    /// 空转的代价 = 一次哈希表判空：没有会话时它什么都不做，也**不** spawn 任何进程。
+    pub fn spawn_session_watch(self: &Arc<Self>) {
+        let kernel = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut tick: u32 = 0;
+            loop {
+                tokio::time::sleep(SESSION_TICK).await;
+                if kernel.tray_sessions.lock().map(|guard| guard.is_empty()).unwrap_or(true) {
+                    tick = 0;
+                    continue;
+                }
+                tick += 1;
+                if tick % SESSION_PROBE_EVERY == 0 {
+                    kernel.probe_sessions().await;
+                }
+                let _ = kernel.refresh_tray().await;
+            }
+        });
+    }
+
+    /// 向声明了 `session` 的插件要一次**真状态**：还在跑吗？多久了？暂停了吗？
+    ///
+    /// 状态命令是插件自己的脚本（内核不猜它的语义）；查不到 / 报没在跑 = 这段会话结束
+    /// —— 宁可少显示一行，也不能让托盘一直挂着一段早就结束的录制（那正是「假成功」的翻版）。
+    pub async fn probe_sessions(self: &Arc<Self>) {
+        if self.session_probing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let mut next: std::collections::HashMap<String, SessionRuntime> = std::collections::HashMap::new();
+        for plugin_id in self.plugins.session_plugins() {
+            let Some(decl) = self.plugins.session_of(&plugin_id) else { continue };
+            let status = self
+                .exec
+                .run(&plugin_id, &decl.status, None, Some(SESSION_STATUS_TIMEOUT_MS))
+                .await;
+            let Ok(data) = status else {
+                crate::log_debug!("会话状态查询失败（{plugin_id}:{}）", decl.status);
+                continue;
+            };
+            if !data.get("active").and_then(Value::as_bool).unwrap_or(false) {
+                continue;
+            }
+            let previous = self.tray_sessions.lock().ok().and_then(|guard| guard.get(&plugin_id).cloned());
+            next.insert(
+                plugin_id,
+                SessionRuntime {
+                    active_ms: data.get("activeMs").and_then(Value::as_u64).unwrap_or(0),
+                    paused: data.get("paused").and_then(Value::as_bool).unwrap_or(false),
+                    state: data.get("state").and_then(Value::as_str).map(str::to_string),
+                    can_pause: decl.pause.is_some(),
+                    can_stop: decl.stop.is_some(),
+                    sampled_at: std::time::Instant::now(),
+                    busy: previous.map(|session| session.busy).unwrap_or(false),
+                },
+            );
+        }
+        if let Ok(mut tray_sessions) = self.tray_sessions.lock() {
+            *tray_sessions = next;
+        }
+        self.session_probing.store(false, Ordering::SeqCst);
+    }
+
+    /// 托盘会话区的一项被点：`session:<pluginId>:<action>` → 拉起插件自己声明的命令。
+    ///
+    /// 动作在飞时托盘里禁点：一次「结束录制」会 spawn 一个等到收尾写完文件的进程，
+    /// 连点就是堆一串。动作完立刻重采一次状态，不等下一拍。
+    async fn handle_session_action(self: &Arc<Self>, id: &str) {
+        let mut parts = id.splitn(3, ':');
+        let _prefix = parts.next();
+        let (Some(plugin_id), Some(action)) = (parts.next(), parts.next()) else { return };
+        let Some(decl) = self.plugins.session_of(plugin_id) else { return };
+        let command = match action {
+            "pause" => decl.pause.clone(),
+            "stop" => decl.stop.clone(),
+            _ => None,
+        };
+        let Some(command) = command else { return };
+
+        let already_busy = self
+            .tray_sessions
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.get_mut(plugin_id).map(|session| std::mem::replace(&mut session.busy, true)))
+            .unwrap_or(false);
+        if already_busy {
+            return;
+        }
+        let _ = self.refresh_tray().await;
+
+        if let Err(err) = self.exec.run(plugin_id, &command, None, Some(SESSION_ACTION_TIMEOUT_MS)).await {
+            self.log("warn", &format!("托盘会话动作失败（{plugin_id}:{command}）：{}", err.message));
+        }
+        if let Ok(mut tray_sessions) = self.tray_sessions.lock() {
+            if let Some(session) = tray_sessions.get_mut(plugin_id) {
+                session.busy = false;
+            }
+        }
+        self.probe_sessions().await;
+        let _ = self.refresh_tray().await;
+    }
+
     pub async fn handle_tray_menu(self: &Arc<Self>, id: &str) {
+        if id.starts_with(SESSION_PREFIX) {
+            self.handle_session_action(id).await;
+            return;
+        }
         match id {
             "show" => {
                 let _ = self.show_window_animated(true).await;
@@ -1703,9 +1908,38 @@ impl Kernel {
 /// 由用户在那页决定要不要更 —— 托盘不再自己执行更新；有新版时标签带上版本号，
 /// 执行中变「正在更新…」并禁点（防重入）。
 ///
-/// 抽成纯函数是为了单测 —— 这是「用户手动决定更新」策略的主要提示入口，错一天用户就看不到更新。
-fn tray_items(update: Option<&Value>, busy: bool) -> Vec<Value> {
+/// **进行中会话区**（`sessions`，plugin-spec §3.6）排在最前面：录制这类事有时效性，
+/// 用户点开托盘第一眼就得看到「录了多久 / 暂停 / 结束」，而不是先翻过一排应用入口。
+/// 没有会话时这一段整个不出现（空闲的托盘保持原样）。
+///
+/// 抽成纯函数是为了单测 —— 这是「用户手动决定更新」策略的主要提示入口，错一天用户就看不到更新；
+/// 会话区的 id 与文案同理（拼错了托盘就是死的）。
+fn tray_items(update: Option<&Value>, busy: bool, sessions: &[SessionRow]) -> Vec<Value> {
     let mut items: Vec<Value> = Vec::new();
+    for session in sessions {
+        items.push(json!({
+            "id": format!("{SESSION_PREFIX}{}:status", session.plugin),
+            "label": session.label,
+            "enabled": false,
+        }));
+        // 动作文案用**通用**词（会话上方那一行已经写明是哪个插件在干什么）：
+        // 内核不该硬写「录制」—— 会话可以是更新、导出、转码……
+        if session.can_pause {
+            items.push(json!({
+                "id": format!("{SESSION_PREFIX}{}:pause", session.plugin),
+                "label": if session.paused { "继续" } else { "暂停" },
+                "enabled": !session.busy,
+            }));
+        }
+        if session.can_stop {
+            items.push(json!({
+                "id": format!("{SESSION_PREFIX}{}:stop", session.plugin),
+                "label": "结束",
+                "enabled": !session.busy,
+            }));
+        }
+        items.push(json!({ "id": format!("sep-{}", session.plugin), "label": "", "type": "separator" }));
+    }
     if busy {
         items.push(json!({ "id": "app-update", "label": "正在更新应用…（完成后自动重启）", "enabled": false }));
     } else if let Some(update) = update {
@@ -1723,6 +1957,17 @@ fn tray_items(update: Option<&Value>, busy: bool) -> Vec<Value> {
     items.push(json!({ "id": "separator-2", "label": "", "type": "separator" }));
     items.push(json!({ "id": "quit", "label": "退出" }));
     items
+}
+
+/// 秒表文案：`00:12`，超过一小时才带小时位（`1:02:03`）
+fn format_duration(ms: u64) -> String {
+    let seconds = ms / 1000;
+    let (hours, minutes, seconds) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
 }
 
 fn platform_string() -> String {
@@ -1766,23 +2011,105 @@ mod tests {
     /// 有新版时标签带版本号，执行中禁点。
     #[test]
     fn tray_items_always_surface_update_entry() {
-        let idle = tray_items(None, false);
+        let idle = tray_items(None, false, &[]);
         assert_eq!(idle[0].get("id").and_then(Value::as_str), Some("app-update"), "无更新时更新项也在（常驻）");
         let idle_label = idle[0].get("label").and_then(Value::as_str).unwrap_or_default();
         assert!(idle_label.contains("检查更新"), "无更新时文案要说清是「检查更新」：{idle_label}");
 
-        let hinted = tray_items(Some(&json!({ "latest": "0.2.0" })), false);
+        let hinted = tray_items(Some(&json!({ "latest": "0.2.0" })), false, &[]);
         assert_eq!(hinted[0].get("id").and_then(Value::as_str), Some("app-update"), "有提示时更新项置顶");
         let label = hinted[0].get("label").and_then(Value::as_str).unwrap_or_default();
         assert!(label.contains("0.2.0"), "文案要带版本号：{label}");
         assert!(label.contains("更新页"), "点击是打开更新页，文案要说出来：{label}");
 
         // 执行中：仍然常驻，但禁点（防重入）
-        let busy = tray_items(Some(&json!({ "latest": "0.2.0" })), true);
+        let busy = tray_items(Some(&json!({ "latest": "0.2.0" })), true, &[]);
         assert_eq!(busy[0].get("id").and_then(Value::as_str), Some("app-update"), "执行中该项还在");
         assert_eq!(busy[0].get("enabled").and_then(Value::as_bool), Some(false), "执行中该项要禁点（防重入）");
         for id in ["show", "settings", "plugins", "reload", "quit"] {
             assert!(ids(&busy).contains(&id.to_string()), "基础项 {id} 不能丢：{:?}", ids(&busy));
         }
+    }
+
+    fn session(plugin: &str, paused: bool, busy: bool) -> SessionRow {
+        SessionRow {
+            plugin: plugin.to_string(),
+            label: format!("{} {}", if paused { "已暂停" } else { "进行中" }, format_duration(12_000)),
+            paused,
+            can_pause: true,
+            can_stop: true,
+            busy,
+        }
+    }
+
+    /// 会话区（plugin-spec §3.6）：**排在最前**、有实时时长、暂停 / 结束两个动作可点，
+    /// 动作在飞时禁点；没有会话时**整个不出现**（空闲托盘保持原样）。
+    #[test]
+    fn tray_sessions_lead_the_menu_with_actions() {
+        let idle = tray_items(None, false, &[]);
+        assert!(
+            !ids(&idle).iter().any(|id| id.starts_with("session:")),
+            "没有会话时不该出现会话项：{:?}",
+            ids(&idle)
+        );
+
+        let running = tray_items(None, false, &[session("screen-recorder", false, false)]);
+        assert_eq!(
+            ids(&running)[..3],
+            ["session:screen-recorder:status", "session:screen-recorder:pause", "session:screen-recorder:stop"]
+        );
+        assert_eq!(running[0].get("enabled").and_then(Value::as_bool), Some(false), "状态行只是显示，点不动");
+        let label = running[0].get("label").and_then(Value::as_str).unwrap_or_default();
+        assert!(label.contains("00:12"), "状态行要带实时时长：{label}");
+        assert_eq!(running[1].get("label").and_then(Value::as_str), Some("暂停"));
+        assert_eq!(running[2].get("label").and_then(Value::as_str), Some("结束"));
+        // 会话区后面跟着分隔线，再才是原来的常驻项
+        assert_eq!(running[3].get("type").and_then(Value::as_str), Some("separator"));
+        assert!(ids(&running).contains(&"app-update".to_string()), "常驻项不能因为会话区而丢");
+        assert!(ids(&running).contains(&"quit".to_string()));
+
+        // 暂停中：计时停住，动作变「继续」
+        let paused = tray_items(None, false, &[session("screen-recorder", true, false)]);
+        assert_eq!(paused[1].get("label").and_then(Value::as_str), Some("继续"));
+        assert!(paused[0]
+            .get("label")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .contains("已暂停"));
+
+        // 动作在飞：两个动作都禁点（连点 = 往插件堆进程）
+        let busy = tray_items(None, false, &[session("screen-recorder", false, true)]);
+        assert_eq!(busy[1].get("enabled").and_then(Value::as_bool), Some(false));
+        assert_eq!(busy[2].get("enabled").and_then(Value::as_bool), Some(false));
+    }
+
+    /// 会话区是秒表：`mm:ss`，过小时才带小时位。
+    #[test]
+    fn format_duration_reads_like_a_stopwatch() {
+        assert_eq!(format_duration(0), "00:00");
+        assert_eq!(format_duration(999), "00:00", "不足一秒不进位");
+        assert_eq!(format_duration(12_000), "00:12");
+        assert_eq!(format_duration(59_999), "00:59");
+        assert_eq!(format_duration(60_000), "01:00");
+        assert_eq!(format_duration(3_599_000), "59:59");
+        assert_eq!(format_duration(3_661_000), "1:01:01");
+    }
+
+    /// 会话行只由内核本地时钟走字：采样后过一会儿，显示的时长要跟着涨
+    /// （否则 1s 一拍的托盘会显示一个冻住的秒表）。
+    #[test]
+    fn session_row_ticks_between_samples() {
+        let runtime = SessionRuntime {
+            active_ms: 5_000,
+            paused: false,
+            state: None,
+            can_pause: true,
+            can_stop: true,
+            sampled_at: std::time::Instant::now(),
+            busy: false,
+        };
+        assert!(runtime.active_ms_now() >= 5_000);
+        let paused = SessionRuntime { paused: true, ..runtime.clone() };
+        assert_eq!(paused.active_ms_now(), 5_000, "暂停中计时停住");
     }
 }

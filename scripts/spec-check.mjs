@@ -251,8 +251,13 @@ function checkArtifacts(pluginDir, pkg, report) {
     for (const key of Object.keys(distManifest)) {
       if (!DIST_MANIFEST_FIELDS.includes(key)) report.fail('产物', `dist/package.json 含不该发布的字段：${key}`)
     }
-    for (const key of ['apiVersion', 'capabilities']) {
-      if (distManifest[key] === undefined) report.fail('产物', `dist/package.json 缺 ${key}（裁剪脚本要同步 MANIFEST_KEYS）`)
+    // 源清单里**在白名单内**的字段，产物必须原样带上。
+    // 只盯着 apiVersion / capabilities 是不够的：`essential` 与 `session` 都是这么漏掉的
+    // —— 源清单写了、构建脚本忘了放进裁剪白名单，装上去就等于没声明。
+    for (const key of MANIFEST_KEYS) {
+      if (pkg[key] !== undefined && distManifest[key] === undefined) {
+        report.fail('产物', `dist/package.json 缺 ${key}（裁剪脚本要同步 MANIFEST_KEYS）`)
+      }
     }
     if (JSON.stringify(distManifest.commands) !== JSON.stringify(pkg.commands)) {
       report.fail('产物', 'dist/package.json 的 commands 与源清单不一致 —— 重新构建')

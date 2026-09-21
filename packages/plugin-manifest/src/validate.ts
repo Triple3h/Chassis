@@ -12,6 +12,7 @@ import {
   type CommandMode,
   type Platform,
   type PluginManifest,
+  type SessionDecl,
   type SettingDecl,
   type SettingOption,
 } from './types'
@@ -311,6 +312,31 @@ export function validateManifest(raw: unknown): ManifestValidation {
   const arch = validateDimension(raw.arch, 'arch', ARCHS)
   if (typeof arch === 'string') return fail('MANIFEST_INVALID', arch)
   manifest.arch = arch
+  // 进行中会话（plugin-spec §3.6）：引用必须落在本插件已声明的 script 命令上 ——
+  // 内核会主动拉起它们，指错了就是托盘上点不动的死项。
+  if (raw.session !== undefined) {
+    if (typeof raw.session !== 'object' || raw.session === null || Array.isArray(raw.session)) {
+      return fail('MANIFEST_INVALID', 'session 必须是对象')
+    }
+    const session = raw.session as Record<string, unknown>
+    const decl: SessionDecl = { status: '' }
+    for (const key of ['status', 'pause', 'stop'] as const) {
+      const name = session[key]
+      if (name === undefined) continue
+      if (typeof name !== 'string') return fail('MANIFEST_INVALID', `session.${key} 必须是命令名`)
+      const command = manifest.commands.find((item) => item.name === name)
+      if (!command) return fail('MANIFEST_INVALID', `session.${key} 指向不存在的命令：${name}`)
+      if (command.mode !== 'script') {
+        return fail('MANIFEST_INVALID', `session.${key} 必须是 script 命令（内核会主动拉起它）：${name}`)
+      }
+      decl[key] = name
+    }
+    if (!decl.status) return fail('MANIFEST_INVALID', 'session.status 必须存在（内核按它问「还在跑吗」）')
+    if (!decl.pause && !decl.stop) {
+      return fail('MANIFEST_INVALID', 'session 至少要给 pause 或 stop 之一（只有状态行的会话点不动任何东西）')
+    }
+    manifest.session = decl
+  }
 
   return { ok: true, manifest, warnings }
 }

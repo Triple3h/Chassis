@@ -31,4 +31,6 @@ export const MANIFEST_KEYS = [
   // 平台 / 架构白名单（省略 = 不限制；plugin-spec §3.5）
   'platforms',
   'arch',
+  // 进行中会话（托盘控制区：状态行 + 暂停 / 结束；plugin-spec §3.6）
+  'session',
 ]

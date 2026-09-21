@@ -98,6 +98,27 @@ export interface PluginManifest {
   platforms?: Platform[]
   /** 支持的 CPU 架构白名单；**省略 = 不限制**。取值 `x64` / `arm64`。 */
   arch?: Arch[]
+  /**
+   * 进行中会话（plugin-spec §3.6）：点名三条**自己已声明的 `script` 命令**，
+   * 内核据此在托盘菜单**最前面**挂一块控制区（一行状态 + 暂停 / 结束）。
+   * **省略 = 这个插件没有「进行中」的概念**。
+   */
+  session?: SessionDecl
+}
+
+/**
+ * 「进行中会话」声明（plugin-spec §3.6）。
+ *
+ * `status` 的返回是内核与插件之间唯一的契约面：`{ active, activeMs, paused, state? }`
+ * —— `active` 不是 true 就把整块会话区撤掉（托盘绝不显示已经结束的会话）。
+ */
+export interface SessionDecl {
+  /** 状态查询命令（`script`）：内核在动作之后与每 2 拍拉起一次 */
+  status: string
+  /** 暂停 / 继续（`script`，点一下切一次）；与 `stop` 至少要有一个 */
+  pause?: string
+  /** 结束（`script`） */
+  stop?: string
 }
 
 /** 全局命令 id：`${pluginId}:${name}` */

@@ -169,6 +169,20 @@ pub struct SettingDecl {
     pub options: Option<Vec<SettingOption>>,
 }
 
+/// 「进行中会话」声明（清单顶层 `session`，plugin-spec §3.6）：
+/// 插件在这里点名三条 script 命令，内核据此在托盘菜单里给它挂一块控制区
+/// （状态行显示实时时长 + 暂停 / 结束两个操作）。**不认识会话内容的语义** ——
+/// 时长、暂停态都由 `status` 命令回报（`{ active, activeMs, paused }`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDecl {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginManifest {
@@ -203,6 +217,9 @@ pub struct PluginManifest {
     /// 支持的 CPU 架构白名单；`None` = 不限制
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arch: Option<Vec<String>>,
+    /// 进行中会话（托盘控制区）；`None` = 这个插件没有「会话」这个概念
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionDecl>,
 }
 
 impl PluginManifest {
@@ -413,6 +430,48 @@ pub fn validate_manifest(raw: &Value) -> std::result::Result<PluginManifest, Man
         commands.push(command);
     }
 
+    // `session`（plugin-spec §3.6）：托盘「进行中会话」区的三个入口。
+    // 引用必须落在**本插件已声明的 script 命令**上 —— 内核会主动拉起它们。
+    let session = match object.get("session") {
+        None => None,
+        Some(value) => {
+            let Some(object) = value.as_object() else {
+                return Err(ManifestIssue::new("MANIFEST_INVALID", "session 必须是对象"));
+            };
+            let name_at = |key: &str| -> std::result::Result<String, ManifestIssue> {
+                let Some(text) = object.get(key).and_then(Value::as_str) else {
+                    return Err(ManifestIssue::new("MANIFEST_INVALID", format!("session.{key} 必须是命令名")));
+                };
+                let Some(command) = commands.iter().find(|command| command.name == text) else {
+                    return Err(ManifestIssue::new(
+                        "MANIFEST_INVALID",
+                        format!("session.{key} 指向不存在的命令：{text}"),
+                    ));
+                };
+                if command.mode != CommandMode::Script {
+                    return Err(ManifestIssue::new(
+                        "MANIFEST_INVALID",
+                        format!("session.{key} 必须是 script 命令（内核会主动拉起它，view 命令拉不动）：{text}"),
+                    ));
+                }
+                Ok(text.to_string())
+            };
+            let status = name_at("status")?;
+            let pause = match object.get("pause") {
+                Some(_) => Some(name_at("pause")?),
+                None => None,
+            };
+            let stop = match object.get("stop") {
+                Some(_) => Some(name_at("stop")?),
+                None => None,
+            };
+            if pause.is_none() && stop.is_none() {
+                return Err(ManifestIssue::new("MANIFEST_INVALID", "session 至少要给 pause 或 stop 之一（只有状态行的会话没有意义）"));
+            }
+            Some(SessionDecl { status, pause, stop })
+        }
+    };
+
     let mut manifest = PluginManifest {
         name: name.to_string(),
         title: title.to_string(),
@@ -431,6 +490,7 @@ pub fn validate_manifest(raw: &Value) -> std::result::Result<PluginManifest, Man
         settings: None,
         platforms: None,
         arch: None,
+        session,
     };
 
     if let Some(value) = object.get("description") {
@@ -821,6 +881,43 @@ mod tests {
 
         raw["settings"] = json!([{ "key": "engine", "type": "select", "title": "引擎" }]);
         assert!(validate_manifest(&raw).unwrap_err().message.contains("必须提供 options"));
+    }
+
+    /// `session`（plugin-spec §3.6）：引用必须落在本插件已声明的 script 命令上 ——
+    /// 内核会主动拉起它们，指错了就是托盘上点不动的死项。
+    #[test]
+    fn validates_session_declaration() {
+        // 不声明 = 没有会话这个概念（现有插件一行都不用改）
+        assert!(validate_manifest(&manifest_json()).unwrap().session.is_none());
+
+        let mut raw = manifest_json();
+        raw["commands"] = json!([
+            { "name": "rec-start", "title": "开始", "mode": "script" },
+            { "name": "rec-status", "title": "状态", "mode": "script" },
+            { "name": "rec-stop", "title": "结束", "mode": "script" },
+            { "name": "show", "title": "查看", "mode": "view" }
+        ]);
+        raw["session"] = json!({ "status": "rec-status", "stop": "rec-stop" });
+        let manifest = validate_manifest(&raw).expect("合法 session 应当通过");
+        let session = manifest.session.expect("session 要保留下来");
+        assert_eq!(session.status, "rec-status");
+        assert_eq!(session.pause, None, "没给 pause = 托盘里只能结束");
+        assert_eq!(session.stop.as_deref(), Some("rec-stop"));
+
+        // 指向不存在的命令
+        let mut bad = raw.clone();
+        bad["session"] = json!({ "status": "rec-status", "stop": "nope" });
+        assert!(validate_manifest(&bad).unwrap_err().message.contains("不存在的命令"));
+
+        // view 命令拉不起来：必须是 script
+        let mut bad = raw.clone();
+        bad["session"] = json!({ "status": "show", "stop": "rec-stop" });
+        assert!(validate_manifest(&bad).unwrap_err().message.contains("script 命令"));
+
+        // 只有状态行没有意义（点不动任何东西）
+        let mut bad = raw;
+        bad["session"] = json!({ "status": "rec-status" });
+        assert!(validate_manifest(&bad).unwrap_err().message.contains("至少要给 pause 或 stop"));
     }
 
     #[test]
