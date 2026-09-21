@@ -25,6 +25,12 @@
  * 为什么必须删：Gitee 普通仓库附件总量 1GB（仓库附件 + 发行版附件共用），zip 文件名带版本号，
  * 不清理每发一版都净增一份（与 GitHub 侧同一个理由）。
  *
+ * **执行顺序（2026-09-21 血的教训）**：先删同名覆盖 → 传 zip → **索引最后** → 才清理旧版本包。
+ * 原先「先删光全部待删项，再按目录顺序传」在跨境链路上翻过车：19MB 的包传了几分钟仍被 abort
+ * （`AbortSignal.timeout`），重试期间 **Gitee 侧 app-latest 是空的**（索引与两个包都已删）——
+ * 谁把域名切到 gitee 谁就 404。现在最坏情况只是「旧索引 + 少一个包」，绝不会变成空壳；
+ * 上传超时也单独放宽（`GITEE_UPLOAD_TIMEOUT_MS`，默认 10 分钟）。
+ *
  * 失败不阻塞发布：workflow 里这步 continue-on-error —— Gitee 挂了主通道仍然可用。
  */
 import fs from 'node:fs'
@@ -34,6 +40,12 @@ const API = 'https://gitee.com/api/v5'
 /// 匿名限流实测存在（连续请求会 403 Rate Limit Exceeded）⇒ 串行 + 固定间隔 + 退避重试
 const REQUEST_INTERVAL_MS = 800
 const RETRY_DELAYS_MS = [2000, 5000, 10000]
+/// 小请求（列附件 / 建 release）的超时
+const REQUEST_TIMEOUT_MS = 300_000
+/// 附件上传的独立超时：跨境链路上十几 MB 真的会磨很久（300s 实测被 abort 过），可用环境变量加长
+const UPLOAD_TIMEOUT_MS = Number(process.env.GITEE_UPLOAD_TIMEOUT_MS || 600_000)
+/// 索引（`app-registry.json` / `kernel-registry.json` / `registry.json`）：必须**最后**上传
+const REGISTRY_RE = /(^|-)registry\.json$/
 
 const options = readOptions(process.argv.slice(2))
 const tag = options.tag
@@ -67,15 +79,26 @@ if (registryPath) {
   console.warn(`目录里没有索引文件（${dir}），按「只保留本次文件」处理`)
 }
 
+const uploadOrder = orderUploads(files)
+
 console.log(`Gitee 镜像同步：${repo} → tag ${tag}`)
 console.log(`  索引 ${registryPath ?? '（未找到）'}：保留集 ${keep.size} 项，待上传 ${files.length} 个文件`)
-for (const name of files) console.log(`  + ${name}`)
+console.log('待上传（索引最后 —— 包先落地，索引才不会指向不存在的文件）：')
+for (const name of uploadOrder) console.log(`  + ${name}`)
 
 if (options['remote-list']) {
   const remote = readRemoteList(options['remote-list'])
   const doomed = planDelete(files, keep, remote)
+  const { conflicts, stale } = splitDoomed(files, doomed)
   console.log(`（离线预览：远程 ${remote.length} 个附件，待删除 ${doomed.length} 个，保留 ${remote.length - doomed.length} 个）`)
-  for (const name of doomed) console.log(`  - ${name}`)
+  if (conflicts.length) {
+    console.log('同名覆盖（先删，否则传不上去）：')
+    for (const name of conflicts) console.log(`  - ${name}`)
+  }
+  if (stale.length) {
+    console.log('索引替换后清理（旧版本包，半路失败时它们还在）：')
+    for (const name of stale) console.log(`  - ${name}`)
+  }
   process.exit(0)
 }
 
@@ -90,21 +113,41 @@ if (!token) {
 
 const release = await ensureRelease()
 const remote = await apiJson(`/repos/${repo}/releases/${release.id}/attach_files`)
-const doomed = new Set(planDelete(files, keep, remote.map((file) => file.name)))
-for (const file of remote) {
-  if (!doomed.has(file.name)) continue
-  await api(`/repos/${repo}/releases/${release.id}/attach_files/${file.id}`, { method: 'DELETE' })
-  console.log(`✓ 已删除旧附件 ${file.name}`)
+const remoteFiles = remote ?? []
+const byId = new Map(remoteFiles.map((file) => [file.name, file.id]))
+const { conflicts, stale } = splitDoomed(files, planDelete(files, keep, remoteFiles.map((file) => file.name)))
+
+// 1) 同名覆盖对象先删（Gitee 不收同名附件）
+for (const name of conflicts) {
+  const id = byId.get(name)
+  if (id === undefined) continue // 远程表里突然没了（别拿 undefined 去拼 URL）
+  await api(`/repos/${repo}/releases/${release.id}/attach_files/${id}`, { method: 'DELETE' })
+  console.log(`✓ 已删除同名旧附件 ${name}`)
 }
-for (const name of files) {
+
+// 2) 传 zip，**索引最后** —— 索引一旦落地，它指向的包就都已经在了
+for (const name of uploadOrder) {
   const local = path.join(dir, name)
-  const uploaded = await upload(release.id, local, name)
   const size = fs.statSync(local).size
+  console.log(`… 上传 ${name}（${(size / 1024 / 1024).toFixed(1)} MB，超时 ${Math.round(UPLOAD_TIMEOUT_MS / 60_000)} 分钟）`)
+  const uploaded = await upload(release.id, local, name)
   if (uploaded?.size !== size) {
     console.error(`✗ 附件大小不符：${name} 本地 ${size} / 远端 ${uploaded?.size}`)
     process.exit(1)
   }
   console.log(`✓ 已上传 ${name}（${size} 字节）`)
+}
+
+// 3) 索引已经换新版，旧版本包这时才真没人引用；这步失败只是留个垃圾，不影响可用性
+for (const name of stale) {
+  const id = byId.get(name)
+  if (id === undefined) continue
+  try {
+    await api(`/repos/${repo}/releases/${release.id}/attach_files/${id}`, { method: 'DELETE' })
+    console.log(`✓ 已清理旧版本包 ${name}`)
+  } catch (err) {
+    console.warn(`⚠ 旧版本包没删掉（不影响本次同步）：${name}（${err instanceof Error ? err.message : err}）`)
+  }
 }
 console.log(`✓ Gitee 同步完成：https://gitee.com/${repo}/releases/tag/${tag}`)
 
@@ -130,12 +173,25 @@ async function ensureRelease() {
 async function upload(releaseId, filePath, name) {
   const form = new FormData()
   form.append('file', new Blob([fs.readFileSync(filePath)]), name)
-  return apiJson(`/repos/${repo}/releases/${releaseId}/attach_files`, { method: 'POST', body: form })
+  return apiJson(`/repos/${repo}/releases/${releaseId}/attach_files`, { method: 'POST', body: form }, UPLOAD_TIMEOUT_MS)
 }
 
 /** 待删：本次要覆盖的同名文件 + 不在保留集里的 `.zip`（索引文件与将来可能的其它格式一律不碰）。 */
 function planDelete(files, keep, remoteNames) {
   return remoteNames.filter((name) => files.includes(name) || (name.endsWith('.zip') && !keep.has(name)))
+}
+
+/** 上传顺序：`.zip` 先、索引最后（索引一落地就指向它的包，得让包先到）。 */
+function orderUploads(files) {
+  return [...files].sort((a, b) => Number(REGISTRY_RE.test(a)) - Number(REGISTRY_RE.test(b)))
+}
+
+/** 待删分两段：同名覆盖（先删，否则传不上去）与旧版本包（索引替换后才清理）。 */
+function splitDoomed(files, doomed) {
+  return {
+    conflicts: doomed.filter((name) => files.includes(name)),
+    stale: doomed.filter((name) => !files.includes(name)),
+  }
 }
 
 /** 索引里所有资产 URL 的文件名（与 prune-release-assets.mjs 同款递归，兼容三种索引结构）。 */
@@ -181,8 +237,8 @@ function readRemoteList(file) {
     .filter(Boolean)
 }
 
-async function apiJson(pathname, init = {}) {
-  const res = await api(pathname, init)
+async function apiJson(pathname, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const res = await api(pathname, init, 0, timeoutMs)
   const text = await res.text()
   if (!text) return null
   try {
@@ -192,21 +248,21 @@ async function apiJson(pathname, init = {}) {
   }
 }
 
-async function api(pathname, init = {}, attempt = 0) {
+async function api(pathname, init = {}, attempt = 0, timeoutMs = REQUEST_TIMEOUT_MS) {
   await sleep(REQUEST_INTERVAL_MS)
   let res
   try {
     res = await fetch(`${API}${pathname}`, {
       ...init,
       headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (err) {
     if (attempt < RETRY_DELAYS_MS.length) {
       const wait = RETRY_DELAYS_MS[attempt]
       console.warn(`网络错误，${wait}ms 后重试：${pathname}（${err instanceof Error ? err.message : err}）`)
       await sleep(wait)
-      return api(pathname, init, attempt + 1)
+      return api(pathname, init, attempt + 1, timeoutMs)
     }
     throw err
   }
@@ -218,7 +274,7 @@ async function api(pathname, init = {}, attempt = 0) {
     const wait = RETRY_DELAYS_MS[attempt]
     console.warn(`HTTP ${res.status}（疑似限流），${wait}ms 后重试：${pathname}`)
     await sleep(wait)
-    return api(pathname, init, attempt + 1)
+    return api(pathname, init, attempt + 1, timeoutMs)
   }
   throw new Error(`请求失败 HTTP ${res.status}：${pathname} ${body.slice(0, 300)}`)
 }

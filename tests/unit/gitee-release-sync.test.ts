@@ -101,6 +101,42 @@ test('全量发布（app 索引结构）：旧包与同名覆盖进计划，索�
   assert(output.includes('保留集 2 项'), `保留集应含索引指向的包 + 本次文件。输出：${output}`)
 })
 
+/**
+ * 回归（2026-09-21 翻车）：**索引最后传，旧版本包在索引之后才清理**。
+ * 原来的顺序是「先删光待删项 → 按目录顺序传」，跨境链路上一挂就留下**空壳** Gitee release
+ * （索引与两个包都被删、新的还没传上去）——谁把下载域名切到 gitee 谁就 404。
+ */
+test('同步顺序：zip 先传、索引最后，旧版本包留到索引替换之后再清理', () => {
+  const url = (file: string) => `https://github.com/x/y/releases/download/app-latest/${file}`
+  const { status, output } = runSync({
+    files: ['Chassis-0.1.2-macos-arm64.zip', 'app-registry.json'],
+    registry: { app: { version: '0.1.2', assets: [{ url: url('Chassis-0.1.2-macos-arm64.zip') }] } },
+    remote: ['Chassis-0.1.1-macos-arm64.zip', 'Chassis-0.1.2-macos-arm64.zip', 'app-registry.json'],
+  })
+  assertEqual(status, 0, `离线预览应成功。输出：${output}`)
+
+  const uploads = planLines(output, '+')
+  assertEqual(uploads[uploads.length - 1], 'app-registry.json', `索引必须最后上传（包先落地）。输出：${output}`)
+
+  const conflicts = section(output, '同名覆盖（先删，否则传不上去）：', '索引替换后清理')
+  const stale = section(output, '索引替换后清理（旧版本包，半路失败时它们还在）：')
+  assert(conflicts.includes('app-registry.json'), `同名索引要先删（否则传不上去）。输出：${output}`)
+  assert(conflicts.includes('Chassis-0.1.2-macos-arm64.zip'), `同名包要先删。输出：${output}`)
+  assertEqual(conflicts.main.length, 2, `同名覆盖应只含本次文件。输出：${output}`)
+  assertEqual(stale.main.join(','), 'Chassis-0.1.1-macos-arm64.zip', `旧版本包只在最后清理。输出：${output}`)
+})
+
+/** 取输出里某一段（header 到下一个 header / 结尾）以及该段的 `- ` 行；`.includes` 查整段原文。 */
+function section(output: string, from: string, to?: string): { raw: string; main: string[] } & { includes(value: string): boolean } {
+  const rest = output.split(from)[1] ?? ''
+  const raw = to ? (rest.split(to)[0] ?? '') : rest
+  return {
+    raw,
+    main: planLines(raw, '-'),
+    includes: (value: string) => raw.includes(value),
+  }
+}
+
 test('分片与隐藏文件不上传', () => {
   const { status, output } = runSync({
     files: ['todo-0.1.1-macos-arm64.zip', 'registry.json', 'shard-1.json', '.DS_Store'],
