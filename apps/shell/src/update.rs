@@ -427,9 +427,13 @@ exit 1
 
 /// Windows 版 helper（PowerShell 5.1：系统自带，仍是「脱离壳进程树等它退出再动手」同一套）。
 ///
-/// 与 sh 版的差异只有三处，都是平台决定的：
-///  - **整目录 rename**：绿色版安装 = 一个目录（`Chassis.exe` + `resources/`），替换 = 目录换位；
+/// 与 sh 版的差异都是平台决定的：
+///  - **整目录换位**：绿色版安装 = 一个目录（`Chassis.exe` + `resources/`），替换 = 目录换位
+///    （候选在同卷是 rename；在别的卷是复制 + 删除 —— 数据目录在 C:、安装目录在 D: 就是这么走的）；
 ///  - 等进程退出用 `Get-Process -Id`（Windows 上运行中的 exe 与它所在目录都被锁，等是硬前提）；
+///  - 换位**必须重试**：Windows 上「壳进程没了」≠「目录能动了」—— 壳留下的残骸
+///    （继承了我们工作目录的 WebView2 子进程、杀毒扫描）还会压住目录几百毫秒到几秒，
+///    而 sh 那边 `mv` 根本不管有没有进程开着文件。见 `Move-WithRetry`；
 ///  - 起新实例用 `Start-Process`（等价 macOS 的 `open`）。
 ///
 /// 坑：参数名**不能叫 `pid`** —— PowerShell 的 `$PID` 是只读自动变量，声明同名参数会直接报错。
@@ -440,7 +444,53 @@ $ErrorActionPreference = 'Stop'
 
 function Write-Log([string]$message) {
   $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-  Add-Content -Path $log -Value "$stamp [shell-swap] $message" -ErrorAction SilentlyContinue
+  # `-Encoding UTF8`：PS 5.1 的 Add-Content 默认按 ANSI 写，中文日志会变成乱码（排障时读不出来）
+  Add-Content -Path $log -Value "$stamp [shell-swap] $message" -Encoding UTF8 -ErrorAction SilentlyContinue
+}
+
+# 目录换位 / 落位，**轮询重试到 deadline**：Windows 上「壳进程没了」≠「目录能动了」——
+# 刚退出的壳留下的残骸还会继续压着安装目录（典型是继承了我们工作目录的 WebView2 子进程，
+# 以及杀毒软件扫描刚落地的文件），这一压往往就是几百毫秒到几秒。只试一次就判死 = 更新永远装不上。
+function Move-WithRetry([string]$from, [string]$to, [int]$seconds) {
+  $deadline = (Get-Date).AddSeconds($seconds)
+  $tries = 0
+  while ($true) {
+    try {
+      Move-Item -Path $from -Destination $to -ErrorAction Stop
+      if ($tries -gt 0) { Write-Log "移动成功（重试 $tries 次）：$from → $to" }
+      return $true
+    } catch {
+      $tries++
+      if ($tries -eq 1) { Write-Log "目录暂不可移动（$($_.Exception.Message)），重试至多 $seconds 秒：$from" }
+      if ((Get-Date) -gt $deadline) {
+        Write-Log "移动失败（已重试 $tries 次 / $seconds 秒）：$from → $to：$($_.Exception.Message)"
+        return $false
+      }
+      Start-Sleep -Milliseconds 500
+      # 候选与安装位置不在同一个卷时，Move-Item 是「复制 + 删源」：失败会留下半个目标目录。
+      # 重试前必须清掉它 —— 否则下一次 Move-Item 会把候选塞进它里面（“成功”了却是个半个安装）。
+      if (Test-Path $to) { Remove-Item -Recurse -Force $to -ErrorAction SilentlyContinue }
+    }
+  }
+}
+
+# 回滚：把当前目录整体挪开（rename 可重试；直接递归删会被残留进程挡下）→ 备份换回原位。
+# 回滚这一整套两处共用：`restore` 模式（boot_guard 判坏包）与 ④（新实例起不来）。
+function Restore-Backup([string]$target, [string]$backup) {
+  $broken = "${target}.chassis-broken"
+  if (Test-Path $broken) { Remove-Item -Recurse -Force $broken -ErrorAction SilentlyContinue }
+  if (Test-Path $target) {
+    if (-not (Move-WithRetry $target $broken 30)) {
+      Write-Log "回滚失败：挪不开当前目录（$target）"
+      return $false
+    }
+  }
+  if (-not (Move-WithRetry $backup $target 30)) {
+    Write-Log "回滚失败：备份换不回来（$backup）"
+    return $false
+  }
+  if (Test-Path $broken) { Remove-Item -Recurse -Force $broken -ErrorAction SilentlyContinue }
+  return $true
 }
 
 # ① 等旧进程完全退出：运行中的 exe 与它所在目录都动不了
@@ -461,27 +511,23 @@ $exe = Join-Path $target 'Chassis.exe'
 # ② 替换（失败一律回到「原目录还在原位」的状态，绝不留半个安装）
 if ($mode -eq 'replace') {
   Write-Log "开始替换：$target（候选 $staged）"
-  try {
-    if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
-    Move-Item -Path $target -Destination $backup
-    Move-Item -Path $staged -Destination $target
-  } catch {
-    Write-Log "替换失败：$($_.Exception.Message)（立即回滚）"
-    if ((Test-Path $backup) -and -not (Test-Path $target)) {
-      Move-Item -Path $backup -Destination $target -ErrorAction SilentlyContinue
-    }
+  if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
+  # ① 旧目录换位（同卷 rename）。挪不动 = 它还被占用：原样放着，什么都不用回滚
+  if (-not (Move-WithRetry $target $backup 30)) {
+    Write-Log "备份失败（旧目录仍被占用），放弃替换，启动当前版本"
+    if (Test-Path $exe) { Start-Process -FilePath $exe -WorkingDirectory $target }
+    exit 1
+  }
+  # ② 候选落位（候选在别的卷时是复制 + 删除，非原子）。失败可能留半个新目录：回滚会把它挪开
+  if (-not (Move-WithRetry $staged $target 30)) {
+    Write-Log "候选包落位失败，立即回滚"
+    if (-not (Restore-Backup $target $backup)) { exit 1 }
     if (Test-Path $exe) { Start-Process -FilePath $exe -WorkingDirectory $target }
     exit 1
   }
 } else {
   Write-Log "回滚：备份换回 $target"
-  try {
-    if (Test-Path $target) { Remove-Item -Recurse -Force $target }
-    Move-Item -Path $backup -Destination $target
-  } catch {
-    Write-Log "回滚失败：$($_.Exception.Message)（备份 $backup）"
-    exit 1
-  }
+  if (-not (Restore-Backup $target $backup)) { exit 1 }
 }
 
 # ③ 起新实例（绿色版：直接跑目录里的 Chassis.exe）
@@ -500,13 +546,9 @@ if (Get-Process -Name 'Chassis' -ErrorAction SilentlyContinue) {
 Write-Log "新实例未在 8 秒内起来"
 if ($mode -eq 'replace' -and (Test-Path $backup)) {
   Write-Log "自动回滚到备份"
-  try {
-    if (Test-Path $target) { Remove-Item -Recurse -Force $target }
-    Move-Item -Path $backup -Destination $target
+  if (Restore-Backup $target $backup) {
     $restored = Join-Path $target 'Chassis.exe'
     if (Test-Path $restored) { Start-Process -FilePath $restored -WorkingDirectory $target }
-  } catch {
-    Write-Log "自动回滚失败：$($_.Exception.Message)"
   }
 }
 exit 1
@@ -969,6 +1011,14 @@ mod tests {
         assert!(text.contains("Get-Process -Id $targetPid"), "等旧进程退出（$PID 是只读自动变量，参数名不能叫 pid）");
         assert!(text.contains("Move-Item"), "替换 = 整目录换位");
         assert!(text.contains("Start-Process"), "换完要起新实例");
+        // 2026-09-22 真机（Windows 11，数据目录 C:/安装目录 D:）：只等 300ms 就 Move-Item，
+        // 目录还被残留进程压着 ⇒ 一次失败就回滚，更新永远装不上（swap.log 里是「正在被另一进程使用」）。
+        assert!(text.contains("function Move-WithRetry"), "换位/回位要轮询重试，不能试一次就判死");
+        assert!(text.contains("Move-WithRetry $target $backup"), "换位走重试");
+        assert!(text.contains("Move-WithRetry $staged $target"), "落位走重试");
+        assert!(text.contains("Move-WithRetry $backup $target"), "回滚也要重试（回滚失败 = 用户卡在坏版本上）");
+        assert!(text.contains("Restore-Backup $target $backup"), "restore 模式与「新实例起不来」共用同一套回滚");
+        assert!(text.contains("-Encoding UTF8 -ErrorAction SilentlyContinue"), "swap.log 要 UTF-8（PS 5.1 默认 ANSI，中文全乱码）");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

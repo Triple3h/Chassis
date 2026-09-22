@@ -52,9 +52,14 @@ GitHub Action 发版后**自动检查并提示新版本**（托盘常驻「检�
 | 形态 | 安装位置 | 候选包结构 | helper | 替换动作 |
 |---|---|---|---|---|
 | macOS | `X.app`（`/Applications/Chassis.app`） | `Contents/MacOS/launcher-shell` + `Info.plist` | `swap.sh`（`/bin/sh`） | 同卷 rename 整个 bundle |
-| Windows | 绿色版目录（`Chassis.exe` + `resources/`） | 同左（zip 根就是该目录） | `swap.ps1`（PowerShell 5.1，脚本带 BOM） | 同卷 rename 整个目录 |
+| Windows | 绿色版目录（`Chassis.exe` + `resources/`） | 同左（zip 根就是该目录） | `swap.ps1`（PowerShell 5.1，脚本带 BOM） | 整个目录换位（候选同卷是 rename；在别的卷是复制 + 删除） |
 
 两端的共同硬前提：**替换必须发生在进程完全退出之后**（Windows 连运行中的 exe 与它所在目录都锁）。
+
+Windows 还多一层：**壳退出了 ≠ 目录能动了** —— 壳留下的残骸（继承了我们工作目录的 WebView2 子进程、杀毒扫描）
+会继续压着安装目录几百毫秒到几秒。所以 `swap.ps1` 的换位 / 落位 / 回滚都是**轮询重试**（各 30 秒），
+不是「试一次就判死」：一次失败就回滚 = 更新永远装不上（2026-09-22 真机：数据目录在 C:、安装目录在 D:，
+`swap.log` 里连续两次「无法移动项，因为 D:\Chassis-0.1.9-win-x64 正在被另一进程使用」）。
 
 ## 2. 全自动链路
 
