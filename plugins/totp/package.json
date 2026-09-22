@@ -3,7 +3,7 @@
   "title": "双重验证器",
   "author": "triple3h",
   "description": "TOTP 两步验证码，支持扫码导入 Google Authenticator 迁移二维码，可选密码加密",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "apiVersion": "2",
