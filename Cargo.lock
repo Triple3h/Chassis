@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-kernel"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "axum",
  "base64 0.22.1",
