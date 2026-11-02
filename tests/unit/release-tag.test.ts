@@ -70,4 +70,14 @@ test('--github-output：tag 版本与 package.json 不一致时明确报错', ()
   assert(result.stderr.includes('不一致'), `应提示版本不一致：${result.stderr}`)
 })
 
+test('pnpm ship --dry-run：只打印计划，不推送', () => {
+  const result = spawnSync(
+    process.execPath,
+    [path.join(repoRoot, 'scripts', 'ship.mjs'), 'plugin', 'json-tools', '--version', '9.9.9', '--dry-run'],
+    { encoding: 'utf8' },
+  )
+  assertEqual(result.status, 0, result.stderr)
+  assert(result.stdout.includes('plugins/json-tools/9.9.9'), result.stdout)
+})
+
 run()

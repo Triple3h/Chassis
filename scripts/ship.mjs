@@ -18,7 +18,8 @@ import { tagFor } from './lib/release-tag.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SEMVER = /^\d+\.\d+\.\d+$/
-const FLAGS = new Set(['--skip-verify', '--dry-run'])
+const ALLOWED = new Set(['--skip-verify', '--dry-run'])
+const flags = new Set()
 
 function run(cmd, args) {
   execFileSync(cmd, args, { stdio: 'inherit', cwd: repoRoot })
@@ -50,7 +51,8 @@ for (let index = 0; index < argv.length; index += 1) {
     continue
   }
   if (arg.startsWith('--')) {
-    if (!FLAGS.has(arg)) fail(`未知参数：${arg}`)
+    if (!ALLOWED.has(arg)) fail(`未知参数：${arg}`)
+    flags.add(arg)
     continue
   }
   positional.push(arg)
@@ -63,7 +65,7 @@ if (!['kernel', 'app', 'plugin'].includes(target)) {
 if (target === 'plugin' && !pluginId) fail('plugin 需要插件 id：pnpm ship plugin json-tools')
 
 const branch = capture('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
-if (branch !== 'main') fail(`发布只能从 main 发（当前 ${branch}）`)
+if (branch !== 'main' && !flags.has('--dry-run')) fail(`发布只能从 main 发（当前 ${branch}）`)
 
 const dirty = capture('git', ['status', '--porcelain']).split('\n').filter(Boolean)
 if (dirty.length) {
@@ -95,14 +97,14 @@ const files =
 const remote = remoteArg ?? process.env.SHIP_REMOTE ?? sshRemote(capture('git', ['remote', 'get-url', 'origin']))
 const actionsUrl = workflowUrl(remote, workflow)
 
-if (FLAGS.has('--dry-run')) {
+if (flags.has('--dry-run')) {
   console.log(`计划：${tag} → ${workflow}`)
   console.log(`  版本：${current}${bumped ? ` → ${next}` : '（已就位，只打 tag）'}`)
   console.log(`  远程：${remote}`)
   process.exit(0)
 }
 
-if (!FLAGS.has('--skip-verify')) {
+if (!flags.has('--skip-verify')) {
   console.log('▶ 本地验证')
   if (target !== 'plugin') run('cargo', ['test', '--workspace'])
   run('pnpm', ['typecheck'])
