@@ -10,6 +10,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import ChangelogNotes from '@launcher/ui/ChangelogNotes.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { exec, host, hostUi, settings } from '@launcher/api'
 
@@ -420,7 +421,7 @@ onMounted(async () => {
                       <span class="font-medium text-accent">v{{ appUpdate.latest }}</span>
                     </template>
                   </div>
-                  <p v-if="appUpdate?.notes" class="mt-1 text-[11.5px] text-faint">{{ appUpdate.notes }}</p>
+                  <ChangelogNotes v-if="appUpdate?.notes" :notes="appUpdate.notes" />
                   <p v-if="!shellInfo.canSelfUpdate" class="mt-1 text-[11px] text-faint">
                     开发态或安装位置不可写：自更新只在打包安装的应用里生效
                   </p>
@@ -467,7 +468,7 @@ onMounted(async () => {
                       <span class="font-medium text-accent">v{{ kernelUpdate.latest }}</span>
                     </template>
                   </div>
-                  <p v-if="kernelUpdate?.notes" class="mt-1 text-[11.5px] text-faint">{{ kernelUpdate.notes }}</p>
+                  <ChangelogNotes v-if="kernelUpdate?.notes" :notes="kernelUpdate.notes" />
                   <p v-if="kernelUpdate && !kernelUpdate.hotOk" class="mt-1 text-[11.5px] text-danger">
                     当前热更新机制版本过低（需要 {{ kernelUpdate.minHotVersion ?? '—' }}），请先升级应用
                   </p>
@@ -515,7 +516,7 @@ onMounted(async () => {
                         <span class="font-medium text-accent">v{{ item.latest }}</span>
                       </template>
                     </div>
-                    <p v-if="item.hasUpdate && item.notes" class="mt-1 text-[11.5px] text-faint">{{ item.notes }}</p>
+                    <ChangelogNotes v-if="item.hasUpdate && item.notes" :notes="item.notes" />
                     <p v-if="item.hasUpdate && !item.minKernelOk" class="mt-1 text-[11.5px] text-danger">
                       当前底座版本过低，请先升级应用
                     </p>

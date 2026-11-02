@@ -4,6 +4,7 @@
  */
 import { host, settings } from '@launcher/api'
 import type { LogExportResult } from '@launcher/api'
+import { changelogHtml } from '@launcher/ui/changelog'
 import { iconSvg } from '@launcher/ui/icons'
 
 interface ConfigLike {
@@ -829,7 +830,7 @@ function renderAboutUpdate(): string {
   if (aboutUpdate?.available) {
     const latest = aboutUpdate.latest ?? ''
     const current = aboutUpdate.current ?? aboutInfo.version
-    const notes = aboutUpdate.notes ? `<div class="hint">${escapeHtml(aboutUpdate.notes)}</div>` : ''
+    const notes = aboutUpdate.notes ? `<div class="cl-notes">${changelogHtml(aboutUpdate.notes)}</div>` : ''
     const blocked =
       aboutUpdate.hotOk === false
         ? '<div class="hint">当前壳的自更新机制版本过低：请手动换包（App 通道 v*）。</div>'

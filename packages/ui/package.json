@@ -6,9 +6,11 @@
   "description": "插件 UI 套件：设计令牌 + AppShell / UiIcon / UiDialog + 宿主无关的前端工具（构建期被插件打进各自产物，无需发布）",
   "exports": {
     "./AppShell.vue": "./ui/AppShell.vue",
+    "./ChangelogNotes.vue": "./ui/ChangelogNotes.vue",
     "./UiDialog.vue": "./ui/UiDialog.vue",
     "./UiIcon.vue": "./ui/UiIcon.vue",
     "./UiSelect.vue": "./ui/UiSelect.vue",
+    "./changelog": "./lib/changelog.ts",
     "./clipboard": "./lib/clipboard.ts",
     "./icons": "./lib/icons.ts",
     "./keys": "./lib/keys.ts",
