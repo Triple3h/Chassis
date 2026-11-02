@@ -134,7 +134,8 @@ curl -X POST http://127.0.0.1:<kernelPort>/api/hot/rollback -d '{}' -H 'Content-
 内核与插件**各自独立**监控自己的 Release 通道（2026-09-18 拍板）：App 用 `v*`、插件用 `plugins-latest`、
 内核用 **`kernel-latest`** —— 三个 tag 互不干扰，客户端走 `releases/download/<tag>/...` 直链（无需 GitHub API、无 token）。
 
-> 发布收尾的资产清理与镜像规则（只保留索引指向的资产、Gitee 同步）见 [`release-channels.md`](release-channels.md) §4。
+> 发布收尾的资产清理规则（只保留索引指向的资产）见 [`release-channels.md`](release-channels.md) §5。
+> `internal-store` 下一版起会优先读 npm 的签名索引（npmmirror），失败再回落 `kernel-latest` 直链，见 §7。
 
 ```
 kernel-release.yml ──macOS + Windows 原生构建──▶ 固定 tag kernel-latest

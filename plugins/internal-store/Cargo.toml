@@ -27,3 +27,9 @@ sha2 = "0.10"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 # 解压内核更新包（launcher-kernel + ui/）；与内核侧 installZip 同款依赖、同款最小 features
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# npm 通道：索引验签（ring 经 ureq/rustls 已在依赖树里）+ base64 解码
+ring = "0.17"
+base64 = "0.22"
+# npm tarball（.tgz）解包：rust_backend 避免 Windows 交叉编译拉 zlib 的 C 代码
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tar = "0.4"

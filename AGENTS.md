@@ -42,6 +42,8 @@ The app has **no Node dependency at runtime**: the kernel and every logical-laye
 - `pnpm build` — release kernel + launcher UI + all 17 built-in plugins (view assets and `target/release/<bin>` copies).
 - `pnpm spec-check` — manifest self-audit (`docs/plugin-spec.md` §13: G1 / N1–N3, artifacts, remote resources).
 - `pnpm ship <kernel|app|plugin <id>>` — one-command release (bump → verify → commit → tag → SSH push); it also writes that channel's `CHANGELOG`, which the publisher turns into update-page notes (`--notes` overrides). Details: `docs/release-channels.md` §1 / §3.
+- `pnpm index:key` — generate the ed25519 index-signing keypair (private key → `INDEX_SIGNING_KEY` secret, public key → internal-store).
+- `pnpm npm:publish -- --channel <app|kernel|plugins> --dir <dir>` — publish that channel to npm (CI runs it after the GitHub Release; `--dry-run` / `--configure-trust` for local checks).
 - `pnpm dev` / `pnpm dev:kernel` / `pnpm dev:ui` — kernel + UI in a browser without the shell; kernel data goes to `.dev-data/`.
 - `npm run shell:dev` — run the real macOS app; `npm run app:local` — package it.
 - `pnpm app:win` (Windows only) — Windows portable zip at `dist-app/Chassis-<version>-win-<arch>.zip`.
@@ -61,7 +63,8 @@ Four independent tag channels; clients read plain `releases/download/<tag>/...` 
 
 - **Versions** live in the root `version.json` only; `pnpm version:set` / `version:check` keep it in sync. **Never hand-edit the generated fields** — drift makes clients silently miss updates. Plugin versions stay in each plugin's `package.json`; mechanism versions (`SHELL_HOT_VERSION`, `HOT_UPDATE_VERSION`) are separate.
 - Kernel/plugin updates hot-swap without restarting the App; an App release restarts everything and re-deploys the bundled kernel. Publishing is instantly visible to all clients — the only gates are `minHotVersion` / `minShellHotVersion` / `minKernel`.
-- Release hygiene — asset pruning, registry merge on partial plugin releases, Gitee mirror, App signing: [docs/release-channels.md](docs/release-channels.md).
+- **npm/npmmirror read path**: the three self-update channels also publish to npm (`@triple3h/chassis-*`). Clients read the signed index from `registry.npmmirror.com` first and fall back to the tag channels. Secrets: `NPM_TOKEN` (bootstrap; later replaced by trusted publishing/OIDC) and `INDEX_SIGNING_KEY`. The first npm release of a channel must be a full one (plugins: `plugins/all`). Details: [docs/release-channels.md](docs/release-channels.md) §7.
+- Release hygiene — asset pruning, registry merge on partial plugin releases, App signing: [docs/release-channels.md](docs/release-channels.md).
 
 ## Coding Style
 

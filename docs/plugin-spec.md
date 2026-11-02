@@ -999,12 +999,18 @@ fn main() {
 契约要点：
 
 - **schema 稳定**：字段只增不改；`schema` 不认识 ⇒ 拒绝整份索引（不挑字段读）。
-- `sig` 字段为**预留**（后续版本的签名，`null` 表示未启用）。v1 的信任模型是「固定仓库 + HTTPS + sha256」：下载只接受插件 id，地址一律从索引取；在引入第三方源之前不上签名 —— 一旦开放第三方通道，「GitHub + TLS」不再成立，签名必须同期上。
+- `sig` 字段在索引体内保持**预留**（`null` 表示未启用）。npm 通道的签名放在传输封装 `chassis.sig`（见下）——
+  npm/npmmirror 是第三方源，「固定仓库 + HTTPS」的前提不再成立，签名是入口条件。
 - 客户端**只接受插件 id 作为入参**，下载地址一律从本索引取 —— URL 不可被外部注入。
 - 索引与产物发布在**固定 tag**（`plugins-latest`）的 Release 上；各平台各发一份 zip，sha256 必须逐字节一致于构建产物。
-- **主源 + 国内镜像**：客户端对索引里的每个 URL **先试镜像**（`github.com/triple3h/Chassis` → `gitee.com/triple3h/Chassis`，大小写不敏感），
-  连不上 / HTTP 错 / sha256 不符再回落主源；索引本身同样镜像优先，两级都失败才报错。两个地址都是编译期常量 —— **不接受自定义源**。
-  镜像由 `scripts/sync-release-to-gitee.mjs` 同步，规则见 [`release-channels.md`](release-channels.md) §4。
+- **主源 + 加速代理**：索引只走 GitHub 主源（不走第三方代理）；附件**先试加速代理**（`ghfast.top` / `gh-proxy.com`，
+  把主源 URL 原样拼在代理域名后），连不上 / HTTP 错 / sha256 不符再回落主源。地址都是编译期常量 —— **不接受自定义源**。
+  Gitee 镜像已移除；国内首选的读取路径是 npm/npmmirror（见下一条）。
+- **npm 通道的封装（第三方源）**：索引原文（UTF-8）作为字符串放在 `@triple3h/chassis-index-<通道>` 的
+  `package.json` 的 `chassis.registry` 里，`chassis.sig` 是对该原文的 ed25519 签名，`chassis.keyId` 标识公钥；
+  客户端**先验签再解析**，失败 / 缺失即拒绝该候选并回落自有通道。npm 版资产多两个字段：`format: "tgz"` 与
+  `entry`（包内 zip 名），原 GitHub URL 放进 `mirrors`；`sha256` 仍是对 zip 的校验值。
+  npm 源在 `is_allowed_host` 白名单里（`registry.npmmirror.com` / `cdn.npmmirror.com`，tarball 会 302 到 CDN）。
 - **索引永远整份发布**：单独发某个插件时必须合并上一版索引（`gen-plugin-registry.mjs --merge-registry`，`plugins-release.yml` 自动做）——
   没打包的插件整条沿用上一版。少了这一步，其余插件对客户端等于「不存在」，静默不再提示更新。
   守卫：`tests/unit/plugin-registry-merge.test.ts`；规则见 [`release-channels.md`](release-channels.md) §4。

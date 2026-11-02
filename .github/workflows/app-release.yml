@@ -133,6 +133,10 @@ jobs:
   publish:
     needs: [macos, windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # 以后切到 npm trusted publishing（OIDC）时需要；bootstrap 阶段用 NPM_TOKEN
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -188,12 +192,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/prune-release-assets.mjs --tag app-latest --registry app/release/app-registry.json
 
-      # 国内镜像：把本次的索引与 zip 同步到 Gitee 固定 tag 的 Release（同名 tag / 同名文件，
-      # 客户端只需把下载域名换成 gitee.com 即可命中，见 scripts/sync-release-to-gitee.mjs）。
-      # 需要仓库 secret `GITEE_TOKEN`（Gitee 私人令牌，projects 权限）：未配置则跳过本步；
-      # 同步失败也不阻塞主通道（continue-on-error）—— 客户端回落 GitHub 主源。
-      - name: 同步到 Gitee（国内镜像）
-        continue-on-error: true
+      # npm 通道：产物 + 签名索引发到 npmjs，客户端从 registry.npmmirror.com 读取
+      # （docs/release-channels.md §7）。bootstrap 阶段用 NPM_TOKEN；所有包绑好 trusted
+      # publishing 后删掉这个 env，改由 id-token 的 OIDC 发布。
+      # 放在收尾最后：这一步失败（比如缺 INDEX_SIGNING_KEY）不会连带跳过 prune。
+      - name: 发布 npm 通道（npmmirror 读取）
         env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: node scripts/sync-release-to-gitee.mjs --tag app-latest --dir app/release
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          INDEX_SIGNING_KEY: ${{ secrets.INDEX_SIGNING_KEY }}
+        run: node scripts/publish-npm.mjs --channel app --dir app/release

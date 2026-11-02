@@ -20,8 +20,9 @@ GitHub Action 发版后**自动检查并提示新版本**（托盘常驻「检�
 | 内核 | `kernel-latest` | `kernel-registry.json` + 内核 zip | 「更新」页 → 内核 |
 | **应用（壳）** | **`app-latest`** | **`app-registry.json` + `Chassis-<版本>-macos-<架构>.zip`** | **自动检查 → 托盘「检查更新…」/「关于」页提示 → 「更新」页 → 应用** |
 
-> 三条固定 tag 通道（`app-latest` / `kernel-latest` / `plugins-latest`）发布时只保留索引指向的资产、
-> 以及 Gitee 镜像的同步规则，见 [`release-channels.md`](release-channels.md) §4。
+> 三条固定 tag 通道（`app-latest` / `kernel-latest` / `plugins-latest`）发布时只保留索引指向的资产，
+> 规则见 [`release-channels.md`](release-channels.md) §5。
+> `internal-store` 下一版起会优先读 npm 的签名索引（npmmirror），失败再回落固定 tag 直链，见 §7。
 
 索引（schema 1）与内核那份同形：
 

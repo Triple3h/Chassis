@@ -4,8 +4,11 @@
 //! 索引格式见 `docs/plugin-spec.md` 附录「更新源（registry.json）」。
 
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -29,22 +32,32 @@ pub const REGISTRY_SCHEMA: u64 = 1;
 /// 主源基址（索引里的每个资产 URL 都以它开头）。
 pub const PRIMARY_BASE: &str = "https://github.com/triple3h/Chassis";
 
-/// 国内镜像基址（Gitee 同名仓库 / 同名 tag / 同名文件名，由 CI 的 `scripts/sync-release-to-gitee.mjs` 同步）。
-/// 客户端**优先走镜像**，拿不到（连不上 / HTTP 错 / sha256 不符）再降级主源 —— 见 `bin/update.rs`。
-pub const MIRROR_BASE: &str = "https://gitee.com/triple3h/Chassis";
-
 /// GitHub 加速代理：把主源 URL 原样拼在代理域名后面（`https://<代理>/https://github.com/...`）。
 ///
 /// **只给附件用，索引绝不走代理**。索引是信任根 —— 它决定「下载什么、校验值是多少」；
-/// 一旦它能被第三方改写，攻击者就能把 url 指向白名单内的任意仓库（GitHub / Gitee 都免费可建）、
+/// 一旦它能被第三方改写，攻击者就能把 url 指向白名单内的任意仓库（GitHub 对所有人免费开放）、
 /// 再配上自己算的 sha256，sha256 校验就形同虚设了。
-/// 附件则反过来：sha256 来自**可信通道的索引**，代理改一个字节都会被拒 ⇒
+/// 附件则反过来：sha256 来自**已验签索引**，代理改一个字节都会被拒 ⇒
 /// 「不可信的加速通道 + 可信的哈希」才是安全的组合（`bin/update.rs::asset_candidates`）。
 ///
-/// 为什么值得：Gitee 镜像要靠跨境同步（CI 常失败、要本机补），而这几个代理即时可用。
+/// 为什么保留：npm（npmmirror）是第一优先；它没同步 / 不可用时，代理通常比 GitHub 直连快。
 /// 实测（2026-09-21 国内网络，下 16MB 应用包）：ghfast.top 3.27MB/s（8 秒下完）、gh-proxy.com 309KB/s。
-/// 前者主力、后者备份，都不可用还有 Gitee 镜像与 GitHub 主源兜底。
 pub const PROXY_BASES: [&str; 2] = ["https://ghfast.top", "https://gh-proxy.com"];
+
+/// npm 通道（客户端读取源）：npmmirror 是 npmjs 的只读镜像。
+/// 发布走 npmjs，读取只认这里；产物与索引都由 `scripts/publish-npm.mjs` 发布。
+pub const NPM_READ_BASE: &str = "https://registry.npmmirror.com";
+
+/// 三条通道各一个索引包，客户端只读它的 `latest` 版本清单。
+pub fn npm_index_url(channel: &str) -> String {
+    format!("{NPM_READ_BASE}/@triple3h/chassis-index-{channel}/latest")
+}
+
+/// npm 索引的签名公钥（ed25519，base64 原始 32 字节）。
+/// 生成：`node scripts/make-index-key.mjs`；`INDEX_KEY_ID` 是公钥 sha256 的前 16 位（轮换用）。
+/// **空串 = 未启用**：npm 通道会被跳过并回落 GitHub 通道（绝不接受未验签的第三方索引）。
+pub const INDEX_PUBKEY_B64: &str = "IL46C9XTcT0WOEDeaWTIQO/YPZc8m61RU3KJGjnlTOA=";
+pub const INDEX_KEY_ID: &str = "a74909b6d56b29aa";
 
 /// 主源 URL 的后半段（`/releases/download/...`）；不是主源 URL（含将来可能出现的其它域）返回 `None`。
 /// 大小写不敏感：索引由 CI 用 `GITHUB_REPOSITORY` 拼出，owner 是 `Triple3h`，与这里的 `triple3h` 不同。
@@ -57,10 +70,6 @@ fn primary_suffix(url: &str) -> Option<&str> {
     Some(&url[prefix.len()..])
 }
 
-/// 把主源 URL 换成镜像 URL（非主源 URL 返回 `None`）。
-pub fn mirror_url(url: &str) -> Option<String> {
-    Some(format!("{MIRROR_BASE}{}", primary_suffix(url)?))
-}
 
 /// 主源 URL → 各加速代理的候选（非主源 URL 返回空：索引里的其它域不该被拼到代理后面）。
 pub fn proxy_urls(url: &str) -> Vec<String> {
@@ -110,6 +119,15 @@ pub struct RegistryAsset {
     pub sha256: String,
     #[serde(default)]
     pub bytes: u64,
+    /// npm 通道的封装：`Some("tgz")` 表示 `url` 是 npm tarball，要先取出 `entry` 指定的 zip。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// npm tarball 里 zip 的文件名（按 basename 匹配）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+    /// 兜底地址（npm 索引里放原 GitHub URL；自有索引里为空）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +235,115 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 pub fn download_name(id: &str, version: &str, platform: &str, arch: &str) -> String {
     format!("{id}-{version}-{platform}-{arch}.zip")
+}
+
+// ── npm 通道（索引验签 + tarball 解包）──────────────────────────
+
+/// 校验 npm 版索引的签名：签名对象是 `chassis.registry` 的**原文**（不做 JSON 规范化）。
+/// `pubkey_b64` / `expected_key_id` 可注入（测试用）；生产入口是 [`verify_index_signature`]。
+pub fn verify_index_signature_with(
+    registry_text: &str,
+    sig_b64: &str,
+    key_id: Option<&str>,
+    pubkey_b64: &str,
+    expected_key_id: &str,
+) -> std::result::Result<(), String> {
+    if let Some(id) = key_id {
+        if !id.is_empty() && id != expected_key_id {
+            return Err(format!("索引签名 keyId 不受信任：{id}"));
+        }
+    }
+    if pubkey_b64.trim().is_empty() {
+        return Err("客户端未内置索引公钥（INDEX_PUBKEY 为空）".to_string());
+    }
+    let key = BASE64.decode(pubkey_b64.trim()).map_err(|_| "INDEX_PUBKEY 不是合法 base64".to_string())?;
+    let signature = BASE64.decode(sig_b64.trim()).map_err(|_| "索引签名不是合法 base64".to_string())?;
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
+        .verify(registry_text.as_bytes(), &signature)
+        .map_err(|_| "索引签名校验失败".to_string())
+}
+
+/// 生产入口：把编译期内置的公钥焊死在这里（npm 是第三方通道，索引必须验签）。
+pub fn verify_index_signature(
+    registry_text: &str,
+    sig_b64: &str,
+    key_id: Option<&str>,
+) -> std::result::Result<(), String> {
+    verify_index_signature_with(registry_text, sig_b64, key_id, INDEX_PUBKEY_B64, INDEX_KEY_ID)
+}
+
+/// npm 索引包（npmmirror 的 `latest` 版本清单）→ **验签后**的 registry 原文。
+/// 公钥可注入（测试用）；生产入口是 [`registry_from_npm_manifest`]。
+pub fn registry_from_npm_manifest_with(
+    raw: &str,
+    pubkey_b64: &str,
+    expected_key_id: &str,
+) -> std::result::Result<String, String> {
+    let manifest: serde_json::Value =
+        serde_json::from_str(raw).map_err(|err| format!("npm 索引不是 JSON：{err}"))?;
+    let chassis = manifest.get("chassis").ok_or("npm 索引缺少 chassis 封装")?;
+    let text = chassis
+        .get("registry")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("npm 索引缺少 chassis.registry")?;
+    let signature = chassis.get("sig").and_then(serde_json::Value::as_str).ok_or("npm 索引没有签名")?;
+    let key_id = chassis.get("keyId").and_then(serde_json::Value::as_str);
+    verify_index_signature_with(text, signature, key_id, pubkey_b64, expected_key_id)?;
+    Ok(text.to_string())
+}
+
+pub fn registry_from_npm_manifest(raw: &str) -> std::result::Result<String, String> {
+    registry_from_npm_manifest_with(raw, INDEX_PUBKEY_B64, INDEX_KEY_ID)
+}
+
+/// 从 npm tarball（`.tgz`）里取出 `entry` 指定的 zip 写到 `out_zip`，返回字节数。
+///
+/// 安全口径：输出路径固定为 `out_zip`、只按 **basename** 匹配 ⇒ tar 里的相对路径 / 绝对路径
+/// 都无法把文件写到目标目录之外；只接受普通文件；解出的 zip 超过 `max_bytes` 立即拒绝。
+pub fn extract_npm_zip(
+    tgz_path: &Path,
+    entry: &str,
+    out_zip: &Path,
+    max_bytes: u64,
+) -> std::result::Result<u64, String> {
+    let wanted = Path::new(entry)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| format!("npm 包里的 entry 非法：{entry}"))?;
+    let file = std::fs::File::open(tgz_path).map_err(|err| format!("无法打开 npm 包：{err}"))?;
+    let decoder = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+    let entries = archive.entries().map_err(|err| format!("npm 包不是合法 tar.gz：{err}"))?;
+
+    for item in entries {
+        let mut item = item.map_err(|err| format!("读取 npm 包条目失败：{err}"))?;
+        let path = item.path().map_err(|err| format!("npm 包条目路径非法：{err}"))?;
+        if path.file_name().and_then(|name| name.to_str()) != Some(wanted) {
+            continue;
+        }
+        if !item.header().entry_type().is_file() {
+            return Err(format!("npm 包里的 {wanted} 不是普通文件"));
+        }
+        let mut output = std::fs::File::create(out_zip).map_err(|err| format!("无法写入 zip：{err}"))?;
+        let mut total = 0u64;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let read = item.read(&mut buffer).map_err(|err| format!("读取 npm 包失败：{err}"))?;
+            if read == 0 {
+                break;
+            }
+            total += read as u64;
+            if total > max_bytes {
+                drop(output);
+                let _ = std::fs::remove_file(out_zip);
+                return Err("npm 包解出的 zip 超过大小上限".to_string());
+            }
+            output.write_all(&buffer[..read]).map_err(|err| format!("写入失败：{err}"))?;
+        }
+        return Ok(total);
+    }
+    Err(format!("npm 包里没有 {wanted}"))
 }
 
 // ── 内核热更新（kernel-latest 索引 + 更新包）─────────────────────
@@ -539,8 +666,7 @@ pub fn current_arch() -> &'static str {
     }
 }
 
-/// 传输面白名单：更新源是固定仓库（主源 GitHub / 国内镜像 Gitee）与其加速代理，
-/// 附件会 302 到各自的 CDN。
+/// 传输面白名单：更新源是固定仓库（GitHub）、npm 镜像与加速代理，附件会 302 到各自的 CDN。
 /// 命令**不接受 URL 入参**，这条只是最后一道兜底（防止索引被换成别的域）。
 pub fn is_allowed_host(url: &str) -> bool {
     let Some(host) = host_of(url) else {
@@ -549,8 +675,10 @@ pub fn is_allowed_host(url: &str) -> bool {
     host == "github.com"
         || host.ends_with(".github.com")
         || host.ends_with(".githubusercontent.com")
-        || host == "gitee.com"
-        || host.ends_with(".gitee.com")
+        // npm 通道：tarball 会 302 到 `cdn.npmmirror.com`，两个主机都要精确放行。
+        // **精确匹配**：绝不写成「`.npmmirror.com` 结尾」那种。
+        || host == "registry.npmmirror.com"
+        || host == "cdn.npmmirror.com"
         // 加速代理（只用于附件下载；索引不走它们 —— 见 `PROXY_BASES`）。
         // **精确匹配**：绝不写成「`.top` 结尾」那种 —— 那是把整个 TLD 放进来当更新源。
         || PROXY_BASES.iter().any(|base| host_of(base).as_deref() == Some(host.as_str()))
@@ -705,11 +833,15 @@ mod tests {
     fn only_fixed_domains_are_allowed() {
         assert!(is_allowed_host("https://github.com/o/r/releases/download/x/y.zip"));
         assert!(is_allowed_host("https://objects.githubusercontent.com/x"));
-        assert!(is_allowed_host("https://gitee.com/triple3h/Chassis/releases/download/app-latest/x.zip"));
-        assert!(is_allowed_host("https://foruda.gitee.com/attach_file/1/x.zip"));
+        assert!(!is_allowed_host("https://gitee.com/triple3h/Chassis/releases/download/app-latest/x.zip"), "Gitee 渠道已移除");
         // 加速代理（只给附件用）：放行的是**精确域名**
         assert!(is_allowed_host("https://ghfast.top/https://github.com/o/r/releases/download/x/y.zip"));
         assert!(is_allowed_host("https://gh-proxy.com/https://github.com/o/r/releases/download/x/y.zip"));
+        // npm 通道：注册表与 tarball 的 CDN 主机
+        assert!(is_allowed_host("https://registry.npmmirror.com/@triple3h/chassis-index-app/latest"));
+        assert!(is_allowed_host("https://cdn.npmmirror.com/packages/%40types/node/26.6.6/node-26.6.6.tgz"));
+        assert!(!is_allowed_host("https://registry.npmmirror.com.evil.example.com/x"), "后缀伪装不得放行");
+        assert!(!is_allowed_host("https://evil-registry.npmmirror.com/x"), "同 TLD 的别的域不得放行");
         assert!(!is_allowed_host("https://ghfast.top.evil.example.com/x.zip"), "后缀伪装不得放行");
         assert!(!is_allowed_host("https://evil-ghfast.top/x.zip"), "同 TLD 的别的域不得放行");
         assert!(!is_allowed_host("https://evil.example.com/y.zip"));
@@ -726,25 +858,8 @@ mod tests {
             proxy_urls(url),
             vec![format!("https://ghfast.top/{url}"), format!("https://gh-proxy.com/{url}")]
         );
-        assert!(proxy_urls("https://gitee.com/triple3h/Chassis/x").is_empty());
+        assert!(proxy_urls("https://registry.npmmirror.com/@triple3h/chassis-index-app/latest").is_empty());
         assert!(proxy_urls("https://example.com/x.zip").is_empty());
-    }
-
-    /// 镜像 URL 由主源 URL 推导；索引里的 owner 大小写与常量可能不同（CI 用 `GITHUB_REPOSITORY`）。
-    #[test]
-    fn mirror_url_swaps_gitee_case_insensitively() {
-        assert_eq!(
-            mirror_url("https://github.com/Triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip").as_deref(),
-            Some("https://gitee.com/triple3h/Chassis/releases/download/app-latest/Chassis-0.1.6-macos-arm64.zip")
-        );
-        assert_eq!(
-            mirror_url("https://github.com/triple3h/Chassis/releases/download/plugins-latest/registry.json").as_deref(),
-            Some("https://gitee.com/triple3h/Chassis/releases/download/plugins-latest/registry.json")
-        );
-        // 别的域（含 Gitee 自己）：不动，交给调用方只用原 URL
-        assert_eq!(mirror_url("https://gitee.com/triple3h/Chassis/x"), None);
-        assert_eq!(mirror_url("https://example.com/x.zip"), None);
-        assert_eq!(mirror_url("不是 URL"), None);
     }
 
     #[test]
@@ -986,6 +1101,129 @@ mod tests {
         write_app_zip(&evil, true, true, true);
         let err = unzip_app_bundle(&evil, &dir.join("out3")).expect_err("路径穿越必须拒绝");
         assert!(err.contains("路径穿越"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── npm 通道 ──────────────────────────────────────────────
+
+    /// 测试用 tar.gz：条目名按 npm 包内形态（`package/<file>`）
+    fn write_tgz(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = std::fs::File::create(path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for (name, data) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, *data).unwrap();
+        }
+        let encoder = builder.into_inner().unwrap();
+        encoder.finish().unwrap();
+    }
+
+    #[test]
+    fn npm_index_signature_verifies_and_rejects_tampering() {
+        use ring::signature::KeyPair as _;
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        let pubkey = BASE64.encode(pair.public_key().as_ref());
+        let text = r#"{"schema":1}"#;
+        let sig = BASE64.encode(pair.sign(text.as_bytes()).as_ref());
+
+        assert!(verify_index_signature_with(text, &sig, Some("id1"), &pubkey, "id1").is_ok());
+        assert!(
+            verify_index_signature_with(text, &sig, Some("id2"), &pubkey, "id1").is_err(),
+            "keyId 不符必须拒绝（轮换时不能串钥匙）"
+        );
+        assert!(
+            verify_index_signature_with(&format!("{text} "), &sig, Some("id1"), &pubkey, "id1").is_err(),
+            "改一个字节必须拒绝"
+        );
+        assert!(
+            verify_index_signature_with(text, &sig, None, "", "id1").is_err(),
+            "客户端没内置公钥时必须拒绝，回落自有通道"
+        );
+    }
+
+    #[test]
+    fn npm_manifest_is_verified_before_parsing() {
+        use ring::signature::KeyPair as _;
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        let pubkey = BASE64.encode(pair.public_key().as_ref());
+        let registry_text = r#"{"schema":1,"plugins":{}}"#;
+        let sig = BASE64.encode(pair.sign(registry_text.as_bytes()).as_ref());
+
+        let manifest = serde_json::json!({
+            "name": "@triple3h/chassis-index-plugins",
+            "version": "0.20261102.1",
+            "chassis": { "registry": registry_text, "sig": sig, "keyId": "kid" }
+        })
+        .to_string();
+        assert_eq!(registry_from_npm_manifest_with(&manifest, &pubkey, "kid").unwrap(), registry_text);
+
+        // 改了索引原文但沿用旧签名 ⇒ 拒绝
+        let tampered = serde_json::json!({
+            "chassis": { "registry": r#"{"schema":2,"plugins":{}}"#, "sig": sig, "keyId": "kid" }
+        })
+        .to_string();
+        assert!(registry_from_npm_manifest_with(&tampered, &pubkey, "kid").is_err());
+
+        // 没有签名 / keyId 不受信任 ⇒ 拒绝
+        let unsigned = serde_json::json!({ "chassis": { "registry": registry_text } }).to_string();
+        assert!(registry_from_npm_manifest_with(&unsigned, &pubkey, "kid").is_err());
+        assert!(registry_from_npm_manifest_with(&manifest, &pubkey, "other").is_err());
+    }
+
+    /// 生产公钥与 keyId 必须自洽（空串表示阶段二部署前还没填）。
+    #[test]
+    fn compiled_index_pubkey_matches_key_id() {
+        if INDEX_PUBKEY_B64.is_empty() {
+            return;
+        }
+        let raw = BASE64.decode(INDEX_PUBKEY_B64).unwrap();
+        assert_eq!(raw.len(), 32, "ed25519 公钥必须是 32 字节");
+        assert_eq!(&sha256_hex(&raw)[..16], INDEX_KEY_ID, "公钥指纹必须等于 INDEX_KEY_ID");
+    }
+
+    #[test]
+    fn extract_npm_zip_takes_only_the_named_entry() {
+        let dir = std::env::temp_dir().join(format!("npm-tgz-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tgz = dir.join("pkg.tgz");
+        write_tgz(
+            &tgz,
+            &[
+                ("package/package.json", b"{}"),
+                ("package/Chassis-0.1.11-macos-arm64.zip", b"PK..zip"),
+            ],
+        );
+        let out = dir.join("artifact.zip");
+        let bytes = extract_npm_zip(&tgz, "Chassis-0.1.11-macos-arm64.zip", &out, 1024).unwrap();
+        assert_eq!(bytes, 7);
+        assert_eq!(std::fs::read(&out).unwrap(), b"PK..zip");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extract_npm_zip_rejects_missing_entry_and_oversize() {
+        let dir = std::env::temp_dir().join(format!("npm-tgz-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tgz = dir.join("pkg.tgz");
+        write_tgz(&tgz, &[("package/a.zip", b"0123456789")]);
+
+        let missing = dir.join("missing.zip");
+        assert!(extract_npm_zip(&tgz, "b.zip", &missing, 1024).is_err(), "entry 不存在必须拒绝");
+        assert!(!missing.exists());
+
+        let oversize = dir.join("oversize.zip");
+        assert!(extract_npm_zip(&tgz, "a.zip", &oversize, 5).is_err(), "超过大小上限必须拒绝");
+        assert!(!oversize.exists(), "超限的半成品必须删掉");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

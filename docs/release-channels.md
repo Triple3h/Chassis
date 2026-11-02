@@ -5,6 +5,7 @@
 > 插件更新契约见 [`plugin-spec.md`](plugin-spec.md) §6.4 与附录 C（含三段分工的理由）。
 
 四条 tag 通道互相独立，客户端只读 `releases/download/<tag>/...` 直链 —— **不需要 GitHub API，也不需要 token**。
+三条自更新通道的产物还会额外发布到 npm，客户端优先从 npmmirror 的**签名索引**读取（§7）；tag 直链仍是主通道与兜底。
 独立发版靠 tag + Release，与仓库边界无关：不拆仓库（SDK 发包、工具链独立、App 组装跨仓库拉产物、协议变更跨仓库协调，成本都大于收益）。
 
 | 通道 | tag | 触发 | 产物 | 客户端入口 |
@@ -13,6 +14,9 @@
 | App 自更新 | `app-latest` | `workflow_dispatch` → `app-release.yml`，或 tag `app/*` | `app-registry.json` + `Chassis-<版本>-<平台>-<架构>.zip` | 托盘「检查更新…」/「关于」页 → 更新页 →「应用」 |
 | 内核 | `kernel-latest` | `workflow_dispatch` → `kernel-release.yml`，或 tag `kernel/*` | `kernel-registry.json` + `launcher-kernel-<版本>-<平台>-<架构>.zip`（内核 + `ui/`） | 更新页 →「内核」 |
 | 插件 | `plugins-latest` | 推 tag `plugins/<id>/<ver>` → `plugins-release.yml`，或 `workflow_dispatch` | `registry.json` + `<id>-<版本>-<平台>-<架构>.zip` | 更新页 → 单个插件 |
+
+> npm/npmmirror 是三条自更新通道的**额外读取路径**（不是第五条 tag）：CI 把产物与签名索引发到 npm，
+> 客户端优先读 `registry.npmmirror.com`，失败回落加速代理 / GitHub。见 §7。
 
 ## 1. 触发口径
 
@@ -73,13 +77,10 @@
 - **插件索引必须合并**：增量发布时 `gen-plugin-registry.mjs --merge-registry <上一版 registry.json>` 把没打包的插件整条沿用
   （`plugins-release.yml` 自动做）。少了这一步，索引里只剩本次打包的插件，其余插件对客户端等于「不存在」。
   守卫：`tests/unit/plugin-registry-merge.test.ts`。
-- **Gitee 镜像**：发布收尾跑 `scripts/sync-release-to-gitee.mjs`，把本次索引与 zip 同步到同名 tag / 同名文件。
-  需要仓库 secret `GITEE_TOKEN`（Gitee 私人令牌，`projects` 权限）；未配置时跳过，这步 `continue-on-error`，失败不阻塞主通道。
-  - 删除策略与 prune 同构（**按索引保留**）：若「全删再传」，会误删本次没重发的插件包（`tests/unit/gitee-release-sync.test.ts` 守护）。
-  - 请求串行 + 退避：Gitee 普通仓库附件总量 1GB，匿名 API 也有限流。
-  - 客户端（`internal-store` ≥ 0.1.3）**镜像优先、主源回落**：索引与产物都先试镜像，
-    连不上 / HTTP 错 / sha256 不符就换下一个候选；`lib.rs::PRIMARY_BASE` / `MIRROR_BASE` + `mirror_url()` 推导地址（大小写不敏感），
-    `bin/update.rs::fetch_verified()` 逐个校验，`gitee.com` 在 `is_allowed_host` 白名单里。日志会写明实际来源。
+- **Gitee 镜像已移除**：国内下载改由 npm/npmmirror 承担（见 §7）。客户端不再把 `gitee.com` 视为更新源，
+  回落链变成「加速代理 → GitHub」；仓库 secret `GITEE_TOKEN` 可以删除。
+- **npm 通道**：GitHub Release 之后跑 `scripts/publish-npm.mjs`（产物包先、签名索引最后）。需要
+  `NPM_TOKEN` 与 `INDEX_SIGNING_KEY`；包布局、签名与 trusted publishing 切换见 §7。
 - **App 包签名**：CI 用与本机相同的固定证书（`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD`，
   由 `node scripts/export-signing-cert.mjs` 一次性导出）。没配就回落 ad-hoc —— 包照发，但用户每次自更新后
   都要重新授权辅助功能 / 屏幕录制（TCC 按签名身份记账）。细节见 [`permissions.md`](permissions.md)。
@@ -97,3 +98,42 @@ pnpm ship kernel --dry-run                          # 只看计划，不改仓�
 # 需要 notes / min_* 门控时仍可走 dispatch：
 gh workflow run plugins-release.yml --ref main -f plugins="totp" -f min_kernel=0.1.9
 ```
+
+## 7. npm / npmmirror 读取路径
+
+三条自更新通道的产物会**额外**发布到 npm，客户端（`internal-store` 下一版起）优先读 npmmirror，
+拿不到再回落自有通道：索引走 GitHub，附件依次试加速代理 → GitHub。GitHub 通道本身不变。
+
+**包布局**（scope = `@triple3h`，token 只授权这个 scope）：
+
+| 包 | 内容 | 版本 |
+|---|---|---|
+| `chassis-app-<platform>-<arch>` / `chassis-kernel-<platform>-<arch>` | 对应平台的 zip | App / 内核版本 |
+| `chassis-plugin-<id>` | 该插件的各平台 zip（单插件更新只下这一个包） | 插件版本 |
+| `chassis-index-app` / `-kernel` / `-plugins` | `package.json` 的 `chassis.registry` 内嵌索引原文 + `sig` | `0.<yyyymmdd>.<epoch 秒>`（与产物版本无关） |
+
+按平台拆 app/kernel 是为了避免为装一个平台下两个平台的包；按插件拆是为了避免为一个插件更新下载全量插件。
+
+**索引必须签名**：npm/npmmirror 是第三方通道，而索引是信任根（决定「下载什么、校验值是多少」）。
+`publish-npm.mjs` 用 ed25519 对索引**原文**签名，原文以字符串内嵌（避免两端 JSON 规范化差异），
+`chassis.sig` / `keyId` 放在同一封装里；客户端先验签再解析，失败即拒绝该候选并回落自有通道。
+密钥用 `pnpm index:key` 生成：私钥只进 CI secret `INDEX_SIGNING_KEY`，公钥编译进 `internal-store`。
+契约见 [`plugin-spec.md`](plugin-spec.md) 附录 C。
+
+**发布流程**：
+1. CI 在 GitHub Release 之后跑 `node scripts/publish-npm.mjs --channel <c> --dir <产物目录>`：
+   **产物包先、索引包最后**；产物版本已存在则跳过（幂等重跑）；索引版本每次都新。
+2. npmmirror 自动从 npmjs 同步（分钟级）。未同步时客户端首轮 404 会自然回落 GitHub 链路。
+3. 首次启用某条通道必须**全量发布**（插件用 `plugins/all`）：npm 索引覆盖全量，没进过 npm 的包会 404。
+4. 首发之后不再做 prune：npm 版本不可覆盖，旧版本永久保留（对老客户端反而是好事）；
+   App 每版约 18MB，按发版频率评估存储增长。
+
+**凭据与长期方案**：
+- bootstrap：仓库 secret `NPM_TOKEN`（granular token，`@triple3h` scope，发布权限，最长 90 天）。
+- npm 从 2027-01 起移除「granular token 直接发布」：所有包创建后执行
+  `node scripts/publish-npm.mjs --channel <c> --configure-trust`（内部是 `npm trust github …`），
+  然后删掉 workflow 里的 `NODE_AUTH_TOKEN`，改走 `id-token: write` 的 OIDC（npm ≥ 11.5.1）。
+- 本机调试 `npm publish` 要显式 `--registry=https://registry.npmjs.org`（默认 registry 是只读的 npmmirror）。
+
+**回滚**：npm 版本不可覆盖，回滚 = 重发一个索引版本指向旧产物版本；已装新版的客户端不会自动降级
+（与 GitHub 通道语义一致），壳/内核的崩溃回滚仍由各自机制负责。
