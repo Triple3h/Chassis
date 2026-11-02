@@ -27,13 +27,33 @@ on:
         required: false
         default: ''
   push:
-    tags: ['plugins/*']
+    tags: ['plugins/**']
 
 permissions:
   contents: write
 
 jobs:
+  # tag 触发时从 tag 名解析要打包的插件（plugins/<id>/<ver> / plugins/all）；
+  # workflow_dispatch 仍按 inputs.plugins（留空 = 全部）。
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.resolve.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: resolve
+        shell: bash
+        env:
+          INPUT_PLUGINS: ${{ inputs.plugins }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            printf 'plugins=%s\n' "$INPUT_PLUGINS" >> "$GITHUB_OUTPUT"
+          else
+            node scripts/release-tag.mjs --github-output
+          fi
+
   macos:
+    needs: meta
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +67,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-all.mjs plugins
-      - run: node scripts/pack-plugins.mjs ${{ inputs.plugins }}
+      - run: node scripts/pack-plugins.mjs $PLUGINS
+        env:
+          # 走环境变量而不是直接内插：tag 名是外部输入，不能拼进 shell 命令
+          PLUGINS: ${{ needs.meta.outputs.plugins }}
       - uses: actions/upload-artifact@v4
         with:
           name: plugins-macos-arm64
@@ -68,7 +91,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-all.mjs plugins
-      - run: node scripts/pack-plugins.mjs ${{ inputs.plugins }}
+      - run: node scripts/pack-plugins.mjs $PLUGINS
+        env:
+          # 走环境变量而不是直接内插：tag 名是外部输入，不能拼进 shell 命令
+          PLUGINS: ${{ needs.meta.outputs.plugins }}
       - uses: actions/upload-artifact@v4
         with:
           name: plugins-windows-x64

@@ -21,6 +21,7 @@
     "version:check": "node scripts/version.mjs check",
     "version:sync": "node scripts/version.mjs sync",
     "version:set": "node scripts/version.mjs set",
+    "ship": "node scripts/ship.mjs",
     "pack:plugins": "node scripts/pack-plugins.mjs",
     "pack:registry": "node scripts/gen-plugin-registry.mjs",
     "dev": "node scripts/dev.mjs",
