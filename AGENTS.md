@@ -41,6 +41,7 @@ The app has **no Node dependency at runtime**: the kernel and every logical-laye
 - `pnpm test` — every `*.test.ts`; scope with `pnpm test:unit` / `test:contract` / `test:smoke`. The harness spawns the real kernel binary and auto-runs `cargo build -p launcher-kernel`.
 - `pnpm build` — release kernel + launcher UI + all 17 built-in plugins (view assets and `target/release/<bin>` copies).
 - `pnpm spec-check` — manifest self-audit (`docs/plugin-spec.md` §13: G1 / N1–N3, artifacts, remote resources).
+- `pnpm ship <kernel|app|plugin <id>>` — one-command release (bump → verify → commit → tag → SSH push); it also writes that channel's `CHANGELOG`, which the publisher turns into update-page notes (`--notes` overrides). Details: `docs/release-channels.md` §1 / §3.
 - `pnpm dev` / `pnpm dev:kernel` / `pnpm dev:ui` — kernel + UI in a browser without the shell; kernel data goes to `.dev-data/`.
 - `npm run shell:dev` — run the real macOS app; `npm run app:local` — package it.
 - `pnpm app:win` (Windows only) — Windows portable zip at `dist-app/Chassis-<version>-win-<arch>.zip`.
