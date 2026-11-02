@@ -68,6 +68,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-all.mjs plugins
       - run: node scripts/pack-plugins.mjs $PLUGINS
+        shell: bash
         env:
           # 走环境变量而不是直接内插：tag 名是外部输入，不能拼进 shell 命令
           PLUGINS: ${{ needs.meta.outputs.plugins }}
@@ -78,6 +79,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    needs: meta
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,6 +94,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-all.mjs plugins
       - run: node scripts/pack-plugins.mjs $PLUGINS
+        shell: bash
         env:
           # 走环境变量而不是直接内插：tag 名是外部输入，不能拼进 shell 命令
           PLUGINS: ${{ needs.meta.outputs.plugins }}
