@@ -123,13 +123,18 @@ gh workflow run plugins-release.yml --ref main -f plugins="totp" -f min_kernel=0
 **发布流程**：
 1. CI 在 GitHub Release 之后跑 `node scripts/publish-npm.mjs --channel <c> --dir <产物目录>`：
    **产物包先、索引包最后**；产物版本已存在则跳过（幂等重跑）；索引版本每次都新。
-2. npmmirror 自动从 npmjs 同步（分钟级）。未同步时客户端首轮 404 会自然回落 GitHub 链路。
+2. 发布完自动 `PUT https://registry.npmmirror.com/-/package/<scope>%2F<name>/syncs` 触发同步：
+   新包的元数据常先到、tarball 后到（实测不触发会持续 `NoSuchKey`）。同步失败不影响发布，
+   客户端在空窗期会回落 mirrors 里的 GitHub zip（同一份 sha256）。
 3. 首次启用某条通道必须**全量发布**（插件用 `plugins/all`）：npm 索引覆盖全量，没进过 npm 的包会 404。
 4. 首发之后不再做 prune：npm 版本不可覆盖，旧版本永久保留（对老客户端反而是好事）；
    App 每版约 18MB，按发版频率评估存储增长。
 
 **凭据与长期方案**：
 - bootstrap：仓库 secret `NPM_TOKEN`（granular token，`@triple3h` scope，发布权限，最长 90 天）。
+  **必须勾选 Bypass 2FA**：npm 当前拒绝没有 bypass 的 granular token 发布
+  （`E403 … granular access token with bypass 2fa enabled is required`），账号本身关闭 2FA 也不例外。
+  这个 token 只用于每个包的首次发布；包创建后立刻配 trusted publishing，见下一条。
 - npm 从 2027-01 起移除「granular token 直接发布」：所有包创建后执行
   `node scripts/publish-npm.mjs --channel <c> --configure-trust`（内部是 `npm trust github …`），
   然后删掉 workflow 里的 `NODE_AUTH_TOKEN`，改走 `id-token: write` 的 OIDC（npm ≥ 11.5.1）。

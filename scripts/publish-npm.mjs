@@ -139,6 +139,12 @@ try {
     console.log(`  ✓ ${indexManifest.name}@${indexManifest.version}（sig keyId ${keyId}）`)
   }
 
+  // 3) 主动触发 npmmirror 同步：新包的元数据常先到、tarball 后到（实测不触发会持续 NoSuchKey）。
+  //    失败不影响发布 —— 客户端还有 mirrors 的 GitHub 兜底。
+  if (!dryRun) {
+    await triggerNpmmirrorSync([...plan.packages.map((pkg) => pkg.packageName), indexManifest.name])
+  }
+
   console.log('\n客户端读取地址：')
   for (const pkg of plan.packages) {
     console.log(`  ${tarballUrl(pkg.packageName, pkg.version)}`)
@@ -293,6 +299,28 @@ function configureTrustedPublishing() {
     process.exit(1)
   }
   console.log(`\n✓ ${packageNames.length} 个包已绑定 ${repo} / ${workflow}`)
+}
+
+/** npmmirror：新包元数据先同步、tarball 后同步；主动 PUT 一次能把空窗压到分钟级。
+ *  实测接口：`PUT /-/package/<scope>%2F<name>/syncs` → 201 `{state:"waiting"}`（无需鉴权）。 */
+async function triggerNpmmirrorSync(packageNames) {
+  const results = []
+  for (const packageName of packageNames) {
+    try {
+      const response = await fetch(
+        `https://registry.npmmirror.com/-/package/${packageName.replace('/', '%2F')}/syncs`,
+        { method: 'PUT', signal: AbortSignal.timeout(5000) },
+      )
+      results.push(`${packageName} ${response.status}`)
+    } catch (err) {
+      // 镜像不可达就不要再逐个等超时了（发布本身已经成功）
+      results.push(`${packageName} 失败（${err instanceof Error ? err.message : err}）`)
+      break
+    }
+  }
+  const failed = results.filter((line) => !/ (200|201|202)$/.test(line))
+  console.log(`  npmmirror 同步：${results.length - failed.length}/${results.length} 已触发`)
+  for (const line of failed) console.log(`    ! ${line}`)
 }
 
 function findRegistry(directory, targetChannel) {
