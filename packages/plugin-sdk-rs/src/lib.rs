@@ -1,7 +1,7 @@
 //! `launcher-plugin-sdk` —— Chassis 逻辑层插件 Rust SDK（apiVersion 2）。
 //!
 //! 逻辑层插件（`no-view` / `script`）是独立可执行文件：宿主 `spawn` 后按行读写 NDJSON。
-//! 协议权威定义见 `docs/plugin-spec.md` §4.4；决策背景见 `docs/decisions/ADR-0005-kernel-language.md`。
+//! 协议权威定义见 `docs/plugin-spec.md` §4.4；语言与协议见 `docs/architecture.md` §1。
 //!
 //! 最小用法：
 //!

@@ -164,9 +164,9 @@ CSP 或老 WebView 下 Worker 可能创建失败，降级分支不是可选项�
 
 | 位置 | 装什么 |
 |---|---|
+| `docs/plugin-spec.md` | 对外契约：清单、产物、能力、接入检查清单 |
 | `docs/plugin-dev-guide.md` | 平台模型、命令形态、产物契约、脚本协议、踩坑复盘 |
-| `.codebuddy/rules/chassis-plugin/RULE.mdc` | 不遵守就一定出错的硬约束（alwaysApply，本地不入库） |
-| `.codebuddy/skills/chassis-plugin-dev/` | 新建/改造 Vue 插件的操作流程 + 模板 + 排障 |
+| `packages/plugin-cli` | `pnpm create:plugin` 脚手架：新建 / 改造插件的流程与模板 |
 
 ## 边界
 

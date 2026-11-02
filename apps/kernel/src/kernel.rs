@@ -1315,7 +1315,7 @@ impl Kernel {
 
     /// 插件管理动作（托盘、设置面板、HTTP API 共用同一条路径）。
     pub async fn plugin_action(self: &Arc<Self>, action: &str, payload: &Value) -> Result<Value> {
-        // 内核自身的热更新动作：只对 `internal-` 插件开放（`ctx.settings` 的注入闸门见 ADR-0003）
+        // 内核自身的热更新动作：只对 `internal-` 插件开放（`ctx.settings` 的注入闸门见 plugin-spec §3.4）
         if action == "applyKernelUpdate" {
             return self.apply_kernel_update(payload).await;
         }

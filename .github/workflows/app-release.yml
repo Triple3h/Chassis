@@ -2,9 +2,9 @@
 #
 # 两个平台各有产物（索引按 `platforms` 分发）：
 #   - macOS：`.app` 的 zip（自动替换链路在用）
-#   - Windows：绿色版目录的 zip（`Chassis.exe` + `resources/`）—— **自动替换尚未实现**
-#     （运行中的 exe 写不了，安装路径见 docs/win-hot-update-research.md §4.3），
-#     索引里带上它是给「手动换包 / 将来接上 helper」留一个稳定的下载入口
+#   - Windows：绿色版目录的 zip（`Chassis.exe` + `resources/`）—— 自更新已落地：
+#     `swap.ps1` 在壳完全退出后整目录替换（运行中的 exe 与目录都被锁 ⇒ 轮询重试），
+#     边界见 docs/shell-hot-update.md §1 与 docs/architecture.md §11
 #
 # 与另外三条通道完全独立（四个 tag 各自 releases/download/<tag>/... 直链，互不顶替）：
 #   - App 换包（给人下载）：release.yml（tag v*）

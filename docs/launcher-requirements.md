@@ -1,6 +1,6 @@
 # 启动台底座 · 需求与实现文档
 
-> 版本：v1.0 ｜ 状态：已实施（进度见 `README.md` 的「当前状态」）｜ 日期：2026-09-14，最后更新：2026-09-17
+> 版本：v1.0 ｜ 状态：已实施（进度见 `README.md` 的「当前状态」）｜ 日期：2026-09-14，最后更新：2026-11-02
 > 读者：实现者 / 评审者 / 后续参与的人
 > 用法：本文件是**唯一的需求源**。开工时按 §13 的里程碑推进；遇到本文件没写的行为，先补文档再写代码。
 > 说明：§5 的目录树是**规划口径**（模块视角）；**实际落地的结构以 `README.md` 的「目录结构」为准**。
@@ -185,7 +185,7 @@
 
 ### 4.1 进程与通信
 
-> **2026-09-17 更新（M5）**：内核与逻辑层插件的**实现语言改变、对外协议不变** —— 三条链路（壳 ↔ 内核 stdio JSON-RPC、UI ↔ 内核 HTTP/SSE、插件页 ↔ 宿主 postMessage）**字段级不变**；逻辑层插件（`no-view` / `script`）载体从 Node `worker_threads`（`.mjs`）改为**独立子进程 + NDJSON over stdio**（可执行产物）。决策与理由见 `docs/decisions/ADR-0005-kernel-language.md`。
+> **2026-09-17 更新（M5）**：内核与逻辑层插件的**实现语言改变、对外协议不变** —— 三条链路（壳 ↔ 内核 stdio JSON-RPC、UI ↔ 内核 HTTP/SSE、插件页 ↔ 宿主 postMessage）**字段级不变**；逻辑层插件（`no-view` / `script`）载体从 Node `worker_threads`（`.mjs`）改为**独立子进程 + NDJSON over stdio**（可执行产物）。决策与理由见 `docs/architecture.md` §1。
 
 ```
 ┌──────────────────────── 壳（Rust / Tauri 2） ────────────────────────┐
@@ -207,7 +207,7 @@
 ```
 
 - **壳 ↔ 内核**：内核作为 Tauri sidecar 由壳拉起，走 **stdio + newline-delimited JSON-RPC 2.0**。壳只实现 §6.1 的原语方法，不实现业务。
-- **内核 ↔ 启动台 UI**：启动台 UI 由壳的 WebView 加载（Tauri 的 asset 协议），通过 Tauri 的 `invoke`/`event` 与壳通信，再由壳转发给内核；**或者**（推荐实现更简单）内核也托管启动台 UI 的静态资源（`http://127.0.0.1:<uiPort>`），WebView 直接加载该 URL。二选一，ADR 记录。
+- **内核 ↔ 启动台 UI**：启动台 UI 由壳的 WebView 加载；实现选**内核托管静态资源**（`http://127.0.0.1:<uiPort>`，WebView 直接加载该 URL），理由见 `docs/architecture.md` §6.1。
 - **内核 ↔ 插件页**：`http://127.0.0.1:<pluginPort>/index.html?sid=&cmd=&theme=&token=`，每插件一个 listener（端口不同 ⇒ origin 不同 ⇒ localStorage/IndexedDB 天然隔离）。
 - **内核 ↔ 插件逻辑层**（M5 起）：宿主 `spawn` 可执行产物（`dist/<name>`，Windows 加 `.exe`），上下文经 `--launcher-context`（base64url JSON）注入；
   插件侧按行写 NDJSON：`{type:'log'|'progress'|'result'|'done'|'rpc'}`，宿主侧下发 `{type:'query'|'rpc-result'|'shutdown'}`。完整协议见 `docs/plugin-spec.md` §4.4。
@@ -229,7 +229,7 @@
 ## 5. 目标仓库结构
 
 ```
-launcher/
+Chassis/
 ├── apps/
 │   ├── shell/                        # Rust / Tauri 2
 │   │   ├── Cargo.toml
@@ -287,7 +287,8 @@ launcher/
 │   ├── app-launcher/                 # 应用扫描 + 启动（第一个做）
 │   ├── file-search/
 │   ├── web-open/                     # 网址 / 搜索引擎直达
-│   └── internal-settings/            # internal：设置 + 插件管理（不可卸载）
+│   ├── internal-settings/            # internal：设置 + 插件管理（不可卸载）
+│   └── …                             # 共 17 个，清单见 plugins/README.md
 ├── scripts/
 │   ├── build-all.mjs                 # 内核 + UI + 全部出厂插件
 │   ├── run-ts.mjs                    # esbuild 打包 TS 后交给 node（测试用）
@@ -300,7 +301,8 @@ launcher/
     ├── plugin-spec.md                # 第三方插件开发文档（面向插件作者）
     ├── architecture.md               # 内核实现细节
     ├── plugin-dev-guide.md           # 插件开发手册（Vue 工程实操）
-    └── decisions/ADR-0001~0005.md
+    ├── release-channels.md           # 发布通道、版本策略与发布收尾
+    └── motion.md                     # 动效令牌与窗口显隐协作
 ```
 
 > 这棵树是 §5 的**规划口径**；实际落地的目录（含 `packages/ui` 与构建脚本分布）见 `README.md` 的「目录结构」。
@@ -376,7 +378,7 @@ launcher/
 
 ### 6.3 打包
 
-- Tauri 2；内核作为 sidecar 打进 app bundle（`Contents/Resources/kernel/`）。**M5 起为 Rust 二进制 `launcher-kernel`（无 Node 运行时，见 ADR-0005）**；M0–M4 过渡期是 Node sidecar + 系统 Node
+- Tauri 2；内核作为 sidecar 打进 app bundle（`Contents/Resources/kernel/`）。**M5 起为 Rust 二进制 `launcher-kernel`（无 Node 运行时，见 architecture §1）**；M0–M4 过渡期是 Node sidecar + 系统 Node
 - macOS：签名 + 公证（**需第 1 周启动 Apple Developer 流程**）；更新走 `tauri-plugin-updater` + minisign
 - Windows（M6）：**绿色版 zip**（`pnpm app:win` → `dist-app/Chassis-<version>-win-<arch>.zip`，解压双击即用；
   资源布局 `resources/{kernel,ui,builtin-plugins}` 与壳的查找顺序对齐）+ NSIS 安装包
@@ -513,7 +515,7 @@ interface PinnedItem extends Omit<HistoryItem, 'lastUsed' | 'count'> {
   - 插件自评 `score` 存在时：`final = 0.6 * pluginScore + 0.4 * kernelScore`
 - 固定项恒在最前（按 `order`），不受搜索影响（但高亮命中）
 - 失效项（插件已卸载/命令已不存在）保留展示但置灰，设置里提供"清理失效项"
-- 插件改过 id（改名链模块：v1 `apps/kernel/src/legacy.ts` / M5 `apps/kernel/src/legacy.rs`）时，启动装配期把条目的 `pluginId` 与 key 前缀一次性迁到新 id（同 key 合并）——否则老条目会被置灰判定当成"插件不可用"
+- 插件改过 id（改名链模块：`apps/kernel/src/legacy.rs`）时，启动装配期把条目的 `pluginId` 与 key 前缀一次性迁到新 id（同 key 合并）——否则老条目会被置灰判定当成"插件不可用"
 
 ### 7.6 搜索调度
 
@@ -770,7 +772,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 | 网络隔离 | 插件页只能访问自己的 origin + https（CSP `connect-src`）；`http://127.0.0.1:*` 默认禁止（防探测本机服务） |
 | 宿主 API 滥用 | 端口随机 + 每会话 token + origin/source 三重校验；未授权方法不存在 |
 | 脚本危险面 | `exec` 命令路径**绝不接受调用方入参**（要写系统文件的插件只准认平台默认路径）；提权一律走系统对话框；写前备份、写后回读逐字节校验；提权不可用则落"待生效文件 + 可复制命令"手工路径 |
-| 敏感数据 | 存储默认明文（本地 KV）；插件自行加密（提供 `packages/crypto` 参考实现：PBKDF2 + AES-GCM，口令不落盘） |
+| 敏感数据 | 存储默认明文（本地 KV）；插件自行加密（推荐 PBKDF2 + AES-GCM，口令不落盘；仓库暂无公共加密包，范例见 `plugins/totp/src/core/vault.ts`） |
 | 审计 | 全部调用落 jsonl，敏感字段打码 |
 | 供应链 | 插件 zip 只解压到目标目录、拒绝绝对路径与 `..`、拒符号链接、单文件 ≤ 50MB |
 | 供应链（插件更新） | 更新源是**编译期常量 + 固定 tag 的 Release**，不接受自定义源；下载后强制 sha256 校验（不匹配即删除）；`essential` 出厂插件不参与更新（内核二次拒绝，错误码 `ESSENTIAL_PROTECTED`）；替换是原子的（失败自动回滚），并有「恢复出厂版本」逃生口 |
@@ -823,7 +825,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 ## 13. 里程碑与验收
 
 > 进度快照见 `README.md` 的「当前状态」。本节保留**计划口径**（交付物与验收标准），不随实现改动。
-> M0–M4 的交付物按当时的实现口径书写（TypeScript 内核）；**M5 起为 Rust 实现**（见 ADR-0005）。
+> M0–M4 的交付物按当时的实现口径书写（TypeScript 内核）；**M5 起为 Rust 实现**（见 architecture §1）。
 
 ### M0 — 壳 + 启动台 UI（1–1.5 周）
 **交付**：`apps/shell`（窗口/热键/托盘）、`apps/launcher-ui`（搜索框 + 结果网格 + 键盘导航 + 固定的假数据）、`history.ts` 落盘。
@@ -841,7 +843,7 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 - 禁用/启用插件不留残留（命令消失又出现，历史项置灰）
 
 ### M2 — 脚本运行时 + 第一个官方插件（1–1.5 周）
-**交付**：`services/exec.ts`（worker_threads）+ `plugins/app-launcher`（macOS 扫描 + 启动）。
+**交付**：`services/exec.ts`（worker_threads；M5 起为 `apps/kernel/src/exec.rs`）+ `plugins/app-launcher`（macOS 扫描 + 启动）。
 **验收**：
 - **`hosts`（现 `host-manager`）跑通**（含提权脚本的确认提示）
 - `app-launcher` 能搜到 `/Applications` 下的应用并启动；历史里能出现"最近启动的应用"
@@ -858,8 +860,10 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 **交付**：打包、签名、公证、`tauri-plugin-updater` + minisign、CI（macOS arm64 + x64）、`docs/plugin-spec.md`。
 **验收**：另一台机器下载 `.dmg` 安装 → 首次启动不报安全警告 → 装插件 → 在「关于」页确认后更新到下一版（入口也能从托盘「检查更新…」进更新页）。
 
+> 注：M4 的 `tauri-plugin-updater` / minisign / 公证计划后来由 M9 的自研通道取代（固定 tag + 自签证书 + 整包替换），交付形态见 `docs/release-channels.md`。
+
 ### M5 — Rust 内核（2–3 周，2026-09-17 立项）
-**交付**：`ADR-0005`（内核语言决策）、`packages/plugin-sdk-rs`（Rust 插件 SDK）、`apps/kernel`（bin `launcher-kernel`）、5 个出厂插件的逻辑层 Rust 化、构建与打包链路改造（免 Node）。
+**交付**：`docs/architecture.md` §1（内核语言与协议不变）、`packages/plugin-sdk-rs`（Rust 插件 SDK）、`apps/kernel`（bin `launcher-kernel`）、5 个出厂插件的逻辑层 Rust 化、构建与打包链路改造（免 Node）。
 **验收**：
 - `echo` fixture 在 v1 / v2 宿主上输出逐字段一致（协议一致性测试，作为全程回归门）
 - UI 与插件视图**零改动**（28 个 HTTP 端点 + 12 个 SSE 事件清单不变），搜索 / 启动 / 插件页全部可用
@@ -877,7 +881,8 @@ pnpm build:plugins && pnpm pack:plugins    # 构建全部出厂插件 + 打 zip 
 
 **进度（2026-09-18）**：上述交付物**代码已全部落地**，
 内核 / SDK / 各插件与壳均已通过 Windows 目标的交叉检查（`cargo check --target x86_64-pc-windows-msvc`）；
-`build-windows.yml` 负责真机编译 / 测试 / 打包。**尚未做的**：UWP 应用扫描、文件预览增量、`release.yml`；
+`build-windows.yml` 负责真机编译 / 测试 / 打包。**尚未做的**：UWP 应用扫描、文件预览增量
+（`release.yml` 已落地，四条通道见 `docs/release-channels.md`）；
 `clipboard-history` 已落地（含壳 `clipboard.watch` 与内核新 capability），**待 Windows 实机验收**。
 文件搜索在 Windows 上**优先复用用户已装的 Everything**（按官方 IPC 协议实现，不随包分发任何第三方二进制；
 探不到则回退自建索引，带目录变化增量）。

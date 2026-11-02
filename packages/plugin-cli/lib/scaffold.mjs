@@ -24,8 +24,8 @@ export function checkId(id) {
   if (!ID_RE.test(String(id ?? ''))) {
     return `插件 id 必须是 kebab-case（小写字母 / 数字 / 连字符，3–40 位）：${JSON.stringify(id)}`
   }
-  // `internal-` 是内置特权插件的保留命名（ctx.settings 只注入它，ADR-0003）
-  if (id.startsWith('internal-')) return 'internal- 前缀保留给内置特权插件（ADR-0003），换个名字'
+  // `internal-` 是内置特权插件的保留命名（ctx.settings 只注入它，plugin-spec §3.4）
+  if (id.startsWith('internal-')) return 'internal- 前缀保留给内置特权插件（plugin-spec §3.4），换个名字'
   return null
 }
 

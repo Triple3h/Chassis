@@ -1,5 +1,5 @@
 //! 启动台 UI ↔ 内核的全部 HTTP 接口，以及**壳 → 内核**的通知处理
-//! （v1 `apps/kernel/src/api.ts`；ADR-0001）。
+//! （v1 `apps/kernel/src/api.ts`；architecture §6.1）。
 //!
 //! 响应形状与 v1 逐字段一致：成功是各 handler 自己构造的 `{ ok: true, ... }`，
 //! 失败由这里统一包成 `{ ok: false, error: { code, message } }`（`BAD_ARGS` → 400，其余 500）。
@@ -577,7 +577,7 @@ async fn audit_clear(State(kernel): State<Arc<Kernel>>) -> Response {
 
 // ── 内核热更新（v0.1.0，`GET/POST /api/hot/*`）──────────────────
 //
-// 设计对齐插件热更新的更新语义（plugin-spec §6.4 / ADR-0006）：两阶段 + 原子切换 + 回滚 + 日志。
+// 设计对齐插件热更新的更新语义（plugin-spec §6.4）：两阶段 + 原子切换 + 回滚 + 日志。
 // 内核零能力：spec / 二进制都由外部投递到本地路径（或直接放进请求体），内核不联网。
 
 /// 从请求体取 spec：优先 `body.spec`（内联对象），其次 `body.path` / 默认 `candidate.json`。

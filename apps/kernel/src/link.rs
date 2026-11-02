@@ -1,4 +1,4 @@
-//! 壳 ↔ 内核：stdio + newline-delimited JSON-RPC 2.0（requirements §4.1 / ADR-0001）。
+//! 壳 ↔ 内核：stdio + newline-delimited JSON-RPC 2.0（requirements §4.1 / architecture §6.1）。
 //!
 //! 约定：**协议只走 stdout / stdin，日志一律 stderr**。语义逐条对齐 v1 `jsonrpc.ts`：
 //! - 请求：`{jsonrpc:'2.0', id, method, params?}`；应答：`{jsonrpc:'2.0', id, result}` 或 `{jsonrpc:'2.0', id, error:{code,message}}`

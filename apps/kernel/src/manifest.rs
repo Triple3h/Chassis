@@ -1,6 +1,6 @@
 //! 插件清单与校验（v1 `packages/plugin-manifest` 的 Rust 版本；plugin-spec §3）。
 //!
-//! 两处 M5 差异（ADR-0005 / plugin-spec §11）：
+//! 两处 M5 差异（plugin-spec §11）：
 //! - `apiVersion` 接受 `"1"` 与 `"2"`；`"1"` 的**逻辑层产物（`.mjs`）不再支持**（找不到可执行产物 → `ENTRY_MISSING`）
 //! - 产物查找顺序 = 可执行产物：`<name>` / `<name>.exe` / `workers/<name>` / `workers/<name>.exe`
 

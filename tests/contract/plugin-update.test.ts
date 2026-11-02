@@ -1,5 +1,5 @@
 /**
- * 插件更新契约（M7 / plugin-spec §6.4 / ADR-0006）：
+ * 插件更新契约（M7 / plugin-spec §6.4）：
  *
  * 黑盒形态（真内核二进制 + HTTP + SSE）：
  *   ① `installZip` + `overwrite` 覆盖**非 essential** 出厂插件 → 版本生效、`builtin` 仍为 true、广播 `plugin/reloaded`

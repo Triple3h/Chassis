@@ -1,7 +1,7 @@
 # 内核实现细节与差异记录
 
 > 读者：实现者、评审者 ｜ 需求源：`docs/launcher-requirements.md`（本文件不复制需求，只写"怎么实现"与"哪里不一样"）
-> 最后更新：2026-09-17（M5：内核换成 Rust，见 ADR-0005）
+> 最后更新：2026-11-02｜内核语言与协议见 §1，Windows 更新边界见 §11
 > 约定：**遇到需求没写的行为，先补本文件再写代码。**
 
 ---
@@ -10,36 +10,38 @@
 
 ```
 ┌──────────── 壳（Rust / Tauri 2，apps/shell）────────────┐
-│ main.rs → lib.rs：窗口 · 单实例 · 托盘 · 热键 · 失焦通知   │
+│ main.rs → lib.rs：窗口 · 单实例 · 托盘 · 热键 · 失焦通知│
 │ ipc.rs：stdio + newline JSON-RPC 2.0                    │
-│ sidecar.rs：拉起/监督/重启/回收内核二进制                  │
+│ sidecar.rs：拉起/监督/重启/回收内核二进制               │
 │ primitives/{window,hotkey,tray,notify,clipboard,opener} │
 └───────▲────────────────────────────────────┬────────────┘
         │ JSON-RPC（内核→壳：原语；壳→内核：通知）  │ spawn launcher-kernel
         │                                        ▼
 ┌──────────── 内核（Rust，apps/kernel）────────────────────┐
-│ kernel.rs 装配 → api.rs 路由 → http/server.rs(UiServer)   │
-│ registry · pipeline · plugin/* · search · history · audit │
-│ services/{storage,bridge,host_ui,shell,quicklink,         │
-│           settings,system_stats} + http/plugin_servers.rs │
-└───▲────────────────▲───────────────────────┬────────────┘
+│ kernel.rs 装配 → api.rs 路由 → http/server.rs(UiServer)  │
+│ registry · pipeline · plugin/* · search · history · audit│
+│ services/{storage,bridge,host_ui,shell,quicklink,        │
+│           settings,system_stats} + http/plugin_servers.rs│
+└───▲────────────────▲───────────────────────┬─────────────┘
     │ HTTP + SSE      │ postMessage（经 UI 转发）│ 子进程 + NDJSON
     │                 │                        ▼
 ┌───┴──────────┐  ┌───┴──────────────┐  ┌─────────────────┐
-│ 启动台 UI     │  │ 插件 view 页      │  │ 插件逻辑层命令    │
-│ (uiPort)     │  │ (每插件一端口)      │  │ dist/<name>      │
+│ 启动台 UI    │  │ 插件 view 页     │  │ 插件逻辑层命令  │
+│ (uiPort)     │  │ (每插件一端口)   │  │ dist/<name>     │
 └──────────────┘  └──────────────────┘  └─────────────────┘
 ```
 
 - **壳 ↔ 内核**：`stdio + newline-delimited JSON-RPC 2.0`。第 1 条约定：**协议只走 stdout/stdin，内核所有日志走 stderr**（Rust 侧由 `logging.rs` 的宏固定打到 stderr）。
-- **内核 ↔ UI**：HTTP `/api/*` + SSE `/api/events`（见 ADR-0001）。
+- **内核 ↔ UI**：HTTP `/api/*` + SSE `/api/events`（为什么由内核托管见 §6.1）。
 - **内核 ↔ 插件页**：每插件一个 axum listener，端口 0 由系统分配后读回 ⇒ origin 天然隔离。
-- **内核 ↔ 插件逻辑层**：**独立子进程 + NDJSON over stdio**（ADR-0005 / plugin-spec §4.4），上下文经启动参数注入（`command / args / pluginId / pluginPath / dataPath / dataRoot / mode`）。
+- **内核 ↔ 插件逻辑层**：**独立子进程 + NDJSON over stdio**（plugin-spec §4.4），上下文经启动参数注入（`command / args / pluginId / pluginPath / dataPath / dataRoot / mode`）。
+
+**为什么是 Rust（M5，2026-09-17）**：主因是 **Windows 分发不能要求对方装 Node**，省内存是顺带收益（实测 Node 内核常驻 121MB、裸 Rust 进程 1.7MB）。对外协议字段级不变（M5 时清单：壳 ↔ 内核 21 个原语 + 5 个上报、UI ↔ 内核 28 个 HTTP 端点 + 12 个 SSE 事件、插件页桥三重校验），数据格式无迁移。逻辑层插件改为可执行产物（plugin-spec §4.4），**不做 JS 兼容层** —— 机器上没有 Node 是承诺，不是打折保证。
+被否方案：内嵌 Node（+80–110MB，内存不省）、内嵌 V8（产物 +35MB，每 isolate 再 20–40MB）、QuickJS（Node API 全缺）、Rust dylib（无稳定 ABI，崩溃带崩内核）、WASM（+10–20MB、npm 生态作废，留作未来选项）。
 
 ## 2. 目录 → 模块映射
 
-> v1（TS）→ v2（Rust）的迁移背景见 [`ADR-0005`](decisions/ADR-0005-kernel-language.md)；
-> 下表是当前实现（Rust）落在哪里。
+> 语言与协议的迁移取舍见 §1；下表是当前实现（Rust）落在哪里。
 
 | 需求（§5/§7） | 实现 | 备注 |
 |---|---|---|
@@ -76,7 +78,7 @@
 | `screenshot` | `screenshot` | 属性不存在 |
 | `quicklink` | `quicklink` | 属性不存在 |
 | `clipboard` | `clipboard.read` / `clipboard.write` | 两者都无 → 属性不存在；只有其一 → 另一方法抛 `CAPABILITY_DENIED` |
-| `settings` | 仅 `internal-*` 插件（ADR-0003） | 属性不存在 |
+| `settings` | 仅 `internal-*` 插件（plugin-spec §3.4） | 属性不存在 |
 
 裁剪同时写一条审计（`context.mount`, `ok:false`, `CAPABILITY_DENIED`），所以"拒绝授权"是可追溯的。
 
@@ -93,13 +95,15 @@ UI 输入 → debounce 80ms → POST /api/search
   → token = ++counter；hub.open(token)
   → ① 本地结果：searchable 命令（match 打分）+ pinned 命中 + history 命中（可被 config 关掉）
   → ② 广播 search/query
-       · contributes + script → 常驻搜索 worker（200ms 预算，见 ADR-0002）
+       · contributes + script → 常驻搜索 worker（200ms 预算）
        · contributes + view   → 活跃会话 postMessage
   → ③ 等待（预算 200ms + 30ms 宽限）
   → ④ 合并：按 `${pluginId}:${item.id}` 去重（保留高分）→ 排序
   → ⑤ 稳定排序：集合不变则保持上次顺序（避免列表抖动）
   → 返回 { token, groups:{pinned,best,recent}, pending }
 ```
+
+**为什么贡献型搜索需要常驻载体**：`search.onQuery` 是插件页 API，而索引型插件（应用 / 文件搜索）必须在用户还没打开任何插件时就出结果 —— 此时没有 view 会话可广播。所以 `script + contributes` 由内核维护常驻子进程（空闲 5 分钟回收、并发上限 4），避免每次按键冷启动（约 30–50ms）。它不属于「no-view 命令不得长期驻留」的禁止范围：它不是用户触发的命令实例，而是搜索运行时。
 
 打分（`apps/kernel/src/pinyin.rs`；多音字按**读音变体**展开，见 R1 校准）：
 
@@ -156,6 +160,8 @@ active → degraded（脚本连续失败 3 次）
 | POST | `/api/window/*`、`/api/app/*`、`/api/data/openDir` | 转发壳原语 |
 
 `/api/*` 之外是 UI 静态资源（`--ui-dist`；`--ui-dev` 时 302 到 vite），SPA 兜底回 `index.html`。
+
+**为什么由内核托管**：壳保持零业务 —— 若每条 UI 请求都经壳转发，壳将被迫理解搜索 / 历史 / 插件；HTTP + SSE 让测试可直接驱动（`tests/helpers/harness.ts` 不起壳）；打包只带一个 stub 页。开发态用 `?kernel=` 指定内核、`--ui-dev` 302 到 vite；内核未就绪时显示 stub，崩溃时把 stub 改写成错误面板（不白屏）。不采用：壳托管 + `invoke` 转发（违反零能力，壳重启连带 UI 不可用）、`file://`（iframe 不同源，postMessage 校验与 CSP 更难）、WebSocket（事件单向，SSE 足够）。
 
 ### 6.2 插件 listener（每插件一个端口）
 
@@ -221,7 +227,7 @@ active → degraded（脚本连续失败 3 次）
 | 插件 | 视图层（`view` 命令） | 逻辑层（`no-view` / `script`） |
 |---|---|---|
 | 内置（app-launcher / file-search / web-open / internal-settings） | esbuild，无框架 | Rust crate（源码在插件目录的 `src/`，产物 `dist/<命令名>`） |
-| Vue 插件（totp / host-manager / text-diff / json-tools） | Vite + Vue + Tailwind，共用工作区包 `@launcher/ui`（`packages/ui`：UI 积木 + 前端工具） | Rust crate（同上）；见 `plugins/README.md` |
+| Vue 插件（13 个，如 totp / host-manager / text-diff / json-tools） | Vite + Vue + Tailwind，共用工作区包 `@launcher/ui`（`packages/ui`：UI 积木 + 前端工具） | Rust crate（同上）；见 `plugins/README.md` |
 
 开发态从仓库根加载：内核 `--builtin-plugins` 接受**逗号分隔的多个目录**（默认 `plugins/`），
 壳的开发态回退指向同一处；打包时 `scripts/lib/resources.mjs` 把各插件的 `dist/` 拷进 `builtin-plugins/`。
@@ -234,9 +240,9 @@ active → degraded（脚本连续失败 3 次）
 
 | # | 需求条目 | 实现 | 原因 |
 |---|---|---|---|
-| D1 | §4.1 UI 托管二选一 | 选方案 B（内核托管） | ADR-0001 |
-| D2 | §9.2 贡献型搜索只有 `search.onQuery`（UI 侧） | 增加「常驻搜索源」载体（v1：worker；v2：常驻子进程），逻辑层 SDK 增加 `on_query` | ADR-0002（否则索引型插件无法工作） |
-| D3 | §3.4 设置面板是 internal 插件，但 §8.6 API 表无配置读写 | 新增 `ctx.settings`，仅 `internal-*` 注入 | ADR-0003 |
+| D1 | §4.1 UI 托管二选一 | 选方案 B（内核托管） | 理由见 §6.1 |
+| D2 | §9.2 贡献型搜索只有 `search.onQuery`（UI 侧） | 增加「常驻搜索源」载体（v1：worker；v2：常驻子进程），逻辑层 SDK 增加 `on_query` | 理由见 §4（否则索引型插件无法工作） |
+| D3 | §3.4 设置面板是 internal 插件，但 §8.6 API 表无配置读写 | 新增 `ctx.settings`，仅 `internal-*` 注入 | plugin-spec §3.4 |
 | D4 | §5 写「`plugin-manifest` 用 zod 校验」 | 手写校验器（无运行时依赖） | 错误码要精确映射到 `MANIFEST_INVALID` / `CAPABILITY_UNKNOWN` / `API_VERSION_UNSUPPORTED`，且要产出人话消息；手写比 zod + 映射更直接，也少一个依赖 |
 | D5 | §8.1 目录树是「安装后形态」（`<name>.mjs` 在插件根） | 增加「`<dir>/dist` 即插件根」的识别规则 | 源码工程与产物必须分离；否则出厂插件要么污染源码目录、要么无法扫描 |
 | D6 | §3.3 动作菜单「打开插件所在目录」等固定动作 | 保持不变；另外把 `ActionDecl` 的能力边界写实：`open` 需要 `shell.open`、`copy` 需要 `clipboard.write` | 需求未规定，但不加约束的话"纯前端插件"可以靠结果项打开任意 URL，P5 会被绕过 |
@@ -247,15 +253,15 @@ active → degraded（脚本连续失败 3 次）
 | D11 | §6.3 打包体积/冷启动指标 | 未做基准；自用版（`pnpm app:local`）已实机运行 | 需要真机 `tauri build` 才能量体积；自用不分发，暂不阻塞 |
 | D12 | §8.10 与第三方旧宿主的兼容层 | **不做兼容**（2026-09-16 起）：桥只认原生信封 `__launcher: 1`，清单校验不放过 `apiVersion` / `capabilities` 缺省，旧布局数据迁移一并移除 | 半兼容的代价是长期维护两套语义，还会把"未实现的能力"伪装成"能用"；底座与插件同仓库，没有历史包袱要背 |
 | D13 | §7.5 「拼音匹配」 | 用 `pinyin` crate（内置词典；多音字按读音变体展开，见 §4） | 需求 §12 风险对策明确要求"用成熟库" |
-| D14 | 未规定 plist 读取方式 | v2 由 `plugins/app-launcher/rust` 用 `plist` crate 读（binary + XML 只读）；v1 是自研 TS 解析器 | v1 的 `simple-plist` 内部是运行时 `require`，打不进自包含产物；v2 换 Rust 后由 crate 承担 |
+| D14 | 未规定 plist 读取方式 | v2 由 `plugins/app-launcher/src` 用 `plist` crate 读（binary + XML 只读）；v1 是自研 TS 解析器 | v1 的 `simple-plist` 内部是运行时 `require`，打不进自包含产物；v2 换 Rust 后由 crate 承担 |
 | D15 | §7.6「插件在 200ms 内回结果」 | 插件激活后**延迟 800ms 预热**贡献型搜索 worker | 否则用户第一次输入必然吃一次 worker 冷启动 + 索引加载而超时（体验上就是"第一次搜不到"） |
-| D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 4 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
-| D17 | §3.1 只规定「隐藏」的触发条件，未规定显隐过程 | 窗口显隐拆成**广播 + 落地**两步：内核先 `emit('shell/visibility')` 让 UI 播动画，**等 UI 回执「离场最后一帧画出来了」再落地**（`HIDE_FALLBACK_MS`=500ms 兜底；壳侧另有 800ms 兜底防内核失联）；显隐的**裁决权仍在壳**（`window/toggled` 方向不变） | ADR-0004。透明无边框窗口的弹出感只能在 CSS 里做，而 UI 得先知道"要隐藏了"才播得了离场；固定时长会被不可控的广播延迟砍在淡出中途（半透明的一帧留在窗口里 = 下次唤出闪一下） |
+| D16 | §8「出厂插件」只描述了 `plugins/` | 全部出厂插件（内置 4 个 + Vue 13 个，共 17 个）都住在 `plugins/`，同出厂流程、工具链各自保留；`--builtin-plugins` 仍支持多目录 | 2026-09-16 收敛：取消 `presets/` 层 —— 插件从「两类来源」变成「一个目录、两套工具链」。旧数据目录由内核一次性接手（`LEGACY_PLUGIN_IDS`） |
+| D17 | §3.1 只规定「隐藏」的触发条件，未规定显隐过程 | 窗口显隐拆成**广播 + 落地**两步：内核先 `emit('shell/visibility')` 让 UI 播动画，**等 UI 回执「离场最后一帧画出来了」再落地**（`HIDE_FALLBACK_MS`=500ms 兜底；壳侧另有 800ms 兜底防内核失联）；显隐的**裁决权仍在壳**（`window/toggled` 方向不变） | 见 [`motion.md`](motion.md)。透明无边框窗口的弹出感只能在 CSS 里做，而 UI 得先知道"要隐藏了"才播得了离场；固定时长会被不可控的广播延迟砍在淡出中途（半透明的一帧留在窗口里 = 下次唤出闪一下） |
 | D18 | §6.1「壳只提供系统原语」 | **已下沉（2026-09-19）**：`screenshot.start` 由壳执行（`apps/shell/src/primitives/screenshot.rs`：macOS `screencapture -i -c` / Windows `explorer ms-screenclip:`），内核只做能力校验 + 审计 + 转发 —— 内核里**再无**任何直接执行系统命令的地方 | 原实现是内核直接 exec（唯一一处越界的系统调用，本表曾如实记录「先记录现状，等壳原语补全时一起下沉」）：交互式截图等用户操作可能几十秒，把「等用户」留在零能力层既越界、也说明该调用本就归属壳。下沉时顺带给壳的 `Link` 加了**延迟应答**（`ipc::Outcome::Later`）—— 读循环是单线程串行的，内联等截图会把壳的其它请求（热键唤出、窗口控制…）全部堵死；内核侧超时按 `SCREENSHOT_TIMEOUT`（300s）给足 |
 | D19 | §3.1「选中文本带入」（2026-09-17 新增） | 读取由**壳**完成（`selection.read`，macOS Accessibility API），时机是 `window.show` 内部、**真正上屏之前**；结果随 `window.show` 返回值 / `window/toggled` 通知回到内核，由内核决定"填不填"（搜索框非空就不覆盖，见 `Kernel.applySelection`） | 窗口一显示，前台 App 就是自己，`AXFocusedUIElement` 拿到的选区随之消失 —— 这件事只有壳在 show 的那一刻做得到。策略（何时用、怎么用）留在内核，壳只提供"此刻前台选中了什么"这个事实。**2026-09-18 补充**：Chromium 系 App 默认不构建 AX 树（对外表现＝焦点元素拿得到、`AXSelectedText` 永远读不到），壳读不到时会先为前台 App 开 `AXEnhancedUserInterface` / `AXManualAccessibility` 再短重试（约 90ms，每个 App 只付一次），另有后台线程按前台 App 预热 ⇒ 原生 App（企微等）与 Chromium 系（Chrome / Electron 编辑器）的差别被抹平 |
 | D20 | §6.1「壳只提供系统原语，零业务逻辑」 | **应用（壳）自更新归壳**（2026-09-19）：检查 / 下载 / 解压由内核侧编排（复用 `internal-store` 的 `check-app` / `download-app`，同一套代理降级 + 白名单 + sha256），**候选包自检 / 台账 / 替换 / 重启在壳**（`apps/shell/src/update.rs` + 脱离壳进程树的 helper） | 壳就是应用本体，「换自己」只能是它的职责：它要在内核起不来时也能更新自己，而替换动作必须发生在壳**完全退出之后**（内核随后被停掉，整个应用一起重启）。这不是业务逻辑而是自身运维，与「零能力」不冲突；触发时机由内核守护掌握（`spawn_app_update_check` 只检查并提示：托盘常驻「检查更新…」点击打开更新页，「关于」页更新卡片；`config.autoUpdateCheck` 可关；**下载 / 替换 / 重启由用户确认后触发**），机制细节见 `docs/shell-hot-update.md` |
-| D20 | §3.1「窗口几何记忆」（2026-09-17 新增「尺寸记忆」；2026-09-20 扩展为位置 + 尺寸、按窗口态分别记） | 记忆值存**内核 config**：`windowBounds.host` / `.plugin:<id>`（各 `{x?,y?,width?,height?}`，位置 = 屏幕物理坐标、尺寸 = 逻辑像素；`plugin` 键 = 所有插件页的兜底，旧数据沿用）；UI 负责"什么时候读/写"（关闭前 / 切换窗口态时用 `window.bounds` 读回、缩放后 debounce 400ms 落盘；唤出 / 进插件页用 `window.setBounds` 应用），内核只做 `patchConfig` 清洗 / 钳制，并在启动时把宿主几何经 `window.restoreBounds` 推给壳（跨重启恢复） | 一开始写在 UI 侧且只活在本次会话（离场复位）；用户随后要求"下次打开仍是这个大小" ⇒ **必须落盘**，而 UI 的 localStorage 随内核端口变化（每次启动都变）不可用。放 config 还顺带让几何跟着 `config/changed` 广播走已有的同步链路。**位置的两条硬约束**：① 唤出时由壳裁决（窗口中心仍在鼠标所在屏 ⇒ 保持，否则居中），所以 UI 唤出时只应用尺寸、不应用位置 —— 否则跨屏唤出会被拉回旧位置；② 跨重启恢复走壳的 `window.restoreBounds`，且壳**只在窗口隐藏时应用** —— 内核热更新后的重新推送可能撞上用户正开着的插件页，不能挪走它 |
-| D21 | §3.1「状态显示」（2026-09-17 新增） | 状态条显示的是**启动台自身**的占用：内核报自己（`sysinfo` 读本进程 RSS + 累计 CPU），壳用新原语 `app.usage` 报另一半（`task_info(MACH_TASK_BASIC_INFO)` 的 resident_size + user/system time），内核合并并差分出"占整机百分比"；UI 每 3s 拉 `/api/system/stats`；**不进插件 API**（底座自用，与 `app.info` 同级） | 用户要判断的是"这个启动台轻不轻"，所以要的是两个进程之和，不是整机负载 —— 整机数字（`sysinfo`）只留作 tooltip 里的对照。跨进程的"另一半"只有壳给得了（内核自己的 `os` 看不到壳的 RSS） |
+| D21 | §3.1「窗口几何记忆」（2026-09-17 新增「尺寸记忆」；2026-09-20 扩展为位置 + 尺寸、按窗口态分别记） | 记忆值存**内核 config**：`windowBounds.host` / `.plugin:<id>`（各 `{x?,y?,width?,height?}`，位置 = 屏幕物理坐标、尺寸 = 逻辑像素；`plugin` 键 = 所有插件页的兜底，旧数据沿用）；UI 负责"什么时候读/写"（关闭前 / 切换窗口态时用 `window.bounds` 读回、缩放后 debounce 400ms 落盘；唤出 / 进插件页用 `window.setBounds` 应用），内核只做 `patchConfig` 清洗 / 钳制，并在启动时把宿主几何经 `window.restoreBounds` 推给壳（跨重启恢复） | 一开始写在 UI 侧且只活在本次会话（离场复位）；用户随后要求"下次打开仍是这个大小" ⇒ **必须落盘**，而 UI 的 localStorage 随内核端口变化（每次启动都变）不可用。放 config 还顺带让几何跟着 `config/changed` 广播走已有的同步链路。**位置的两条硬约束**：① 唤出时由壳裁决（窗口中心仍在鼠标所在屏 ⇒ 保持，否则居中），所以 UI 唤出时只应用尺寸、不应用位置 —— 否则跨屏唤出会被拉回旧位置；② 跨重启恢复走壳的 `window.restoreBounds`，且壳**只在窗口隐藏时应用** —— 内核热更新后的重新推送可能撞上用户正开着的插件页，不能挪走它 |
+| D22 | §3.1「状态显示」（2026-09-17 新增） | 状态条显示的是**启动台自身**的占用：内核报自己（`sysinfo` 读本进程 RSS + 累计 CPU），壳用新原语 `app.usage` 报另一半（`task_info(MACH_TASK_BASIC_INFO)` 的 resident_size + user/system time），内核合并并差分出"占整机百分比"；UI 每 3s 拉 `/api/system/stats`；**不进插件 API**（底座自用，与 `app.info` 同级） | 用户要判断的是"这个启动台轻不轻"，所以要的是两个进程之和，不是整机负载 —— 整机数字（`sysinfo`）只留作 tooltip 里的对照。跨进程的"另一半"只有壳给得了（内核自己的 `os` 看不到壳的 RSS） |
 
 ---
 
@@ -279,13 +285,13 @@ pnpm typecheck           # 全部工作区包（含 packages/ui 与各插件，v
 pnpm test                # TS 侧全部测试：契约 / 验收 + 各插件视图层 core 用例
 pnpm build               # kernel + ui + 全部出厂插件
 pnpm spec-check          # 出厂插件规范自检（清单 / N1 / N2 / N3 / 产物 / 远程资源）
-pnpm app:local           # 打包自用 .app（公证 / updater / CI 未接）
+pnpm app:local           # 本地打包自用 .app（公证未做；自更新走 app-release.yml）
 ```
 
 出厂插件在真底座上另有两条端到端冒烟：
 
 ```bash
-node scripts/smoke-real.mjs          # 真内核 + 8 个出厂插件
+node scripts/smoke-real.mjs          # 真内核 + 全部出厂插件（未构建的自动跳过）
 node scripts/smoke-first-batch.mjs   # 四个 Vue 插件端到端（HTTP 驱动，不起壳）
 ```
 

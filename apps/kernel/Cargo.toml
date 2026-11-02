@@ -43,7 +43,7 @@ tokio = { version = "1", features = [
     "net",
 ] }
 sysinfo = { version = "0.39.6", default-features = false, features = ["system", "disk"] }
-# UI 服务（ADR-0001：内核托管 UI 静态资源，UI 走 HTTP + SSE 与内核通信）
+# UI 服务（architecture §6.1：内核托管 UI 静态资源，UI 走 HTTP + SSE 与内核通信）
 axum = "0.8"
 # SSE 扇出：broadcast → BroadcastStream（axum 的 Sse 需要）
 tokio-stream = { version = "0.1", features = ["sync"] }

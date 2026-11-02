@@ -174,7 +174,7 @@ impl Primitives {
     /// 应用（壳）自更新：把候选安装目录交给壳（macOS `.app` / Windows 绿色版目录）—— 校验、备份、替换、重启全在壳侧
     /// （见 `apps/shell/src/update.rs`：helper 在壳完全退出后才动手）。
     ///
-    /// `plugin_id` 只可能是 internal 插件：注入闸门（ADR-0003）让 `ctx.settings` 只对
+    /// `plugin_id` 只可能是 internal 插件：注入闸门（plugin-spec §3.4）让 `ctx.settings` 只对
     /// `internal-` 插件开放，而这条动作只能由视图层经 `pluginAction` 发起。
     pub async fn shell_apply_update(&self, plugin_id: &str, app_path: &str) -> Result<Value> {
         audited(&self.audit, plugin_id, "ui", "ctx.settings.applyShellUpdate", "shell.update", Some(json!({ "appPath": app_path })), async {

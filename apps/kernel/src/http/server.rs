@@ -1,4 +1,4 @@
-//! 启动台 UI 的宿主服务（v1 `http/server.ts`；ADR-0001：内核托管 UI 静态资源，
+//! 启动台 UI 的宿主服务（v1 `http/server.ts`；architecture §6.1：内核托管 UI 静态资源，
 //! UI 走 HTTP + SSE 与内核通信）。
 //!
 //! `infra_router` 产出**可 merge 进任意 Router 的片段**（SSE + 静态 + 兜底），

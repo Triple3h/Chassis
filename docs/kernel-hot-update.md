@@ -134,9 +134,7 @@ curl -X POST http://127.0.0.1:<kernelPort>/api/hot/rollback -d '{}' -H 'Content-
 内核与插件**各自独立**监控自己的 Release 通道（2026-09-18 拍板）：App 用 `v*`、插件用 `plugins-latest`、
 内核用 **`kernel-latest`** —— 三个 tag 互不干扰，客户端走 `releases/download/<tag>/...` 直链（无需 GitHub API、无 token）。
 
-> 发布收尾会**只保留索引指向的资产**：`kernel-release.yml` 在 `action-gh-release` 之后跑
-> `scripts/prune-release-assets.mjs`，把同一个 Release 里索引不再指向的旧 `.zip` 删掉
-> （zip 名带版本号、覆盖上传只认同名 ⇒ 不清理会积累孤儿；单 Release 上限 1000 个资产，攒满 = 发布中断）。
+> 发布收尾的资产清理与镜像规则（只保留索引指向的资产、Gitee 同步）见 [`release-channels.md`](release-channels.md) §4。
 
 ```
 kernel-release.yml ──macOS + Windows 原生构建──▶ 固定 tag kernel-latest
@@ -170,9 +168,8 @@ gh workflow run kernel-release.yml --ref main -f notes="修复…" -f min_hot_ve
 git tag kernel/0.2.0 && git push origin kernel/0.2.0
 ```
 
-- workflow 取的是**默认分支的代码**：先合并 main 再触发（main 推送不触发任何工作流，不存在「一合并就自动发版」）。
-- 内核通道只有一份产物 ⇒ 没有插件侧那个「索引要合并」的问题（插件侧的坑见 §7 之外的 `docs/plugin-spec.md` 附录 C）。
-- 更新源是编译期常量 ⇒ **发布即对所有装机客户端可见，没有灰度**：真要灰度得靠 `minHotVersion` 门槛或另开 tag 通道。
+- 触发口径、可见性与门槛（`workflow_dispatch` / 默认分支 / `minHotVersion` / 无灰度）见 [`release-channels.md`](release-channels.md) §1–§3。
+- 内核通道只有一份产物 ⇒ 没有插件侧那个「索引要合并」的问题（插件侧的坑见 `docs/plugin-spec.md` 附录 C）。
 - App 升级会把外置内核重投成包内版本（台账 `sourceAppVersion`）：内核热更新是「两次 App 发版之间的领先」，不是替代。
 
 ## 8. 壳侧配合（已实现）

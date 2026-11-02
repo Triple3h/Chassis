@@ -1,6 +1,6 @@
 //! `launcher-kernel` —— Chassis 内核（Rust，M5 阶段 A1 进行中）。
 //!
-//! 对外契约（三条协议字段级不变，见 ADR-0005）：
+//! 对外契约（三条协议字段级不变，见 docs/architecture.md §1）：
 //! 壳 ↔ 内核 stdio JSON-RPC（`link.rs`）/ UI ↔ 内核 HTTP + SSE（`http/*`，A1 待实现）/
 //! 插件 ↔ 宿主 postMessage（`services/bridge.rs`，A1 待实现）。
 

@@ -2,7 +2,7 @@
  * 测试装置 = **真内核二进制**（`target/debug/launcher-kernel`）+ 真协议。
  *
  * M5 之前这里是 `new Kernel(...)` 直接跑 TS 内核（进程内、白盒）。v1 内核退役后
- * （ADR-0005 / m5 计划 §A3.1），装置改为 **spawn 真二进制**：断言全部走对外路径 ——
+ * （plugin-spec §4.4 / m5 计划 §A3.1），装置改为 **spawn 真二进制**：断言全部走对外路径 ——
  * HTTP `/api/*` + SSE `/api/events`（UI 那条），stdio NDJSON（壳那条）。
  *
  * 换来的东西：**测的就是发货的那颗内核**。代价是断言不能再伸进内核内部（

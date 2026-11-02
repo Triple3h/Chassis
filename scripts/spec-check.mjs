@@ -298,7 +298,7 @@ function checkArtifacts(pluginDir, pkg, report) {
       if (!isBinary) report.fail('N1', `${rel(found)} 不是可执行文件（二进制魔数校验失败）`)
       continue
     }
-    // v1 的逻辑层（自包含 `.mjs` / Node worker）**不再支持**（plugin-spec §4.4 / ADR-0005）：
+    // v1 的逻辑层（自包含 `.mjs` / Node worker）**不再支持**（plugin-spec §4.4 / §11）：
     // 这里直接判失败，而不是去校验它 —— 「明确不支持」好过「半支持」。
     report.fail(
       'N1',

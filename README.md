@@ -44,7 +44,7 @@
 └ 插件                   view = iframe 页面（每插件独立端口 ⇒ 独立 origin）；no-view / script = 独立子进程
 ```
 
-四条通信链路、三种命令形态（`view` / `no-view` / `script`）与模块落位见 [`docs/architecture.md`](docs/architecture.md)；设计决策见 [`docs/decisions/`](docs/decisions)（ADR-0001~0006）。
+四条通信链路、三种命令形态（`view` / `no-view` / `script`）与模块落位见 [`docs/architecture.md`](docs/architecture.md)；设计取舍见该文 §1/§3/§4/§6.1 与 [`docs/motion.md`](docs/motion.md)。
 
 ## 安装与构建
 
@@ -131,20 +131,21 @@ packages/
   plugin-manifest/  清单类型 + 校验 + 契约类型（内核 / UI / SDK 共用）
   plugin-api/       @launcher/api —— 插件页 SDK
   plugin-sdk-rs/    launcher-plugin-sdk —— 逻辑层 Rust SDK
+  plugin-cli/       pnpm create:plugin 脚手架（清单 / Vite / Cargo / bin 一次生成）
   ui/               @launcher/ui —— 插件 UI 套件（设计令牌 + 组件），构建期打进插件产物
 plugins/            17 个出厂插件（视图层 esbuild 或 Vite + Vue，逻辑层是 Rust 可执行产物）→ plugins/README.md
 tests/              fixtures/echo-plugin + unit / contract / smoke（harness 直接拉起真内核二进制）
 scripts/            构建 / 测试 / 打包 / 自检 / 开发脚本（lib/ 为构建期工具）
-docs/               需求、规范、架构、手册、ADR、第三方许可
+docs/               需求、规范、架构、手册、动效、发布通道、第三方许可
 ```
 
 模块级映射与实现细节见 [`docs/architecture.md`](docs/architecture.md) §2；更细的仓库指南（结构与命令、风格、提交规范）见 [`AGENTS.md`](AGENTS.md)。
 
 ## 文档
 
-**用 / 装**：[`permissions.md`](docs/permissions.md)（签名与系统权限）｜ [`kernel-hot-update.md`](docs/kernel-hot-update.md)（内核更新）
+**用 / 装**：[`permissions.md`](docs/permissions.md)（签名与系统权限）｜ [`kernel-hot-update.md`](docs/kernel-hot-update.md)（内核更新）｜ [`release-channels.md`](docs/release-channels.md)（四条发布通道、版本与发版）
 
-**写插件**：[`plugin-spec.md`](docs/plugin-spec.md)（对外契约）｜ [`plugin-dev-guide.md`](docs/plugin-dev-guide.md) ｜ [`plugins/README.md`](plugins/README.md)
+**写插件**：[`plugin-spec.md`](docs/plugin-spec.md)（对外契约）｜ [`plugin-dev-guide.md`](docs/plugin-dev-guide.md) ｜ [`motion.md`](docs/motion.md)（动效令牌）｜ [`plugins/README.md`](plugins/README.md)
 
 **改底座**：
 
@@ -154,7 +155,7 @@ docs/               需求、规范、架构、手册、ADR、第三方许可
 | [`docs/architecture.md`](docs/architecture.md) | 内核实现细节 + 与需求的差异清单 + 已知边界 + 测试与验收 + **Windows 热更新的边界与不变量（§11）** |
 | [`AGENTS.md`](AGENTS.md) | 仓库指南（给 AI 与新贡献者）：结构、命令、风格、提交规范 |
 
-**历史与合规**：[`docs/decisions/`](docs/decisions)（ADR-0001~0006）｜ [`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) ｜ [`LICENSE`](LICENSE)
+**合规**：[`docs/THIRD-PARTY.md`](docs/THIRD-PARTY.md) ｜ [`LICENSE`](LICENSE)
 
 ## 当前状态
 
@@ -165,7 +166,7 @@ macOS 上自用可用：热键唤出、搜索、应用启动、文件搜索、�
 | macOS 自用版（`pnpm app:local` → `dist-app/Chassis.app`） | ✅ 实机在用 |
 | Rust 内核 + Rust 逻辑层插件（apiVersion 2，免 Node） | ✅ |
 | 视图层插件（Vue + iframe，独立 origin） | ✅ |
-| 插件 / 内核远程更新（`plugins-latest` / `kernel-latest`） | ✅ 通道已发布 |
+| 插件 / 内核 / 应用自更新（`plugins-latest` / `kernel-latest` / `app-latest`） | ✅ 通道已发布 |
 | Windows 10/11（`pnpm app:win` → 绿色版 zip；CI 原生构建） | 🚧 代码就位，待实机验收（缺口见下） |
 
 质量门（仓库内全绿）：`cargo test --workspace && pnpm typecheck && pnpm test && pnpm build && pnpm spec-check`，另加真内核冒烟 `pnpm smoke:real`。
@@ -177,7 +178,7 @@ macOS 上自用可用：热键唤出、搜索、应用启动、文件搜索、�
 | 项 | 说明 |
 |---|---|
 | Windows 10/11 收尾 | 实机验收（托盘 / 透明窗口观感 / 通知 / 拖动缩放）、UWP 应用扫描、NSIS 安装包 |
-| 分发链路 | 代码签名 / 公证、Windows 自动更新（安装器）、dmg 打包 |
+| 分发链路 | 公证、Windows 安装器（NSIS）、dmg 打包 |
 | 更新收尾 | Windows 实机更新正在使用的插件（rename 重试）、更新页自动检查与商店页 |
 | 测试补齐 | Playwright E2E、zip 安装的自动化用例、万条历史性能基准 |
 
@@ -200,7 +201,7 @@ pnpm shell:dev    # 跑真壳（需要 Rust 工具链）
 提交前必须通过质量门（命令见「当前状态」）；四条关键约定：
 
 1. **底座零能力**：提交前自查 `apps/kernel` 的 diff 里有没有出现能力词（应用、文件、网址…）。出现即说明有东西该做成插件。
-2. **规范先行**：需求 / 规范没写的行为，先改 `docs/`（或提 ADR）再写代码；槽位、字段、章节有变动必须同步文档。
+2. **规范先行**：需求 / 规范没写的行为，先把决定写进对应文档（需求 / 规范 / 架构 §8）再写代码；槽位、字段、章节有变动必须同步文档。
 3. **跨进程的同一件事只有一个裁决者**：窗口显隐只由壳决定、内核只广播状态；两边都做 = 一次热键 toggle 两遍。
 4. **改完必跑**：质量门命令 + 起**打包产物**手动点一遍 —— 生产资源路径与 dev server 不同，只测 dev 会漏白屏。
 

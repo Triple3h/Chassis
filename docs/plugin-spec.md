@@ -1,6 +1,6 @@
 # 启动台插件接入规范 v2
 
-> 状态：v2（2026-09-17 起：逻辑层产物 = 可执行文件、宿主 spawn 子进程 + NDJSON；视图层规范与 v1 相同）｜ 日期：2026-09-14，最后更新：2026-09-17 ｜ 配套：`docs/launcher-requirements.md`（底座需求）
+> 状态：v2（2026-09-17 起：逻辑层产物 = 可执行文件、宿主 spawn 子进程 + NDJSON；视图层规范与 v1 相同）｜ 日期：2026-09-14，最后更新：2026-11-02 ｜ 配套：`docs/launcher-requirements.md`（底座需求）
 > 读者：插件作者（含我们自己）、内核实现者、评审者
 > 本文是**对外契约**。内核实现必须能逐条对应到 §14 的校验矩阵；本文没写的字段与行为，插件不得依赖。
 
@@ -175,10 +175,9 @@ interface SettingDecl {
 声明只描述「有哪些设置、长什么样」；**用户改过的值不写清单**（插件产物是构建产物，重装 / 更新即丢）——
 内核统一存 `<dataRoot>/plugin-settings.json`（与别名的覆盖层同款）。**生效值 = 用户值 ?? `default`**。
 
-- **插件侧怎么读**：script / no-view 用 `ctx.settings`（v2：Rust SDK；v1：`@launcher/api-node` 的 `ctx().settings`）：
+- **插件侧怎么读**：script / no-view 用 `ctx.settings`（Rust SDK）：
 
   ```rust
-  // v2（Rust SDK）；v1 写法：const { settings } = ctx()
   let engine = ctx.settings_str("engine").unwrap_or("google");
   ```
 
@@ -189,6 +188,8 @@ interface SettingDecl {
   改过的项提供「恢复默认」（删掉用户值、回落清单值）。
 - **卸载即清**：卸载插件时其设置一并删除（重装不背旧值）；清单里删掉的键、类型对不上的残留值会被过滤。
 - 声明 `settings` **不需要**任何 capability（不是权限）；没声明的插件在设置页不出现「插件设置」区块。
+
+**管理面特权（`ctx.settings`）**：只有 `internal-` 前缀能拿到（内核装配期注入），且**不需要**在 `capabilities` 里声明 —— 管理面不属于插件能力清单，也不出现在安装权限提示里。服务内部会再校验前缀，桥侧对非 internal 调用直接 `FORBIDDEN`（内核配置被改坏也不越权）。审计豁免只跟 `essential` 身份走（底座基础能力），**不**由管理面特权产生。普通插件拿不到任何「读写宿主配置 / 装卸其它插件」的通用入口。
 
 ### 3.5 平台声明与过滤（`platforms` / `arch`）
 
@@ -343,7 +344,7 @@ interface SettingDecl {
 launcher-plugin-<name> --mode run|search [--launcher-context <base64url JSON>]
 ```
 
-`--launcher-context` 解码后的字段（与 v1 `workerData` 一一对应）：
+`--launcher-context` 解码后的字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -364,13 +365,13 @@ launcher-plugin-<name> --mode run|search [--launcher-context <base64url JSON>]
 
 插件 → 宿主（stdout，每行一个 JSON）：
 
-| type | 字段 | 语义 | v1 对应 |
-|---|---|---|---|
-| `result` | `data` | 递交结果（可多次） | `postMessage({type:'result'})` |
-| `done` | — | 本次执行结束（`run` 的唯一结束信号） | `done()` |
-| `log` | `level`, `message` | 日志：`debug` / `info` / `warn` / `error` | `log()` |
-| `progress` | `data` | 进度（宿主记 debug 日志） | `progress()` |
-| `rpc` | `id`, `method`, `params` | 调用宿主（`storage` 等） | RPC 消息 |
+| type | 字段 | 语义 |
+|---|---|---|
+| `result` | `data` | 递交结果（可多次） |
+| `done` | — | 本次执行结束（`run` 的唯一结束信号） |
+| `log` | `level`, `message` | 日志：`debug` / `info` / `warn` / `error` |
+| `progress` | `data` | 进度（宿主记 debug 日志） |
+| `rpc` | `id`, `method`, `params` | 调用宿主（`storage` 等） |
 
 宿主 → 插件（stdin）：
 
@@ -380,9 +381,9 @@ launcher-plugin-<name> --mode run|search [--launcher-context <base64url JSON>]
 | `rpc-result` | `id`, `ok`, `data?`, `error?` | RPC 应答 |
 | `shutdown` | — | 宿主要求退出（插件应尽快 exit） |
 
-**约定**：stdout 只能出现协议行（`log` 走协议，不要直接 print）；野 stdout 由宿主逐行尝试解析、失败转入日志（宽容处理，与 v1 `pipeOutput` 语义一致）；stderr 一律转发为 `warn` 日志。
+**约定**：stdout 只能出现协议行（`log` 走协议，不要直接 print）；野 stdout 由宿主逐行尝试解析、失败转入日志；stderr 一律转发为 `warn` 日志。
 
-**SDK API（Rust，与 v1 逐条对应）**
+**SDK API（Rust）**
 
 ```rust
 fn main() {
@@ -392,24 +393,14 @@ fn main() {
                 let args = ctx.args::<MyArgs>()?;
                 ctx.log("开始", json!({ "foo": 1 }), Level::Info);
                 ctx.progress(0.4, json!({ "step": "halfway" }));
-                ctx.done(json!({ "ok": true }))?;                        // = v1 done(x)
+                ctx.done(json!({ "ok": true }))?;
             }
-            Mode::Search => ctx.on_query(|query| search(&ctx, query)),    // = v1 onQuery
+            Mode::Search => ctx.on_query(|query| search(&ctx, query)),
         }
         Ok(())
     });
 }
 ```
-
-| v2（`launcher-plugin-sdk`） | v1（`@launcher/api-node`） | 说明 |
-|---|---|---|
-| `ctx.args` / `ctx.settings` / `ctx.data_path` / `ctx.plugin_id` / `ctx.mode` … | `ctx()` | 字段一一对应 |
-| `ctx.done(x)` | `done(x)` | 写 `result` + `done` |
-| `ctx.fail(err)` | `fail(err)` | 写 `{result, data:{__error}}` + `done`（宿主沿用 `isFailurePayload` 判定） |
-| `ctx.log(msg, data, level)` / `ctx.progress(p, data)` | `log` / `progress` | |
-| `ctx.on_query(cb)` | `onQuery(cb)` | 贡献型常驻循环（§9.2） |
-| `ctx.storage.*` | `storage.*` | 走 `rpc` 往返，语义不变 |
-| panic hook → `fail`（SDK 内建） | `onError()`（需显式调用） | |
 
 **网络与代理**
 
@@ -430,7 +421,7 @@ fn main() {
 | 崩溃 | 非零退出 → 失败计数 +1；连续 3 次 → 该命令 `degraded`（搜索结果静默置空，UI 不报错） |
 | 孤儿 | 宿主退出时关闭所有子进程 stdin 并 kill；插件应处理 stdin EOF 自行退出（SDK 内建） |
 | 输出过大 | 单行 > 1MB 截断并记 `warn`（防 OOM） |
-| 权限 | 子进程权限 = 当前用户权限（与 v1 相同；不提供额外沙箱） |
+| 权限 | 子进程权限 = 当前用户权限（不提供额外沙箱） |
 
 ---
 
@@ -549,6 +540,8 @@ active → crashed（页面崩溃 / 脚本连续失败）→ 可重试
 - 更新只替换**安装目录**；插件设置 / 别名覆盖 / 历史 / 固定项都按 id 寻址，天然保留（N1 / N2 的直接推论）。
 - 出厂插件不可卸载，等价动作是管理动作 `revertToBuiltin`（删除覆盖 + 回到 App 自带的那份）。
 
+**为什么这样分工**：内核零网络 ⇒ 拉索引 / 版本比对 / 下载只能在插件侧；插件目录归内核管 ⇒ 覆盖规则 / 原子替换 / 备份 / 回滚只能由内核裁决。**安装必须由 view 发起**（`pluginAction('installZip')`）：更新 `internal-store` 自己时，逻辑层命令会在 `disable()` 时被杀掉、收不到结果；view 跑在宿主 WebView，不受影响。**替换绝不走 uninstall 路径**：那会清掉 `plugin-overrides.json` / `plugin-settings.json`，升级必须保留用户设置与别名；备份只留最近 1 份，出厂版本不备份（包里本来就有一份，`revertToBuiltin` 就是回到它）。
+
 **内核更新（`applyKernelUpdate`，2026-09-18 起）**：内核自身的更新与插件同构 —— 下载在插件、应用由内核裁决：
 
 | 环节 | 规格 |
@@ -572,10 +565,9 @@ active → crashed（页面崩溃 / 脚本连续失败）→ 可重试
 | 平台 | **macOS 与 Windows 都支持**：macOS = 候选 `X.app`、Windows = 绿色版目录（`Chassis.exe` + `resources/`），替换都由独立 helper 在进程完全退出后执行（`swap.sh` / `swap.ps1`）；形态与校验口径见 `docs/shell-hot-update.md` §1 |
 | 版本门槛 | 索引带 `minShellHotVersion`：壳自更新机制低于它 ⇒ 界面提示但不给「更新」按钮 |
 
-**资产保留策略（三条固定 tag 通道共同）**：发布收尾**只保留索引指向的最新资产** —— CI 在
-`action-gh-release` 之后跑 `scripts/prune-release-assets.mjs`，删掉同一个 Release 里索引不再指向的 `.zip`
-（zip 文件名带版本号、覆盖上传只认同名 ⇒ 旧包会变成孤儿；单 Release 上限 1000 个资产，攒满后发布会中断）。
-客户端下载 URL 全部来自索引，索引里没有的 zip 没有合法消费方，删除不影响已安装客户端。
+**资产保留策略（三条固定 tag 通道共同）**：发布收尾只保留索引指向的最新资产（`scripts/prune-release-assets.mjs`）——
+zip 文件名带版本号，不清理会积累孤儿；单 Release 上限 1000 个资产，攒满后发布会中断。
+客户端下载 URL 全部来自索引，删掉旧包不影响已安装客户端。完整规则见 [`release-channels.md`](release-channels.md) §4。
 
 ---
 
@@ -776,7 +768,7 @@ type ActionDecl =
 - **应当**引 `@launcher/ui`（工作区包 `packages/ui`：设计令牌 `theme.css` + `AppShell` / `UiIcon` / `UiDialog` + `virtual` / `clipboard` / `keys` / `theme` / `toast`），保证与启动台一致
 - 深浅色**必须**都可用；不要在白色背景上写死深色文本
 - 字号：正文 13px / 次要 12px；圆角与间距用令牌变量
-- 过渡时长与缓动**应当**用 `--launcher-motion-*` / `--launcher-ease-*` 令牌（ADR-0004），不要写死数值；离场时长**应当**短于进场
+- 过渡时长与缓动**应当**用 `--launcher-motion-*` / `--launcher-ease-*` 令牌（取值与规则见 [`motion.md`](motion.md)），不要写死数值；离场时长**应当**短于进场
 - 滚动条**不要**自己写样式：引了 `theme.css` 就已经是「轨道隐形 + 6px 药丸滑块、轨道颜色只由前景色推导」的统一款式（宿主与全部插件页同一套）。
   不引 `theme.css` 的插件页会落到系统样式 —— 系统开着「始终显示滚动条」时是带边框轨道与两端箭头的经典样式，和本套扁平界面放在一起很扎眼
 
@@ -843,7 +835,7 @@ pnpm test                       # 全量测试（含各插件的 core·view 用�
 - **dev 注册**：`pnpm dev:kernel` 起内核（本机 control 端口 + 一次性 token），插件 dev server 把 `devUrl` 挂上去，插件页直接指向 vite ⇒ 免重启热更新
 - **DevTools**：设置 → 插件 → 打开 DevTools（开发构建可用）
 - **调试日志**：`host.log('info', '...')` 会进审计日志，设置页可实时查看
-- **新建插件**：`pnpm create:plugin <id> [--mode view|script|full]` 一条命令生成工程骨架（`packages/plugin-cli`）——清单经 `@launcher/plugin-manifest` 真校验器把关，含逻辑层时自动登记根 `Cargo.toml` members。想手改就照抄现有插件：Vue 工程看 `plugins/totp`（view + script + 对话框）与 `plugins/host-manager`（提权写系统文件、只改自己的托管区），配置模板见 `docs/plugin-dev-guide.md` §4 与 `.codebuddy/skills/chassis-plugin-dev/references/scaffold-templates.md`
+- **新建插件**：`pnpm create:plugin <id> [--mode view|script|full]` 一条命令生成工程骨架（`packages/plugin-cli`）——清单经 `@launcher/plugin-manifest` 真校验器把关，含逻辑层时自动登记根 `Cargo.toml` members。想手改就照抄现有插件：Vue 工程看 `plugins/totp`（view + script + 对话框）与 `plugins/host-manager`（提权写系统文件、只改自己的托管区），配置模板见 `docs/plugin-dev-guide.md` §4。
 
 ---
 
@@ -1007,9 +999,13 @@ fn main() {
 契约要点：
 
 - **schema 稳定**：字段只增不改；`schema` 不认识 ⇒ 拒绝整份索引（不挑字段读）。
-- `sig` 字段为**预留**（后续版本的签名，`null` 表示未启用）。v1 的信任模型是「固定仓库 + HTTPS + sha256」。
+- `sig` 字段为**预留**（后续版本的签名，`null` 表示未启用）。v1 的信任模型是「固定仓库 + HTTPS + sha256」：下载只接受插件 id，地址一律从索引取；在引入第三方源之前不上签名 —— 一旦开放第三方通道，「GitHub + TLS」不再成立，签名必须同期上。
 - 客户端**只接受插件 id 作为入参**，下载地址一律从本索引取 —— URL 不可被外部注入。
 - 索引与产物发布在**固定 tag**（`plugins-latest`）的 Release 上；各平台各发一份 zip，sha256 必须逐字节一致于构建产物。
-- **主源 + 国内镜像**：客户端对索引里的每个 URL 同时推导镜像地址（`github.com/triple3h/Chassis` → `gitee.com/triple3h/Chassis`，大小写不敏感 —— CI 用 `GITHUB_REPOSITORY` 拼索引）并**先试镜像**；镜像拿不到（连不上 / HTTP 错 / sha256 不符）或校验不过再回落主源，两级都失败才报错。索引本身同样镜像优先。镜像由 CI 的 `scripts/sync-release-to-gitee.mjs` 同步（同名 tag / 同名文件名），两个地址都是编译期常量 —— 仍然「不接受自定义源」。
-- **索引永远整份发布**：单独发某个插件（workflow 的 `plugins` 输入）时，`gen-plugin-registry.mjs --merge-registry <上一版 registry.json>` 负责合并 —— 没打包的插件整条沿用上一版（版本 / 说明 / 门槛 / 资产都不动），打包的插件按平台替换资产、未重建平台的资产只在版本一致时保留（版本变了就丢弃 + 告警，避免客户端装到旧版本）。少了这一步，索引里只剩本次打包的插件，其余插件对客户端等于「不存在」（`collect_plugins` 查不到即跳过，静默不再提示更新）。守卫见 `tests/unit/plugin-registry-merge.test.ts`。
+- **主源 + 国内镜像**：客户端对索引里的每个 URL **先试镜像**（`github.com/triple3h/Chassis` → `gitee.com/triple3h/Chassis`，大小写不敏感），
+  连不上 / HTTP 错 / sha256 不符再回落主源；索引本身同样镜像优先，两级都失败才报错。两个地址都是编译期常量 —— **不接受自定义源**。
+  镜像由 `scripts/sync-release-to-gitee.mjs` 同步，规则见 [`release-channels.md`](release-channels.md) §4。
+- **索引永远整份发布**：单独发某个插件时必须合并上一版索引（`gen-plugin-registry.mjs --merge-registry`，`plugins-release.yml` 自动做）——
+  没打包的插件整条沿用上一版。少了这一步，其余插件对客户端等于「不存在」，静默不再提示更新。
+  守卫：`tests/unit/plugin-registry-merge.test.ts`；规则见 [`release-channels.md`](release-channels.md) §4。
 - essential 出厂插件（app-launcher / file-search / internal-settings）**不在索引里**：它们随 App 包发布。

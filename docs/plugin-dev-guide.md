@@ -1,28 +1,16 @@
 # 插件开发手册（view 层 Vue / 逻辑层 Rust）
 
-> 面向本仓库 `plugins/` 下的出厂插件（view 层是 Vite + Vue；**v2 起逻辑层是 Rust**，见下方迁移说明）。
-> **平台模型（命令形态、产物契约、脚本协议、踩坑）适用于任何底座插件。**
-> 状态：现行（与 `plugins/` 下的插件同步维护）｜ 最后更新：2026-09-17
-> 快速上手看 [`../.codebuddy/skills/chassis-plugin-dev/SKILL.md`](../.codebuddy/skills/chassis-plugin-dev/SKILL.md)，硬约束看 [`../.codebuddy/rules/chassis-plugin/RULE.mdc`](../.codebuddy/rules/chassis-plugin/RULE.mdc)
+> 面向本仓库 `plugins/` 下的出厂插件。**平台模型（命令形态、产物契约、脚本协议、踩坑）适用于任何底座插件。**
+> 状态：现行（与 `plugins/` 同步维护）｜ 最后更新：2026-11-02
 
-> **⚠️ M5（v2）已完成迁移：逻辑层全部 Rust 化（2026-09-17）**
->
-> 本手册下半部分描述的**平台模型没有变**（命令形态、产物契约、脚本协议、安全边界、数据目录 N2）；
-> 变的是**逻辑层的语言与产物形态**：
->
-> | | v1（本手册中的旧示例） | v2（现行） |
-> |---|---|---|
-> | 逻辑层 | TypeScript `src/no-view/*.ts` → esbuild → `dist/<name>.mjs` | **Rust** crate（`Cargo.toml` 在插件目录根，源码直接放同目录 `src/`）→ `dist/<name>`（可执行文件） |
-> | 清单 | `apiVersion: "1"` | **`apiVersion: "2"`** |
-> | 宿主通信 | Node worker（`worker_threads` / `parentPort`） | **子进程 + NDJSON**（`launcher-plugin-sdk`） |
-> | 构建 | `node scripts/build-plugin.mjs <id>` | `cargo build --release -p launcher-plugin-<id> && node scripts/build-plugin.mjs <id> --copy-scripts` |
-> | view 层 | Vue + Vite | **同左（不变）** |
+> **现行口径（M5 起，2026-09-17）**：逻辑层全部是 Rust —— 插件目录根的 `Cargo.toml` + `src/`，
+> 产物 `dist/<name>`（可执行文件），清单 `apiVersion: "2"`，与宿主用子进程 + NDJSON 通信；
+> view 层仍是 Vue + Vite。所以机器上**不需要 Node**。
 >
 > - 读代码从简到繁：`plugins/web-open/src/`（最小）→ `file-search`（两个入口 + 外部命令）→
 >   `host-manager`（提权写系统文件）→ `totp`（读图转 base64）→ `app-launcher`（并发扫描 + 本地化 + 图标缓存）。
 > - 带 view 的插件：`build:view` 走 vite、`build:scripts` 走 cargo + `--copy-scripts --keep-dist`（合并进同一 `dist/`）。
-> - 权威规格：`plugin-spec.md` §2.2 / §4.2–4.4 / §11；迁移背景：`decisions/ADR-0005-kernel-language.md`。
-> - 收益：**机器上不再需要 Node**（内核与插件都是原生产物）。
+> - 权威规格：`plugin-spec.md` §2.2 / §4.2–4.4 / §11；语言与协议：`architecture.md` §1。
 
 ---
 
@@ -54,7 +42,7 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 | 典型用途 | UI 交互 | 用户主动触发的后台任务 | 「View 的后端函数」，读写文件、调系统命令 |
 | 依赖包 | `@launcher/api` | `launcher-plugin-sdk`（Rust，crate `launcher_plugin_sdk`） | 同左 |
 
-宿主查找逻辑层产物的顺序：`<pluginRoot>/dist/<name>(.exe)` → `<pluginRoot>/dist/workers/<name>(.exe)`（ADR-0005：`.mjs` 不再支持）。
+宿主查找逻辑层产物的顺序：`<pluginRoot>/dist/<name>(.exe)` → `<pluginRoot>/dist/workers/<name>(.exe)`（plugin-spec §11：`.mjs` 不再支持）。
 **`commands[].name` 必须与产物文件名一致。**
 
 一个插件可以有多个 `view` 命令，它们**共用同一个 `index.html`**，靠 URL 上的 `?cmd=` 区分。
@@ -179,39 +167,22 @@ fn main() {
 
 - `ctx.settings` 是**生效设置快照**（启动时冻结，改设置会重载插件）；`ctx.data_path` 是唯一可写目录，`ctx.plugin_path` 只读。
 - `ctx.on_query(fn)` 用于贡献型搜索（`contributes: true`）；`ctx.storage.*` 走 RPC，与 UI 侧同一份数据（`<dataRoot>/plugins/<id>/storage.json`）。
-- panic 由 SDK 转 `fail`（v1 的 `onError()` 需显式调用）。
+- panic 由 SDK 转 `fail`。
 
-v1（过渡期，`@launcher/api-node`）：
+### 2.3 逻辑层 IPC（实测）
 
-```ts
-onError()                                   // 先注册，兜住未处理异常
-const { command, args, pluginPath, dataPath, pluginId, mode } = ctx()
-log(message, data?, level?)                 // level: info|debug|warn|error
-progress(p: 0~1, data?)
-done(result)                                // 正常结束并把 result 交给调用方
-fail(error)
-await storage.get/set/remove/all/clear      // 与 UI 侧同一份数据
-onQuery(fn)                                 // 贡献型搜索：清单里 contributes: true 时宿主常驻该 worker
-```
+逻辑层是子进程 + NDJSON：host 写一行 JSON 到 stdin，插件往 stdout 写一行 JSON。消息语义：
 
-`args` 来自调用方（`exec.run({ command, args })`）；**`dataPath` 是唯一可写目录**，`pluginPath` 只读。
+| 调用 | 输出（stdout 一行 JSON） |
+|---|---|
+| `log(msg, data)` | `{ type: 'log', level, message, data }` |
+| `done(x)` | `{ type: 'result', data: x }` + `{ type: 'done' }`（两行） |
+| RPC | 请求 `{ type: 'rpc', id, method, params }`，应答同 id |
 
-### 2.3 IPC 实测协议（官方文档没写）
-
-v1 用 `worker_threads` 直接拉起产物即可观察（本仓库对 `dist/read-image.mjs` 做过完整验证）；v2 是子进程 + NDJSON，同一批消息语义照搬：
-
-| 调用 | v1（worker 消息） | v2（stdout 一行 JSON） |
-|---|---|---|
-| `log(msg, data)` | `{ type: 'log', level, message, data }` | 同 |
-| `done(x)` | `{ type: 'result', data: x }` + `{ type: 'done' }` | 同（两行） |
-| RPC | `postMessage({ type: 'rpc', id, method, params })` | 同 |
-
-`ctx.exec.run()` 返回的就是 `data` 本身。想脱离宿主自测逻辑层产物：
+`ctx.exec.run()` 返回的就是 `data` 本身。脱离宿主自测产物：
 
 ```bash
-# v2：直接跑产物（stdin 喂协议行，stdout 读结果）
 echo '{"type":"query","token":1,"query":"dee"}' | ./dist/xxx --mode search --launcher-context "$CTX_B64"
-# v1：new Worker('/abs/path/dist/xxx.mjs', { workerData: { command: 'xxx', args: {...}, pluginPath: '/tmp/plugin' } })
 ```
 
 ### 2.4 降级策略（必须做）
@@ -225,7 +196,7 @@ echo '{"type":"query","token":1,"query":"dee"}' | ./dist/xxx --mode search --lau
 
 ### 2.5 逻辑层命令能做的事（能力边界）
 
-- ✅ 读写任意本地文件、遍历目录、调用系统命令、访问网络（v1 是 Node 生态，v2 是 Rust 生态）
+- ✅ 读写任意本地文件、遍历目录、调用系统命令、访问网络（Rust 生态）
 - ✅ 通过 `ctx.data_path` / `ctx().dataPath` 读写自己的数据目录（`pluginPath` 是只读安装目录）
 - ❌ 不能弹 UI、不能长期驻留（一次性执行，`ctx.done` / `done()` 后结束）
 - ⚠️ 能力越强越要自己收紧：本项目 `read-image` 只做「扫描白名单目录 + 扩展名白名单 + 文件头魔数校验 + 单文件 20MB 上限」
@@ -258,37 +229,8 @@ export default defineConfig({
 - **`base: './'`**：绝对路径 `/assets/x.js` 在宿主托管下大概率 404。
 - **不要开 `manualChunks`**：产物被切成多个 chunk 时，宿主托管路径容易对不上。
 - **构建后把 `package.json` 写进 dist**（本仓库 `scripts/lib/manifest-plugin.mjs` 会自动剔除无关字段）。
-- 「一个命令一个 JS 入口」的 lib 模式是**旧模板**的玩法，新 API 不需要。
 
-### 3.3 No-View / Script 的构建（v1 / TS，过渡期）
-
-> v2（M5 起）逻辑层是 Rust：见 §7。以下 v1 写法在过渡期仍然有效（现有插件的 TS 产物），新插件不要再用。
-
-必须用**独立的 worker 配置**，关键三条：
-
-```ts
-// vite.worker.config.ts
-build: {
-  outDir: 'dist',
-  emptyOutDir: false,                        // ★ 绝不能清掉 UI 产物
-  rollupOptions: {
-    external: ['worker_threads', /^node:.*/], // ★ Node 内置模块保持 external
-    input: discoverInputs(),                  // src/no-view/*.ts → 入口名 = 文件名
-    output: { entryFileNames: '[name].mjs' }, // ★ 必须 .mjs 且与命令名一致
-  },
-}
-```
-
-`package.json` 里串起来：
-
-```json
-"build": "vue-tsc --noEmit && vite build && vite build --config vite.worker.config.ts"
-```
-
-> **v1 历史**：那时 `@launcher/api-node` 会被完整内联进 `.mjs`（约 9KB）。v2 逻辑层是 Rust 可执行产物，这条不再适用 ——
-> 构建见 §7 / `plugins/README.md`（`cargo build --release` + `scripts/build-plugin.mjs --copy-scripts`）。
-
-### 3.4 安装与调试
+### 3.3 安装与调试
 
 - 安装：`dist/` → `<dataRoot>/extensions/<插件名>`（或设置页「插件管理」安装），内核启动时扫描该目录。
 - 开发：`pnpm dev` 起 Vite 服务器，浏览器直接访问即可调 UI；宿主相关能力走降级分支。
@@ -359,7 +301,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **不要**在样式规则里直接写 hex / rgba 字面量 —— 那个值不会跟着主题变
 - 与主题无关的装饰色（半透明叠加、遮罩渐变）可以只写一个值，注明「深浅通用」
 
-动效同样有令牌，**不要自己写死时长和缓动**（与宿主 `apps/launcher-ui/src/styles/app.css` 同值同档，见 ADR-0004）：
+动效同样有令牌，**不要自己写死时长和缓动**（与宿主 `apps/launcher-ui/src/styles/app.css` 同值同档，见 [`motion.md`](motion.md)）：
 
 | 令牌 | 用途 |
 |---|---|
@@ -416,7 +358,6 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 
 - **原因（v2，现行）**：① 命令名与产物文件名不一致（大小写、连字符）；② `dist/<name>` 还是旧二进制（改了 Rust 没重跑 `npm run build:scripts`）；③ 根 `Cargo.toml` members 漏登记 `plugins/<id>`（`cargo build -p` 找不到包）；④ 清单 `apiVersion` 不是 `"2"`。
 - **对策**：产物名 = 命令名；`npm run build:scripts`（或根 `pnpm build`）后跑 `pnpm spec-check`（会校验可执行位 + 二进制魔数）。
-- **v1 历史**：worker 构建 `emptyOutDir` 误删 UI 产物 / 构建顺序反了 —— 见 §3.3 与 §5.17（仅历史参考）。
 
 ### 5.5 从 `packages/ui` import 报模块找不到
 
@@ -464,7 +405,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **现象 ①**：非联网环境 / 离线打包后 wasm 加载失败。
   **对策**：`import wasmUrl from 'pkg/xxx.wasm?url'` 让构建把 wasm 打进 dist，再以 `wasmBinary` 形式喂给 Emscripten（顺带绕开 `instantiateStreaming` 的 MIME 检查）。
 - **现象 ②**：`Aborted(CompileError: Refused to create a WebAssembly object because ... 'wasm-unsafe-eval' is not an allowed source of script ...)`。
-  **原因**：宿主给插件页的 CSP `script-src` 没放行 wasm 编译。**对策**：内核已加 `'wasm-unsafe-eval'`（见 `apps/kernel/src/http/pluginServers.ts`）；换宿主 / 自建静态服务器时要带上它。
+  **原因**：宿主给插件页的 CSP `script-src` 没放行 wasm 编译。**对策**：内核已加 `'wasm-unsafe-eval'`（见 `apps/kernel/src/http/plugin_servers.rs`）；换宿主 / 自建静态服务器时要带上它。
 
 ### 5.14 主题跟随宿主失败
 
@@ -479,20 +420,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 
 - `categories` 这个字段容易被写成 `categroies`。不影响命令注册，但别拼错。
 
-### 5.17 多个 script 入口被拆成多个文件，产物不再自包含
-
-> **v1 历史**（`vite.worker.config.ts` + `.mjs` 时代）：v2 逻辑层是 Rust 可执行产物（一个 bin 天然自包含），本节问题已不存在，仅作历史参考。
-
-- **现象**：插件里有 `hosts-read.ts` 和 `hosts-write.ts` 两个入口，构建后 `dist/` 里除两个 `.mjs` 之外还多出 `dist/assets/_hosts-file-xxx.mjs`，入口文件里只剩一条 `import './assets/…'`。
-- **原因**：Rollup 在多入口模式下，**被两个入口共用的模块必须提取成共享 chunk**（否则就得把同一份代码复制两份，Rollup 不做这件事）。`output.manualChunks: undefined` 也拦不住，它不是用户配置能改的默认行为。
-- **风险**：宿主只把 `dist/<name>.mjs` 当 Worker 入口拉起。这条跨文件相对 import 一旦因为「用户只拷了单个 `.mjs`」「打包时漏了 `assets/`」「宿主换了加载方式」而断掉，命令直接失效——而且报错发生在宿主侧，插件里根本看不见。单入口插件（只一个 script 命令）不会触发，所以很容易到第二个入口才踩到。
-- **对策**：**逐入口各跑一次构建**，每个产物自包含。本仓库做法（`plugins/host-manager`）：
-  - `vite.worker.config.ts` 用 `build.lib.entry` 指向**单个**入口，输出名由 `fileName` 固定，入口由环境变量 `PLUGIN_WORKER_ENTRY` 选择；
-  - `plugins/host-manager/scripts/build-no-view.mjs` 扫一遍 `src/no-view/*.ts`，逐个 `execFileSync(vite, ['build', '--config', 'vite.worker.config.ts'])`，每次带上不同的环境变量；
-  - `package.json` 的 `build` 末段改成 `node scripts/build-no-view.mjs`。
-- **顺带**：Vite 的 `defineConfig` **不接受配置数组**，CLI 会直接报 `config must export or return an object`，所以「多配置」只能自己在脚本里循环调用。
-
-### 5.18 调用宿主"点了没反应"（保存 / 删除按钮像挂了）
+### 5.17 调用宿主"点了没反应"（保存 / 删除按钮像挂了）
 
 - **现象**：点按钮后界面毫无变化，也没有任何报错；宿主审计日志里**完全没有这次调用**（连失败记录都没有）。
 - **原因**：参数里带了 Vue 的 `reactive` / `ref` 代理（Proxy）。`window.parent.postMessage` 按结构化克隆传输，**含 Proxy 的 payload 会抛 `DataCloneError`**，
@@ -500,19 +428,19 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 - **对策**：SDK 已内置兜底（首发失败时 JSON 往返展平后重发一次，见 `packages/plugin-api` 的 `post()`）；
   插件侧仍建议在写库 / 提交前展开一层（`list.map((x) => ({ ...x }))`）或 `toRaw()`，并给写操作补 `try/catch + toast.err`，别让失败被静默吞掉。
 
-### 5.19 插件页里按 `Esc` 没反应（或者该留的退了）
+### 5.18 插件页里按 `Esc` 没反应（或者该留的退了）
 
 - **现象**：焦点在插件页里时按 `Esc`，宿主像没收到（退回不了启动台）；或插件自己画的弹层关了、页面也跟着退了一层。
 - **原因**：iframe 是独立文档，宿主挂在顶层 window 上的键盘监听**收不到**插件页里的按键。`@launcher/api` 因此兜底：**没人消费**的 `Esc` 自动交还宿主（等价 `commands.close()`，见 plugin-spec §10.2）。
 - **对策**：插件消费 `Esc`（关自己画的弹层 / 清空搜索框）时必须 `preventDefault()`（`stopPropagation()` 同样有效）——`UiDialog` / `UiSelect` 已经这么做了，自己叠面板时要照做。
 
-### 5.20 倒计时环一轮转了两圈（CSS 动画的双时钟）
+### 5.19 倒计时环一轮转了两圈（CSS 动画的双时钟）
 
 - **现象**：环的进度比真实时间快一倍 —— 30s 的 TOTP 周期，环走完两整圈；页面停留越久偏差越大。
 - **原因**：动画自身的时钟也在走，而 `animation-delay` 表达的是「本时间步已过秒数」；每秒把 delay 往前推 1 秒 = 把同一秒算了**两遍**（动画位置 = 动画存活时长 + `|delay|`）。`CDP` 单点读 `delay`/`dashoffset` 会看着"自洽"，只有连续采样才能发现速度是 2 倍。
 - **对策**：**一个时间源**。JS 每秒（对齐整秒）算目标 `stroke-dashoffset`，平滑交给 `transition: stroke-dashoffset 1s linear`；跨时间步那一帧要临时关掉过渡，否则「空 → 满」会被补间演成**倒转一整圈**（`plugins/totp/src/App.vue` 的 `ringOffset()` / `markStepReset()`）。
 
-### 5.21 `shallowRef` 里的大文档原地改，界面「改了但没反应」
+### 5.20 `shallowRef` 里的大文档原地改，界面「改了但没反应」
 
 - **现象**：host-manager 里点「新建块」后左栏不出现新块；「收进块」弹窗的下拉里也选不到刚建的块（用户实测截图）。
 - **原因**：文档是 `shallowRef`（几万行不能深度代理）+ **原地改**（`blocks.splice/push`），改动后只补了一个 `triggerRef(doc)`。
@@ -524,13 +452,13 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 
 ---
 
-## 6. 新增一个插件的检查清单
+## 6. 新增一个 Vue 插件的检查清单
 
 ```
 [ ] plugins/<name>/package.json：apiVersion + capabilities 必填，commands 齐全、mode 正确
 [ ] package.json 提供 build:view / build:scripts（根 scripts/build-all.mjs 按这两条驱动）
 [ ] vite.config.ts：base './'，outDir dist，构建后写清单
-[ ] 有 no-view/script 命令时（v2）：插件根 `Cargo.toml` + 同目录 `src/*.rs` + 根 `Cargo.toml` members 登记；`apiVersion: "2"`；`build:scripts`（cargo build + `--copy-scripts`）与 `test:scripts`（cargo test），产物名 = 命令名（§7）
+[ ] 有 no-view/script 命令时：插件根 `Cargo.toml` + 同目录 `src/*.rs` + 根 `Cargo.toml` members 登记；`apiVersion: "2"`；`build:scripts`（cargo build + `--copy-scripts`）与 `test:scripts`（cargo test），产物名 = 命令名（§7）
 [ ] tsconfig.json：extends `../../tsconfig.vue-plugin.json`（走工作区包标准解析，不需要额外 paths）
 [ ] src/styles/app.css：@import tailwindcss + theme.css，@source 覆盖 src 与 `../../packages/ui`
 [ ] 宿主调用直接走 SDK：view 用 `@launcher/api`，逻辑层用 `launcher-plugin-sdk`（Rust）；view 侧先用 `host.isLauncher()` 分流、调用点兜失败
@@ -544,7 +472,7 @@ Vite / TS 都走标准 node_modules 解析，**不需要 alias 或 paths**。两
 
 ## 7. Rust 逻辑层插件（v2）
 
-> 适用：`no-view` / `script` 命令（M5 起）。协议权威定义见 `plugin-spec` §4.4；SDK 源码 `packages/plugin-sdk-rs`；决策背景见 `docs/decisions/ADR-0005-kernel-language.md`。
+> 适用：`no-view` / `script` 命令（M5 起）。协议权威定义见 `plugin-spec` §4.4；SDK 源码 `packages/plugin-sdk-rs`；语言与协议见 `docs/architecture.md` §1。
 
 ### 7.1 工程结构
 
@@ -555,7 +483,7 @@ plugins/<id>/
 └── src/                    # 插件源码：Rust 逻辑层（main.rs / lib.rs / bin/*.rs）+ Vue 视图（有 view 命令时）
     ├── main.rs             # 入口：launcher_plugin_sdk::run
     ├── bin/<name>.rs       # 多命令时：一个命令一个 bin（[[bin]] path 指向这里）
-    └── ...                 # 业务模块（与视图层共享的逻辑在这里写第二份时要用 fixture 向量守护，见 §7.4）
+    └── ...                 # 业务模块（视图层需要同一份逻辑时，用 fixture 向量守护两份实现）
 ```
 
 - crate 由**仓库根** `Cargo.toml` 的 workspace `members` 逐个列出（`plugins/<id>`）—— 新增逻辑层插件时加一行；产物统一落在仓库根 `target/`。
@@ -606,22 +534,12 @@ fn main() {
 - 本机自测：`cargo test -p <crate>`；协议一致性用 `tests/fixtures/echo-plugin` 的双宿主对拍（`pnpm test`）。
 - 跨平台产物必须在各自平台编译（CI 双 job）；`.exe` 只出现在 Windows 包内。
 
-### 7.4 v1 → v2 迁移对照
-
-| v1（TS / worker） | v2（Rust / 子进程） |
-|---|---|
-| `src/no-view/*.ts` → `dist/<name>.mjs` | `src/main.rs`（crate 根 = 插件目录）→ `dist/<name>`（可执行） |
-| `import … from '@launcher/api-node'` | `use launcher_plugin_sdk::…` |
-| `ctx()` | `ctx`（`ctx.args` / `ctx.settings` / `ctx.data_path()`） |
-| `done(x)` / `fail(e)` / `log` / `progress` / `onQuery` / `storage` | `ctx.done(x)` / `ctx.fail(e)` / `ctx.log` / `ctx.progress` / `ctx.on_query` / `ctx.storage` |
-
 ## 8. 参考
 
 - 规范与架构：`docs/plugin-spec.md`（对外契约）、`docs/architecture.md`（内核实现）、`plugins/README.md`（目录与构建）
-- API 权威定义：`packages/plugin-api/src/index.ts`（UI 侧）、`packages/plugin-sdk-rs/src/`（逻辑层 v2；v1 的 `packages/plugin-api-node` 已删除）
+- API 权威定义：`packages/plugin-api/src/index.ts`（UI 侧）、`packages/plugin-sdk-rs/src/`（逻辑层）
 - 现有范例：
   - `plugins/totp` —— view + script + 对话框 + 口令加密（`src/core/vault.ts`）
   - `plugins/host-manager` —— 提权写系统文件、只换自己的托管区、写前备份 + 写后回读校验
   - `plugins/text-diff` —— Web Worker 计算 + 主线程降级 + 虚拟滚动
   - `plugins/json-tools` —— 手写词法扫描（不丢数字精度）+ 树视图
-- 本仓库四个真实插件：`plugins/totp`（含 script 命令）、`plugins/text-diff`（Worker + 虚拟滚动）、`plugins/json-tools`（无损解析 + 树视图）、`plugins/host-manager`（读盘 + 提权写入 + 托管区无损回写）

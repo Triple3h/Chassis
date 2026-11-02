@@ -60,7 +60,7 @@ const h = await createHarness({
       essential: true,
       commands: [{ name: 'main', title: '入口', mode: 'view' }],
     })
-    // ③ 设置页那条路要一个 `internal-` 前缀的插件才有管理面权限（ADR-0003）
+    // ③ 设置页那条路要一个 `internal-` 前缀的插件才有管理面权限（plugin-spec §3.4）
     await writePlugin(path.join(dataRoot, 'extensions', 'internal-probe', 'dist'), {
       name: 'internal-probe',
       title: '管理面探针',

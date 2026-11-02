@@ -20,9 +20,8 @@ GitHub Action 发版后**自动检查并提示新版本**（托盘常驻「检�
 | 内核 | `kernel-latest` | `kernel-registry.json` + 内核 zip | 「更新」页 → 内核 |
 | **应用（壳）** | **`app-latest`** | **`app-registry.json` + `Chassis-<版本>-macos-<架构>.zip`** | **自动检查 → 托盘「检查更新…」/「关于」页提示 → 「更新」页 → 应用** |
 
-> 三条固定 tag 通道（`app-latest` / `kernel-latest` / `plugins-latest`）发布时会**只保留索引指向的资产**：
-> 工作流在 `action-gh-release` 之后跑 `scripts/prune-release-assets.mjs`，清掉同名覆盖没带走的旧 `.zip`
-> （不清理会无限积累孤儿；单 Release 上限 1000 个资产，攒满 = 发布中断）。
+> 三条固定 tag 通道（`app-latest` / `kernel-latest` / `plugins-latest`）发布时只保留索引指向的资产、
+> 以及 Gitee 镜像的同步规则，见 [`release-channels.md`](release-channels.md) §4。
 
 索引（schema 1）与内核那份同形：
 
@@ -136,9 +135,8 @@ Windows `<安装目录>.chassis-backup`（与安装目录同卷 ⇒ rename 即�
 
 ## 7. 发版
 
-版本只改**一处**：根 `version.json`（`app` = 应用/壳版本，`kernel` = 内核版本），
-由 `scripts/version.mjs` 同步到三个位点（`tauri.conf.json`、`shell/Cargo.toml`、`kernel/Cargo.toml`），
-`pnpm version:check`（本地与全部发版 workflow）拦漂移 —— 手改位点文件的后果是自更新**静默失效**。
+版本只在根 `version.json` 改（`pnpm version:set app x.y.z`，`pnpm version:check` 拦漂移）；手改位点文件的后果是自更新**静默失效**。
+规则见 [`release-channels.md`](release-channels.md) §2。
 
 ```bash
 pnpm version:set app 0.1.5      # 改版本（自动同步三处位点；内核同号时再 version:set kernel 0.1.5）

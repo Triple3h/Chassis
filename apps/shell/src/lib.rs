@@ -149,7 +149,7 @@ pub fn run() {
                 return Ok(());
             }
 
-            // ⑦ 内核就绪后把窗口导航到内核托管的启动台 UI（ADR-0001）
+            // ⑦ 内核就绪后把窗口导航到内核托管的启动台 UI（architecture §6.1）
             let ready_handle = handle.clone();
             let ready_sidecar = Arc::clone(&sidecar_setup);
             let ready_data_root = data_root.clone();

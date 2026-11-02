@@ -24,7 +24,7 @@ interface Appearance {
   historyLimit?: number
 }
 
-// 设置页那条路要一个 `internal-` 前缀的插件才有管理面权限（ADR-0003）
+// 设置页那条路要一个 `internal-` 前缀的插件才有管理面权限（plugin-spec §3.4）
 const internalPlugin = path.join('extensions', 'internal-probe', 'dist')
 
 const h = await createHarness({

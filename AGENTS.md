@@ -1,68 +1,85 @@
 # Repository Guidelines
 
-Chassis is a plugin-based macOS launcher: Tauri 2 Rust shell (system primitives only) + **Rust kernel** (`apps/kernel`, bin `launcher-kernel`, ADR-0005) + Vue 3 launcher UI. Three invariants govern every change: the kernel has **zero capabilities** (scanning apps, reading files, launching — all plugins), built-in plugins use the same mechanism as third-party ones, and undeclared capabilities do not exist at runtime. The app runs with no Node dependency: the kernel and all logical-layer plugin commands are Rust executables.
+Chassis is a plugin-based launcher: a Tauri 2 Rust **shell** (system primitives only), a Rust **kernel** (`apps/kernel`, bin `launcher-kernel`, see `docs/architecture.md` §1), and a Vue 3 **launcher UI**. It ships for macOS 11+ and as a Windows portable build.
 
-## Project Structure & Module Organization
+**Three invariants — never merge a change that breaks one:**
+
+1. **The kernel has zero capabilities.** Scanning apps, reading files, opening URLs, network — all belong to plugins. A kernel diff must never contain capability words.
+2. **Built-in ≠ embedded.** Factory plugins use the same manifest/capability mechanism as third-party ones and can be disabled or uninstalled (only the `internal-*` management surface is exempt).
+3. **Undeclared capabilities do not exist at runtime.** They are pruned at assembly time, so the plugin-side method is absent rather than rejected.
+
+The app has **no Node dependency at runtime**: the kernel and every logical-layer plugin command are Rust executables.
+
+## Where things live
 
 | Path | Contents |
 |---|---|
-| `apps/shell/src/` | Rust/Tauri shell: `lib.rs`, `ipc.rs`, `sidecar.rs`, `primitives/*` |
-| `apps/kernel/src/` | Kernel (bin `launcher-kernel`): `kernel.rs`, `api.rs`, `plugin/*`, `search*.rs`, `services/*`, `link.rs` |
+| `apps/shell/src/` | Tauri shell: `main.rs` / `lib.rs`, `ipc.rs` (JSON-RPC over stdio), `sidecar.rs`, `update.rs` (self-update), `kernel_swap.rs`, `primitives/*` (window / hotkey / tray / notify / clipboard / opener) |
+| `apps/kernel/src/` | Kernel: `kernel.rs` (assembly), `api.rs`, `registry.rs`, `pipeline.rs`, `plugin/*`, `search.rs` + `pinyin.rs`, `http/*`, `hot/*`, `services/*`, `link.rs` |
 | `apps/launcher-ui/src/` | Vue UI: `App.vue`, `components/*`, `lib/grid.ts`, `stores/*` |
-| `packages/` | `plugin-manifest` (types + validation + contract), `plugin-api` (view-side SDK), `plugin-sdk-rs` (logical-layer Rust SDK), `ui` (`@launcher/ui` shared kit) |
-| `plugins/*` | 13 built-in plugins; each `dist/` ships `index.html`, `assets/`, `package.json`, plus one executable per `no-view`/`script` command; Rust logic lives in each plugin's crate (`plugins/<id>/Cargo.toml`, sources in the same `src/`) |
-| `tests/{unit,contract,smoke}` | Test suites plus `tests/fixtures/echo-plugin` (Rust fixture: SDK `echo` example binary) |
+| `packages/` | `plugin-manifest` (types + validation), `plugin-api` (view-side SDK), `plugin-sdk-rs` (logical-layer Rust SDK), `plugin-cli` (scaffolding), `ui` (`@launcher/ui` shared kit) |
+| `plugins/*` | 17 built-in plugins; each `dist/` ships `index.html`, `assets/`, `package.json`, plus one executable per `no-view` / `script` command; Rust logic lives in each plugin's crate (`plugins/<id>/Cargo.toml`, sources in the same `src/`) |
+| `tests/{unit,contract,smoke}` | Test suites plus fixtures: `tests/fixtures/echo-plugin` (SDK echo binary) and `tests/fixtures/update-builtin` (fake factory plugins for update tests) |
+| `docs/` | Source of truth — see the index below |
 
-## Build, Test, and Development Commands
+**Docs are authoritative; spec-first.** Before implementing unspecified behavior, record the decision in the matching doc (requirements for behavior, plugin-spec for contract, architecture §8 for kernel deviations) and then write the code. Refresh docs whenever slots, fields, or schema change.
+
+- `docs/launcher-requirements.md` — the only requirements source (P1–P7, §13 milestones).
+- `docs/architecture.md` — process topology, module map, HTTP/bridge checks, data layout, Windows update boundaries (§11).
+- `docs/plugin-spec.md` / `docs/plugin-dev-guide.md` — plugin contract / hands-on guide.
+- `docs/permissions.md` — capability model.
+- `docs/shell-hot-update.md` / `docs/kernel-hot-update.md` / `docs/plugin-spec.md` §6.4 — the three update mechanisms; `docs/release-channels.md` — tags, versions, CI and release hygiene.
+- `docs/motion.md` — motion tokens and window show/hide choreography.
+
+## Commands
+
+**Verify before handing off:** `cargo test --workspace && pnpm typecheck && pnpm test && pnpm build && pnpm spec-check`, then launch the packaged `.app` — production resource paths differ from dev.
 
 - `pnpm install` — install the workspace.
-- `cargo test --workspace` — Rust kernel + SDK + plugin-logic tests.
-- `pnpm typecheck` — `tsc --noEmit` for all packages (Vue packages use `vue-tsc`).
-- `pnpm test` — every `*.test.ts`; scope via `pnpm test:unit` / `test:contract` / `pnpm smoke`. The harness spawns the real kernel binary (`cargo build -p launcher-kernel` runs automatically).
-- `pnpm build` — kernel (`cargo build --release -p launcher-kernel`) + launcher UI + 8 plugins (view assets + `target/release/<bin>` copies).
-- `pnpm spec-check` — plugin manifest self-audit (N1–N3, artifacts, remote resources).
-- `pnpm dev:kernel` / `pnpm dev:ui` — run kernel and UI without the shell.
-- `pnpm smoke:real` / `pnpm smoke:first-batch` — real kernel + real plugins, HTTP only.
-- `npm run shell:dev` / `npm run app:local` — run or package the real macOS app.
-- `pnpm app:win` (Windows only) — package the Windows portable zip (`dist-app/Chassis-<version>-win-<arch>.zip`).
-- Windows cross-check from macOS: `cargo check --workspace --exclude launcher-plugin-translate --exclude launcher-plugin-internal-store --target x86_64-pc-windows-msvc`（被排除的两个依赖 `ring`，其 C 代码在 macOS 主机上交叉不到 msvc；真 Windows 上无此问题）。
-  The shell (`apps/shell`) additionally needs a resource compiler for `tauri-build` — point `RC` at a stub script (its probe output must start with `OVERVIEW: LLVM Resource Converter`, then exit 0). Real Windows builds run in `.github/workflows/build-windows.yml`.
-- Windows binaries are **statically linked against the MSVC runtime** (`.cargo/config.toml` sets `+crt-static` for both msvc targets): the portable zip ships no VC++ redistributable, so a dynamically linked build fails on a clean machine with「找不到 VCRUNTIME140_1.dll」. `pack-win.mjs` scans the packed `.exe`s and fails the build if the flag ever stops taking effect (CI machines have the runtime installed, so they cannot catch it).
+- `cargo test --workspace` — kernel + SDK + plugin-logic tests.
+- `pnpm typecheck` — `tsc --noEmit` for every package (Vue packages via `vue-tsc`).
+- `pnpm test` — every `*.test.ts`; scope with `pnpm test:unit` / `test:contract` / `test:smoke`. The harness spawns the real kernel binary and auto-runs `cargo build -p launcher-kernel`.
+- `pnpm build` — release kernel + launcher UI + all 17 built-in plugins (view assets and `target/release/<bin>` copies).
+- `pnpm spec-check` — manifest self-audit (`docs/plugin-spec.md` §13: G1 / N1–N3, artifacts, remote resources).
+- `pnpm dev` / `pnpm dev:kernel` / `pnpm dev:ui` — kernel + UI in a browser without the shell; kernel data goes to `.dev-data/`.
+- `npm run shell:dev` — run the real macOS app; `npm run app:local` — package it.
+- `pnpm app:win` (Windows only) — Windows portable zip at `dist-app/Chassis-<version>-win-<arch>.zip`.
+- Windows cross-check from macOS: `cargo check --workspace --exclude launcher-plugin-translate --exclude launcher-plugin-internal-store --target x86_64-pc-windows-msvc`（被排除的两个 crate 依赖 `ring`，其 C 代码在 macOS 主机上交叉不到 MSVC；真 Windows 上无此问题）。The shell also needs a resource compiler for `tauri-build`: point `RC` at a stub whose probe output starts with `OVERVIEW: LLVM Resource Converter` and exits 0. Real Windows builds run in `.github/workflows/build-windows.yml`.
+- Windows binaries are **statically linked against the MSVC runtime** (`.cargo/config.toml` sets `+crt-static` for both msvc targets): the portable zip ships no VC++ redistributable, so a dynamic build fails on a clean machine with「找不到 VCRUNTIME140_1.dll」. `pack-win.mjs` scans the packed `.exe`s and fails the build if the flag stops taking effect — CI machines have the runtime installed, so they cannot catch it.
 
-## Release Channels & Independent Updates
+## Release Channels
 
-Three channels, each pinned to its own fixed tag; clients read plain `releases/download/<tag>/...` URLs (no GitHub API, no token). **CI never runs on `main` pushes** — `verify.yml` ignores `main`, and every publisher workflow is `workflow_dispatch` + its own tag prefix, so merging to `main` builds nothing. Releases are always explicit actions:
+Four independent tag channels; clients read plain `releases/download/<tag>/...` URLs (no GitHub API, no token). **CI never runs on `main` pushes** (`verify.yml` ignores `main`); dispatch releases build `main`, tag releases build the tag's commit — land the code first, then trigger explicitly.
 
-| Channel | Trigger | Artifacts (fixed tag) | How clients get it |
-|---|---|---|---|
-| App (shell), manual | tag `v*` → `release.yml` | whole package (`.app` / portable zip) | user installs it manually (new machines / auto-update off) |
-| **App (shell), update** | `gh workflow run app-release.yml --ref main` (or tag `app/*`) | `app-registry.json` + `Chassis-<ver>-macos-<arch>.zip` + `Chassis-<ver>-win-<arch>.zip` → `app-latest` | Update page →「应用」, reached from the **tray's permanent「检查更新…」item** (label carries the version when one is available) or the **About tab** card — the kernel watch (90s after boot, every 6h) only **checks and prompts**, and the tray item just opens the update page (it never updates by itself); the shell downloads and swaps the install via an out-of-process helper only after the user confirms (**both platforms**: macOS renames the `.app`, Windows renames the portable dir — `swap.sh` / `swap.ps1`; `config.autoUpdateCheck`) |
-| Kernel | `gh workflow run kernel-release.yml --ref main` (or tag `kernel/*`) | `kernel-registry.json` + `launcher-kernel-<ver>-<platform>-<arch>.zip` (kernel + `ui/`) → `kernel-latest` | 更新页 →「内核」→ 更新内核 (hot swap + graceful kernel restart) |
-| Plugins | `gh workflow run plugins-release.yml --ref main [-f plugins="<id>"]` (or tag `plugins/*`) | `<id>-<ver>-<platform>-<arch>.zip` + `registry.json` → `plugins-latest` | 更新页 → per-plugin update (hot reload) |
+| Channel | Trigger | Tag |
+|---|---|---|
+| App, manual | tag `v*` → `release.yml` | `v*` (installed by hand) |
+| App, self-update | `gh workflow run app-release.yml --ref main` (or `app/*`) | `app-latest` |
+| Kernel | `gh workflow run kernel-release.yml --ref main` (or `kernel/*`) | `kernel-latest` |
+| Plugins | `gh workflow run plugins-release.yml --ref main [-f plugins="<id>"]` (or `plugins/*`) | `plugins-latest` |
 
-- Versions are maintained in **one place: the root `version.json`** (`app` = shell/App, `kernel` = kernel). `pnpm version:set app 0.1.4` syncs `apps/shell/tauri.conf.json`, `apps/shell/Cargo.toml` and `apps/kernel/Cargo.toml`; `pnpm version:check` guards drift and runs in every release workflow. **Never hand-edit those `version` fields** — drift makes the auto-update channel fail silently (clients can't see a new version). Mechanism versions (`SHELL_HOT_VERSION` / `HOT_UPDATE_VERSION`) and plugin versions are *not* in the manifest.
-- Kernel/plugin releases **never restart the App**: bump the version (kernel via `version.json`, plugins via their own `package.json`), merge to `main`, then run the workflow — it builds the default branch, so code must land on `main` first. An **App (shell) release restarts the whole app** (kernel included) — that is the point of the auto-update channel.
-- **Publishing is instantly visible to every installed client** (source is a compile-time constant; no staged rollout). The only gates are `minHotVersion` (kernel package vs. client hot-update mechanism), `minShellHotVersion` (app package vs. client shell-update mechanism) and `minKernel` (plugin index vs. running kernel).
-- An App upgrade resets the baseline: the shell re-deploys the bundled kernel into `<dataRoot>/kernel/` (ledger `kernel.json` records `sourceAppVersion`), so kernel hot-updates lead only *between* App releases. The same applies to a **shell auto-update** (its version always changes) — expect the bundled kernel to be re-deployed right after.
-- App auto-update packages are signed in CI with the **same fixed certificate as local builds** (`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD` secrets; export via `node scripts/export-signing-cert.mjs`). Without those secrets the workflow falls back to ad-hoc and every update forces the user to re-grant TCC permissions (Accessibility / Screen Recording).
-- Partial plugin releases **must merge the previous `registry.json`** (`gen-plugin-registry.mjs --merge-registry`, done automatically by `plugins-release.yml`). Without it the index lists only the plugins packed in that run and every other plugin silently stops updating — guarded by `tests/unit/plugin-registry-merge.test.ts`.
-- Fixed-tag releases keep **only the assets the current index points to**: after `action-gh-release`, each publish workflow runs `scripts/prune-release-assets.mjs` (deletes `.zip` assets missing from the freshly generated index). Without it every version leaves orphan zips behind (zip names carry versions; `overwrite_files` only overwrites same names) — a release caps at 1000 assets, and hitting that cap breaks publishing.
-- 每个 publish workflow 末尾还把本次的索引与 zip **同步到 Gitee 镜像**（`scripts/sync-release-to-gitee.mjs` → 同名 tag / 同名文件名；Gitee 的 `releases/download/<tag>/<file>` 免登录直链，2026-09-20 实测 ~1MB/s）。需要仓库 secret `GITEE_TOKEN`（Gitee 私人令牌，`projects` 权限）：未配置则跳过本步；这步 `continue-on-error`，同步失败不阻塞主通道。删除策略与 `prune-release-assets.mjs` 同构（**按索引保留**）—— plugins 支持增量发布，`sync` 若「全删再传」会误删本次没重发的插件包（`tests/unit/gitee-release-sync.test.ts` 守护）。Gitee 侧另有配额约束（普通仓库附件总量 1GB）与匿名 API 限流，脚本已串行 + 退避。客户端（`internal-store` 0.1.3 起）**索引与产物都镜像优先、主源回落**：`lib.rs::PRIMARY_BASE` / `MIRROR_BASE` + `mirror_url()`（大小写不敏感）推导镜像地址，`bin/update.rs::fetch_verified()` 逐个候选尝试（sha256 不符也换下一个），白名单同步放行 `gitee.com`；日志会写明「索引/更新包来自 gitee.com」或「镜像不可用，已退回主源」。
+- **Versions** live in the root `version.json` only; `pnpm version:set` / `version:check` keep it in sync. **Never hand-edit the generated fields** — drift makes clients silently miss updates. Plugin versions stay in each plugin's `package.json`; mechanism versions (`SHELL_HOT_VERSION`, `HOT_UPDATE_VERSION`) are separate.
+- Kernel/plugin updates hot-swap without restarting the App; an App release restarts everything and re-deploys the bundled kernel. Publishing is instantly visible to all clients — the only gates are `minHotVersion` / `minShellHotVersion` / `minKernel`.
+- Release hygiene — asset pruning, registry merge on partial plugin releases, Gitee mirror, App signing: [docs/release-channels.md](docs/release-channels.md).
 
-## Coding Style & Naming Conventions
+## Coding Style
 
-TypeScript (view layer, UI, tooling): two-space indentation, single quotes, no semicolons, `strict` with `verbatimModuleSyntax` (type-only imports need `import type`). Rust (kernel + plugin logic): `rustfmt` defaults, 4-space indent. No linter/formatter is configured for TS — match existing style and rely on `pnpm typecheck`. Use kebab-case for plugin ids (`app-launcher`, `text-diff`), PascalCase for Vue components (`ResultGrid.vue`), camelCase for modules; no-view/script command names equal the artifact filename (`dist/<name>`). A kernel diff must never contain capability words (app/file/network) — those belong in plugins.
+TypeScript (view layer, UI, tooling): two-space indentation, single quotes, no semicolons, `strict` with `verbatimModuleSyntax` (type-only imports need `import type`). Rust (kernel + plugin logic): `rustfmt` defaults, 4-space indent. No linter or formatter is configured for TS — match the surrounding code and rely on `pnpm typecheck`.
 
-## Testing Guidelines
+- kebab-case plugin ids (`app-launcher`, `text-diff`); PascalCase Vue components (`ResultGrid.vue`); camelCase modules.
+- `no-view` / `script` command names equal the artifact filename (`dist/<name>`).
+- A kernel diff must never contain capability words — those belong in plugins.
 
-Rust tests live beside their modules plus `apps/kernel/tests/`. TS tests use a dependency-free harness (`tests/helpers/assert.ts`: `test` / `assert` / `assertEqual` / `run`) and `tests/helpers/harness.ts` spawns the real kernel binary (HTTP/SSE + stdio fake shell). Name files `*.test.ts`, write Chinese test titles describing behavior, and place suites in `tests/unit`, `tests/contract`, or `tests/smoke` (plugin-internal cases live beside their `core` code). No coverage gate; before handing off run `cargo test --workspace && pnpm typecheck && pnpm test && pnpm build && pnpm spec-check`, then exercise the packaged `.app`, since production resource paths differ from dev.
+## Testing
 
-## Commit & Pull Request Guidelines
+Rust tests live beside their modules, plus `apps/kernel/tests/`. TS tests use a dependency-free harness (`tests/helpers/assert.ts`: `test` / `assert` / `assertEqual` / `run`); `tests/helpers/harness.ts` spawns the real kernel (HTTP/SSE + stdio fake shell). Name files `*.test.ts`, write Chinese test titles describing behavior, and place suites in `tests/unit`, `tests/contract` or `tests/smoke` (plugin-internal cases live beside their `core` code). No coverage gate — the gate is the Verify command above.
 
-Commits follow Conventional Commits with a Chinese subject plus explanatory body: `feat: 启动台结果改为图标网格（分区折叠 / 键盘导航 / 拖拽重排）`, `refactor: 清除第三方兼容层 + plugins/shared 上收为 @launcher/ui`, `chore: .codebuddy 不入库`.
+## Commits & Pull Requests
 
-Pull requests: state the behavior change and rationale, list commands run (`typecheck` / `test` / `build` / `spec-check`), and attach a screenshot for UI changes. Spec-first — update `docs/launcher-requirements.md` or `docs/plugin-spec.md` (or add an ADR) before implementing unspecified behavior, and refresh docs whenever slots, fields, or schema change.
+Commits follow Conventional Commits with a Chinese subject plus an explanatory body: `feat: 启动台结果改为图标网格（分区折叠 / 键盘导航 / 拖拽重排）`, `fix(shell): Windows 应用热更新改轮询重试（目录被占用不再一次判死）`, `chore: 版本升到 0.1.11（app）`.
+
+PRs state the behavior change and rationale, list the commands run (`typecheck` / `test` / `build` / `spec-check`), and attach a screenshot for UI changes.
 
 ## Security & Configuration
 
-Runtime data lives in `~/Library/Application Support/Chassis` (macOS) / `%APPDATA%\Chassis` (Windows), overridable with `LAUNCHER_DATA_ROOT`; the pre-rename `Launcher/` directory is adopted once by the shell (macOS only — Windows had no prior release). Plugins may only write under their injected `dataPath`. Kernel protocol output stays on stdout, logs on stderr. Never persist secrets in plaintext.
+Runtime data lives in `~/Library/Application Support/Chassis` (macOS) / `%APPDATA%\Chassis` (Windows), overridable with `LAUNCHER_DATA_ROOT`. The pre-rename `Launcher/` directory is adopted once by the shell (macOS only — Windows had no prior release). Plugins may only write under their injected `dataPath`. Kernel protocol output stays on stdout; all logs go to stderr. Never persist secrets in plaintext.
