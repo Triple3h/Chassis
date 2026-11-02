@@ -114,7 +114,7 @@ pnpm pack:plugins               # 打 zip 到 plugins/release/
 > 权威定义在 `packages/plugin-api/src/index.ts`（view 侧）/ `packages/plugin-sdk-rs/src/`（逻辑层 Rust SDK），
 > 能力与错误码见 `docs/plugin-spec.md` §8。
 
-### 2.1 UI 侧（`import { clipboard, commands, exec, host, hostUi, screenshot, searchResult, storage } from '@launcher/api'`）
+### 2.1 UI 侧（`import { clipboard, commands, exec, host, hostUi, hostWindow, screenshot, searchResult, storage } from '@launcher/api'`）
 
 ```ts
 // 宿主探活与能力（isLauncher 是同步的）
@@ -128,6 +128,9 @@ await hostUi.setSearchContent(v: string): Promise<boolean>
 await hostUi.clearSearchContent(): Promise<boolean>
 hostUi.watchSearchContent(cb): () => void   // 返回取消函数
 await hostUi.hide(): Promise<void>
+
+// 无边框窗口：在插件自己的标题栏 mousedown 时调用（插件页是 iframe，宿主的拖拽区收不到里面的按下）
+await hostWindow.startDrag(): Promise<void>   // 聚合对象上是 api.window.startDrag()
 
 // 底部操作栏（仅 UI 环境）
 await hostUi.setFooter(buttons: FooterButton[]): Promise<boolean>

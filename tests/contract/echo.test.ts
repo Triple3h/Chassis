@@ -43,6 +43,10 @@ test('契约全表：host.info / storage / hostUi 走真实桥', async () => {
   assert(search.ok)
   const content = await h.bridge(sid, token, 'ctx.hostUi.getSearchContent')
   assertEqual(content.result, 'hello')
+
+  // 拖动窗口：宿主发起后立即回执（壳要等到松手才答，不能让插件调用挂住）
+  const drag = await h.bridge(sid, token, 'ctx.window.startDrag')
+  assert(drag.ok, `window.startDrag 失败：${JSON.stringify(drag.error)}`)
 })
 
 test('契约：exec.run 拉起本插件 script 命令并拿到 done(x)', async () => {

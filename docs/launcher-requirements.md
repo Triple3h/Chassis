@@ -691,6 +691,7 @@ window.parent.postMessage({ __launcher: 1, token, id, method, params }, '*')
 | `ctx.hostUi.clearSearchContent` | `hostUi` | — | `boolean` |
 | `ctx.hostUi.setFooter` | `hostUi` | `{ buttons }` | `boolean` |
 | `ctx.hostUi.hide` | `hostUi` | — | `void` |
+| `ctx.window.startDrag` | — | — | `void`（插件页在自己的标题栏 mousedown 时请求拖动窗口；iframe 里的按下事件不会到宿主） |
 | `ctx.clipboard.readText` | `clipboard.read` | — | `string` |
 | `ctx.clipboard.writeText` | `clipboard.write` | `{ text }` | `void` |
 | `ctx.shell.openUrl` | `shell.open` | `{ url }` | `void` |

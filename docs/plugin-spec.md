@@ -621,6 +621,7 @@ const content = await hostUi.getSearchContent()
 | `hostUi.clearSearchContent()` | `hostUi` | | `boolean` |
 | `hostUi.setFooter(buttons)` | `hostUi` | 见 §10.3 | `boolean` |
 | `hostUi.hide()` | `hostUi` | | `void` |
+| `window.startDrag()` | — | — | `void`（无边框窗口：在插件自己的标题栏 mousedown 时调用，之后移动交给系统；具名导出是 `hostWindow`，聚合对象上为 `api.window`） |
 | `clipboard.readText()` | `clipboard.read` | | `string` |
 | `clipboard.writeText(text)` | `clipboard.write` | | `void` |
 | `shell.openUrl(url)` | `shell.open` | 仅 http/https/mailto | `void` |

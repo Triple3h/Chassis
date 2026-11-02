@@ -303,6 +303,15 @@ export const hostUi = {
   },
 }
 
+/**
+ * 无边框窗口：在**插件自己的标题栏**上 mousedown 时调用，之后移动交给系统。
+ * 插件页是 iframe，宿主收不到里面的 mousedown，所以这一步只能由插件发起
+ * （聚合对象上是 `api.window`）。
+ */
+export const hostWindow = {
+  startDrag: (options?: CallOptions): Promise<void> => post('ctx.window.startDrag', undefined, options) as Promise<void>,
+}
+
 export const clipboard = {
   readText: (options?: CallOptions): Promise<string> => post('ctx.clipboard.readText', undefined, options) as Promise<string>,
   writeText: (text: string, options?: CallOptions): Promise<void> =>
@@ -476,6 +485,7 @@ export const api = {
   searchResult,
   storage,
   hostUi,
+  window: hostWindow,
   clipboard,
   shell,
   exec,

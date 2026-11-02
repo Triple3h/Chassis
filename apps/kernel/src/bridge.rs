@@ -190,6 +190,15 @@ impl BridgeDispatcher {
                 }))
             }
             "ctx.log" | "ctx.log.info" => return Ok(Value::Null),
+            // 插件页是 iframe：它自己的标题栏要能拖动窗口，只能由插件把这次 mousedown 交给宿主。
+            // macOS 的拖动要等松手才回执，所以这里发起后立即返回，不能把插件调用挂住。
+            "ctx.window.startDrag" => {
+                let primitives = self.deps.primitives.clone();
+                tokio::spawn(async move {
+                    let _ = primitives.start_dragging().await;
+                });
+                return Ok(Value::Null);
+            }
             "ctx.commands.invoke" => {
                 let command = str_param(&params, "command")?;
                 let id = if command.contains(':') { command } else { format!("{plugin_id}:{command}") };
@@ -403,6 +412,7 @@ mod tests {
         assert_eq!(capability_for("ctx.log"), "");
         assert_eq!(capability_for("ctx.commands.invoke"), "");
         assert_eq!(capability_for("ctx.settings.get"), "");
+        assert_eq!(capability_for("ctx.window.startDrag"), "");
     }
 
     #[test]

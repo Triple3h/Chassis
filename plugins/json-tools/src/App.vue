@@ -4,7 +4,7 @@ import AppShell from '@launcher/ui/AppShell.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useToast } from '@launcher/ui/toast'
 import { copyText, downloadBlob, fileFromDataTransfer, pickFile } from '@launcher/ui/clipboard'
-import { hostUi, storage } from '@launcher/api'
+import { hostUi, hostWindow, storage } from '@launcher/api'
 import { isTypingTarget, isMod, modLabel } from '@launcher/ui/keys'
 import { useTheme } from '@launcher/ui/theme'
 import type { FormatOptions, FormatResult, IndentOption } from './core/format'
@@ -636,6 +636,14 @@ async function syncFooter() {
   ])
 }
 
+/** 顶栏空白处按下 = 拖窗口：插件页是 iframe，宿主收不到这里的事件，只能由插件转交 */
+function onHeaderMouseDown(event: MouseEvent): void {
+  if (event.button !== 0) return
+  if ((event.target as HTMLElement | null)?.closest('button, input, textarea, select, a, [role="button"]')) return
+  event.preventDefault()
+  void hostWindow.startDrag().catch(() => undefined)
+}
+
 let stopWatch: (() => void) | null = null
 
 onMounted(async () => {
@@ -663,7 +671,7 @@ onUnmounted(() => {
 <template>
   <AppShell>
     <!-- 顶栏：右侧只剩「文件」（打开 / 导出都在它的下拉里） -->
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2">
+    <header class="flex items-center gap-2 border-b border-line px-3 py-2" @mousedown="onHeaderMouseDown">
       <UiIcon name="braces" :size="16" class="text-accent" />
       <span class="text-[13px] font-semibold">JSON 工具箱</span>
       <span v-if="cur.busy" class="launcher-chip">计算中…</span>
