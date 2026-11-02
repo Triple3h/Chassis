@@ -57,15 +57,15 @@ if (command === 'write') {
 }
 
 function writeChangelog() {
-  const section = buildSection()
-  if (!section) {
-    console.log('· 没有可写入的变更（docs/chore/test/ci/build/style 不计）')
-    process.exit(0)
-  }
   const full = path.join(root, file)
   let text = fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : header()
   if (new RegExp(`^## \\[${escapeRegExp(version)}\\]`, 'm').test(text)) {
     console.log(`· ${file} 已有 ${version}，跳过`)
+    process.exit(0)
+  }
+  const section = buildSection()
+  if (!section) {
+    console.log('· 没有可写入的变更（docs/chore/test/ci/build/style 不计）')
     process.exit(0)
   }
   const first = text.search(/^## \[/m)
