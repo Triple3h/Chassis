@@ -83,9 +83,14 @@ jobs:
           path: kernel/release
           merge-multiple: true
 
+      - name: 更新说明（来自 CHANGELOG-kernel.md）
+        id: changelog
+        if: ${{ !inputs.notes }}
+        run: node scripts/changelog.mjs notes --channel kernel --github-output notes
+
       - name: 汇总生成 kernel-registry.json
         env:
-          NOTES: ${{ inputs.notes }}
+          NOTES: ${{ inputs.notes || steps.changelog.outputs.notes }}
           MIN_HOT: ${{ inputs.min_hot_version }}
         run: |
           args=()

@@ -33,7 +33,11 @@ if (parsed.version && expected && parsed.version !== expected) {
 
 const output = process.env.GITHUB_OUTPUT
 if (!output) fail('缺少 GITHUB_OUTPUT（--github-output 只给 GitHub Actions 用）')
-fs.appendFileSync(output, `plugins=${(parsed.plugins ?? []).join(' ')}\n`)
+const single = parsed.plugins?.length === 1 ? parsed.plugins[0] : ''
+fs.appendFileSync(
+  output,
+  `plugins=${(parsed.plugins ?? []).join(' ')}\nplugin=${single}\nversion=${parsed.version ?? ''}\n`,
+)
 
 function expectedVersion(tag) {
   if (tag.plugins?.length) {

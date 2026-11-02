@@ -3,9 +3,12 @@
  * 一键发版：bump → verify → commit → tag → 推送（默认走 SSH）。
  * tag 触发对应的发布 workflow，客户端仍从固定 tag 直链读取 —— 全程不经过 GitHub API / token。
  *
- *   pnpm ship kernel [--version x.y.z] [--skip-verify] [--dry-run]
+ *   pnpm ship kernel [--version x.y.z] [--notes "一句人话"] [--skip-verify] [--dry-run]
  *   pnpm ship app    [--version x.y.z] [...]
  *   pnpm ship plugin <id> [--version x.y.z] [...]
+ *
+ * 同时把本次变更写进对应通道的 CHANGELOG（Keep a Changelog 格式，见 scripts/changelog.mjs），
+ * 发布 workflow 会把该版本那一段作为更新页的 notes。
  *
  * tag 约定见 docs/release-channels.md §1。版本已经是目标值时只打 tag、不再 bump，
  * 所以「提交已就位、只差发布」也可以用同一条命令。
@@ -38,6 +41,7 @@ const argv = process.argv.slice(2)
 const positional = []
 let versionArg = null
 let remoteArg = null
+let notesArg = null
 for (let index = 0; index < argv.length; index += 1) {
   const arg = argv[index]
   if (arg === '--version') {
@@ -50,6 +54,11 @@ for (let index = 0; index < argv.length; index += 1) {
     if (!remoteArg) fail('--remote 缺少值')
     continue
   }
+  if (arg === '--notes') {
+    notesArg = argv[++index]
+    if (!notesArg) fail('--notes 缺少值')
+    continue
+  }
   if (arg.startsWith('--')) {
     if (!ALLOWED.has(arg)) fail(`未知参数：${arg}`)
     flags.add(arg)
@@ -60,7 +69,7 @@ for (let index = 0; index < argv.length; index += 1) {
 
 const [target, pluginId] = positional
 if (!['kernel', 'app', 'plugin'].includes(target)) {
-  fail('用法：pnpm ship <kernel|app|plugin <id>> [--version x.y.z] [--skip-verify] [--dry-run]')
+  fail('用法：pnpm ship <kernel|app|plugin <id>> [--version x.y.z] [--notes "…"] [--skip-verify] [--dry-run]')
 }
 if (target === 'plugin' && !pluginId) fail('plugin 需要插件 id：pnpm ship plugin json-tools')
 
@@ -93,6 +102,8 @@ const files =
     : target === 'app'
       ? ['version.json', 'apps/shell/tauri.conf.json', 'apps/shell/Cargo.toml', 'apps/shell/Cargo.lock']
       : [`plugins/${pluginId}/package.json`]
+const changelogFile =
+  target === 'app' ? 'CHANGELOG.md' : target === 'kernel' ? 'CHANGELOG-kernel.md' : `plugins/${pluginId}/CHANGELOG.md`
 
 const remote = remoteArg ?? process.env.SHIP_REMOTE ?? sshRemote(capture('git', ['remote', 'get-url', 'origin']))
 const actionsUrl = workflowUrl(remote, workflow)
@@ -100,6 +111,7 @@ const actionsUrl = workflowUrl(remote, workflow)
 if (flags.has('--dry-run')) {
   console.log(`计划：${tag} → ${workflow}`)
   console.log(`  版本：${current}${bumped ? ` → ${next}` : '（已就位，只打 tag）'}`)
+  console.log(`  变更记录：${changelogFile}`)
   console.log(`  远程：${remote}`)
   process.exit(0)
 }
@@ -119,15 +131,40 @@ if (bumped) {
     run('node', ['scripts/version.mjs', 'set', target, next])
     run('node', ['scripts/version.mjs', 'check'])
   }
+} else {
+  console.log(`· 版本已是 ${next}，跳过 bump`)
+}
+
+const changelogArgs = [
+  'scripts/changelog.mjs',
+  'write',
+  '--channel',
+  target === 'plugin' ? 'plugin' : target,
+  '--version',
+  next,
+]
+if (target === 'plugin') changelogArgs.push('--id', pluginId)
+if (notesArg) changelogArgs.push('--notes', notesArg)
+run('node', changelogArgs)
+
+const changelogPath = path.join(repoRoot, changelogFile)
+const changelogChanged =
+  fs.existsSync(changelogPath) && capture('git', ['status', '--porcelain', '--', changelogFile]) !== ''
+
+if (bumped) {
   const message =
     target === 'kernel'
       ? `chore: 版本升到 kernel ${next}`
       : target === 'app'
         ? `chore: 版本升到 app ${next}`
         : `chore: ${pluginId} 升到 ${next}`
-  run('git', ['commit', '--only', '-m', message, '--', ...files])
-} else {
-  console.log(`· 版本已是 ${next}，跳过 bump`)
+  const commitFiles = changelogChanged ? [...files, changelogFile] : files
+  run('git', ['add', '--', ...commitFiles])
+  run('git', ['commit', '--only', '-m', message, '--', ...commitFiles])
+} else if (changelogChanged) {
+  const name = target === 'plugin' ? pluginId : target
+  run('git', ['add', '--', changelogFile])
+  run('git', ['commit', '--only', '-m', `docs: ${name} ${next} 变更记录`, '--', changelogFile])
 }
 
 const existing = capture('git', ['tag', '-l', tag])

@@ -105,7 +105,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [macos, windows]
+    needs: [meta, macos, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -130,9 +130,17 @@ jobs:
             echo "首次发布：plugins-latest 尚不存在，按全新索引发布"
           fi
 
+      - name: 更新说明（来自插件 CHANGELOG）
+        id: changelog
+        if: ${{ !inputs.notes && needs.meta.outputs.plugin != '' }}
+        env:
+          PLUGIN: ${{ needs.meta.outputs.plugin }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: node scripts/changelog.mjs notes --channel plugin --id "$PLUGIN" --version "$VERSION" --github-output notes
+
       - name: 汇总生成 registry.json
         env:
-          PLUGIN_NOTES: ${{ inputs.notes }}
+          PLUGIN_NOTES: ${{ inputs.notes || steps.changelog.outputs.notes }}
           MIN_KERNEL: ${{ inputs.min_kernel }}
         run: |
           args=()

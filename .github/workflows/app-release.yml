@@ -143,9 +143,14 @@ jobs:
           path: app/release
           merge-multiple: true
 
+      - name: 更新说明（来自 CHANGELOG.md）
+        id: changelog
+        if: ${{ !inputs.notes }}
+        run: node scripts/changelog.mjs notes --channel app --github-output notes
+
       - name: 汇总生成 app-registry.json
         env:
-          NOTES: ${{ inputs.notes }}
+          NOTES: ${{ inputs.notes || steps.changelog.outputs.notes }}
           MIN_HOT: ${{ inputs.min_shell_hot_version }}
         run: |
           args=()
