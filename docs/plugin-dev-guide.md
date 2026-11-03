@@ -117,8 +117,9 @@ await hostUi.clearSearchContent(): Promise<boolean>
 hostUi.watchSearchContent(cb): () => void   // 返回取消函数
 await hostUi.hide(): Promise<void>
 
-// 无边框窗口：在插件自己的标题栏 mousedown 时调用（插件页是 iframe，宿主的拖拽区收不到里面的按下）
-await hostWindow.startDrag(): Promise<void>   // 聚合对象上是 api.window.startDrag()
+// 无边框窗口：页首 <header> 与顶缘 8px 由 SDK 自动接管（插件页是 iframe，宿主的拖拽区收不到里面的按下）；
+// 只有自定义拖动区才需要手动调用，聚合对象上是 api.window.startDrag()
+await hostWindow.startDrag(): Promise<void>
 
 // 底部操作栏（仅 UI 环境）
 await hostUi.setFooter(buttons: FooterButton[]): Promise<boolean>

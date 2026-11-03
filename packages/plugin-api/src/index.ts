@@ -448,6 +448,39 @@ function handBackEscape(): void {
 
 handBackEscape()
 
+/**
+ * 窗口拖动：插件页是 iframe，宿主收不到里面的 mousedown，由 SDK 统一转交。
+ *
+ * 约定（插件无需调用）：页首的 `<header>`（贴着视口顶部）与顶缘 8px 是拖动区；
+ * 自定义标题栏可加 `data-window-drag`。按钮 / 输入框 / 链接等交互元素上按下不抢 ——
+ * 那里每一次 mousedown 都有正经用途。对话框里的 `<header>` 不贴顶，不参与。
+ */
+function installWindowDrag(): void {
+  if (typeof window === 'undefined' || !isInLauncher()) return
+  window.addEventListener(
+    'mousedown',
+    (event: MouseEvent) => {
+      if (event.button !== 0) return
+      const target = event.target as HTMLElement | null
+      if (!target) return
+      if (target.closest('button, input, textarea, select, a, [role="button"], [contenteditable="true"]')) return
+      if (!isWindowDragSurface(event, target)) return
+      event.preventDefault()
+      void hostWindow.startDrag().catch(() => undefined)
+    },
+    true,
+  )
+}
+
+function isWindowDragSurface(event: MouseEvent, target: HTMLElement): boolean {
+  if (target.closest('[data-window-drag]')) return true
+  const header = target.closest('header')
+  if (header) return header.getBoundingClientRect().top <= 8
+  return event.clientY <= 8
+}
+
+installWindowDrag()
+
 /** 插件清理（SDK 统一回收，plugin-spec §6.2） */
 export function onCleanup(fn: () => void): () => void {
   cleanups.push(fn)

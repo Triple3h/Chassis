@@ -303,6 +303,8 @@ interface SettingDecl {
 - 入口固定 `index.html`，多个 view 命令共用；用 `?cmd=` 区分，**必须**按 `cmd` 做内部分支或路由
 - 会话：宿主打开命令时创建一个会话（`sid`），关闭页面即销毁；**不保证**会话跨次保留（要持久化用 `ctx.storage`）
 - 尺寸：宿主窗口宽度固定；页面高度自适应并**自滚动**，不要嵌套滚动容器
+- 拖动：页首的 `<header>`（贴着视口顶部）与顶缘 8px 是窗口拖动区，`@launcher/api` 自动接管；
+  按钮 / 输入框 / 链接等交互元素上不触发。自定义标题栏元素可加 `data-window-drag` 标成拖动区
 - 关闭：footer「返回」/ `Esc` / `⌘W` 由宿主统一收口（**回到搜索态**，不是隐藏窗口）；插件也可用 `ctx.commands.close` 主动关闭会话。
   插件页是独立文档，宿主的键盘监听收不到焦点在 iframe 里的按键 —— `@launcher/api` 已兜底：**没有被插件消费**的 `Esc`
   自动交还宿主（等价 `commands.close()`）。插件消费 Esc（关掉自己画的弹层、清空搜索框）时**必须** `preventDefault()`
@@ -613,7 +615,7 @@ const content = await hostUi.getSearchContent()
 | `hostUi.clearSearchContent()` | `hostUi` | | `boolean` |
 | `hostUi.setFooter(buttons)` | `hostUi` | 见 §10.3 | `boolean` |
 | `hostUi.hide()` | `hostUi` | | `void` |
-| `window.startDrag()` | — | — | `void`（无边框窗口：在插件自己的标题栏 mousedown 时调用，之后移动交给系统；具名导出是 `hostWindow`，聚合对象上为 `api.window`） |
+| `window.startDrag()` | — | — | `void`（无边框窗口：页首 `<header>` 与顶缘 8px 已由 SDK 自动接管；只有自定义拖动区才需要手动调用。具名导出是 `hostWindow`，聚合对象上为 `api.window`） |
 | `clipboard.readText()` | `clipboard.read` | | `string` |
 | `clipboard.writeText(text)` | `clipboard.write` | | `void` |
 | `shell.openUrl(url)` | `shell.open` | 仅 http/https/mailto | `void` |
