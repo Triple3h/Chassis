@@ -3,7 +3,7 @@
   "title": "计算稿纸",
   "author": "triple3h",
   "description": "像稿纸一样一行行算下去：实时求值、变量复用、自动保存；在启动台输入算式会直接给出结果并回车打开稿纸",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "apiVersion": "2",

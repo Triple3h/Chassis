@@ -3,7 +3,7 @@
   "title": "剪贴板历史",
   "author": "triple3h",
   "description": "自动记录复制过的文本 / 图片 / 文件，随时搜回来再贴一次（Windows 专属）",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "apiVersion": "2",

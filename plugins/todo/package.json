@@ -3,7 +3,7 @@
   "title": "ToDo 待办",
   "author": "triple3h",
   "description": "记待办、标优先级、蹲截止日期，内置番茄钟专注计时",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "apiVersion": "2",

@@ -3,7 +3,7 @@
   "title": "Markdown 笔记",
   "author": "triple3h",
   "description": "Markdown 笔记：边写边预览、自动保存、可导出 Markdown / HTML",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "apiVersion": "2",
