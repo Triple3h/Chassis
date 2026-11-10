@@ -1,6 +1,6 @@
 # 第三方组件与许可证
 
-> 状态：随依赖与衍生实现变更维护 ｜ 最后更新：2026-09-17
+> 状态：随依赖与衍生实现变更维护 ｜ 最后更新：2026-11-10
 
 本仓库包含以下第三方组件的衍生实现或数据，均保留了原始许可证与版权声明。
 本仓库整体以 MIT 许可发布，见根目录 [LICENSE](../LICENSE)。
@@ -63,60 +63,20 @@ SOFTWARE.
 
 ---
 
-## Lucide（ISC；其中 Feather 衍生图标为 MIT）
+## 图标（自绘；命名沿用 lucide 习惯）
 
-- 仓库：<https://github.com/lucide-icons/lucide>
-- 许可证：ISC License, Copyright (c) 2026 Lucide Icons and Contributors；其中从 Feather 衍生的一部分图标为 MIT License, Copyright (c) 2013-present Cole Bemis（`search` / `terminal` / `check` / `trash` / `plus` / `server` 等在本仓库使用范围内）
-- 用途：**图标数据来源**（非依赖）。`packages/ui/lib/icons.ts` 内置的 svg 子元素取自 lucide 官方图标，渲染仍由本仓库完成（宿主网格 `apps/launcher-ui/src/components/IconGlyph.vue`、设置页插件列表 `plugins/internal-settings` 都从这里取）。
+- 命名参考：<https://github.com/lucide-icons/lucide>（ISC / 部分 Feather 衍生图标 MIT）
+- 用途：**仅沿用图标名称作为清单字段的兼容写法**（`terminal` / `git-compare` / `shield-check` 等），
+  便于既有插件与第三方插件继续按名字引用。
+- 2026-11-10 起，`packages/ui/lib/icons.ts` 与 `packages/ui/ui/UiIcon.vue` 的几何图形全部由本仓库
+  按统一的 Liquid Glass 线稿规范**重新绘制**（24 viewBox、1.75 描边、圆头圆角、20px 光学尺寸）。
+  **不再内联或派生 lucide 的 path 数据**，因此不再附带 ISC / Feather MIT 的许可义务；
+  该节仅保留命名对照与来源说明，不构成代码或数据分发。
+- 壳位图（`apps/shell/icons/`）同样为原创：`scripts/make-icon.mjs` 生成 squircle 玻璃盘 +
+  输入框字形 + 放大镜托盘字形。
 
-> **为什么内联而不装包**：图标是可枚举的静态数据，内联进 `lib/icons.ts` 后总体积只有几 KB，
-> 同时保持离线可用、零运行时依赖；`docs/plugin-spec.md §10.4` 据此只允许三种图标形态（lucide 名 / 相对路径 / data URL）。
-
-### ISC License 原文（Lucide）
-
-```
-ISC License
-
-Copyright (c) 2026 Lucide Icons and Contributors
-
-Permission to use, copy, modify, and/or distribute this software for any
-purpose with or without fee is hereby granted, provided that the above
-copyright notice and this permission notice appear in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-```
-
-### MIT License 原文（Feather 衍生图标）
-
-```
-MIT License
-
-Copyright (c) 2013-present Cole Bemis
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+> 如果将来重新引入任何第三方图标数据，必须在本节补回对应许可证原文，并在
+> `docs/plugin-spec.md §10.4` 记录来源与替换范围。
 
 ---
 

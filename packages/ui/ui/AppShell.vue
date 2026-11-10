@@ -25,7 +25,7 @@ onUnmounted(() => observer?.disconnect())
 </script>
 
 <template>
-  <div class="relative h-full w-full flex flex-col bg-bg text-fg overflow-hidden">
+  <div class="launcher-shell relative h-full w-full flex flex-col text-fg overflow-hidden">
     <slot />
 
     <!-- 轻提示：显式给 duration，收尾走定时器而不是 transitionend（宿主隐藏窗口会暂停渲染） -->
@@ -34,16 +34,38 @@ onUnmounted(() => observer?.disconnect())
         <div
           v-for="t in items"
           :key="t.id"
-          class="rounded-lg border border-line px-3 py-1.5 text-[12.5px] shadow-lg backdrop-blur"
+          class="launcher-glass-strong rounded-lg px-3 py-1.5 text-[12.5px]"
           :class="{
-            'bg-panel text-fg': t.tone === 'info',
-            'bg-panel text-success': t.tone === 'success',
-            'bg-panel text-danger': t.tone === 'error',
+            'text-fg': t.tone === 'info',
+            'text-success': t.tone === 'success',
+            'text-danger': t.tone === 'error',
           }"
         >
           {{ t.text }}
         </div>
       </TransitionGroup>
     </div>
+
+    <!-- 折射滤镜：插件页里需要边缘折射的面板用 filter: url(#launcher-refract)。
+         隐藏的 0×0 SVG 只提供定义，不参与布局。 -->
+    <svg class="launcher-defs" width="0" height="0" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="launcher-refract" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.009 0.014" numOctaves="2" seed="7" result="noise" />
+          <feGaussianBlur in="noise" stdDeviation="1.1" result="soft" />
+          <feDisplacementMap in="SourceGraphic" in2="soft" scale="3.5" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </defs>
+    </svg>
   </div>
 </template>
+
+<style scoped>
+.launcher-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+</style>

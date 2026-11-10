@@ -21,7 +21,7 @@ const groups = computed(() => parseChangelog(props.notes))
       </div>
       <ul class="space-y-0.5">
         <li v-for="(item, itemIndex) in group.items" :key="itemIndex" class="flex gap-1.5">
-          <span class="mt-[7px] size-[3px] shrink-0 rounded-full bg-faint/70" />
+          <span class="mt-[7px] size-[3px] shrink-0 rounded-full bg-accent/60" />
           <span class="min-w-0 break-words">
             <template v-for="(segment, segmentIndex) in item" :key="segmentIndex">
               <strong v-if="segment.bold" class="font-medium text-muted">{{ segment.text }}</strong>

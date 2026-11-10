@@ -74,13 +74,14 @@
 }
 
 .launcher-row {
-  transition: background 0.12s ease;
+  transition: background var(--launcher-motion-fast) var(--launcher-ease-move);
 }
 
 .launcher-scan-box {
   border: 1px dashed var(--launcher-line-strong);
-  border-radius: 10px;
+  border-radius: var(--launcher-radius-md);
   background: var(--launcher-panel-2);
+  box-shadow: inset 0 1px 2px var(--launcher-glass-lo);
 }
 
 @keyframes launcher-pulse {
@@ -108,12 +109,12 @@
    --launcher-accent 会跟着换，而这组派生填充不换（半透明叠色换色相的收益小于不一致的代价）。
    明暗两值成对写在同一个 --launcher-if-light / --launcher-if-dark 行里（见 theme.css）。 */
 :root {
-  --totp-sel-bg: var(--launcher-if-light, rgba(37, 99, 235, 0.09)) var(--launcher-if-dark, rgba(91, 140, 255, 0.13));
-  --totp-sel-line: var(--launcher-if-light, rgba(37, 99, 235, 0.34)) var(--launcher-if-dark, rgba(91, 140, 255, 0.38));
-  --totp-soft-bg: var(--launcher-if-light, rgba(37, 99, 235, 0.13)) var(--launcher-if-dark, rgba(91, 140, 255, 0.17));
-  --totp-soft-line: var(--launcher-if-light, rgba(37, 99, 235, 0.26)) var(--launcher-if-dark, rgba(91, 140, 255, 0.3));
-  --totp-ok-bg: var(--launcher-if-light, rgba(22, 163, 74, 0.08)) var(--launcher-if-dark, rgba(74, 222, 128, 0.09));
-  --totp-ok-line: var(--launcher-if-light, rgba(22, 163, 74, 0.45)) var(--launcher-if-dark, rgba(74, 222, 128, 0.4));
+  --totp-sel-bg: var(--launcher-if-light, rgba(47, 111, 228, 0.09)) var(--launcher-if-dark, rgba(116, 168, 255, 0.13));
+  --totp-sel-line: var(--launcher-if-light, rgba(47, 111, 228, 0.34)) var(--launcher-if-dark, rgba(116, 168, 255, 0.38));
+  --totp-soft-bg: var(--launcher-if-light, rgba(47, 111, 228, 0.13)) var(--launcher-if-dark, rgba(116, 168, 255, 0.17));
+  --totp-soft-line: var(--launcher-if-light, rgba(47, 111, 228, 0.26)) var(--launcher-if-dark, rgba(116, 168, 255, 0.3));
+  --totp-ok-bg: var(--launcher-if-light, rgba(31, 143, 95, 0.08)) var(--launcher-if-dark, rgba(99, 214, 156, 0.09));
+  --totp-ok-line: var(--launcher-if-light, rgba(31, 143, 95, 0.45)) var(--launcher-if-dark, rgba(99, 214, 156, 0.4));
 }
 
 /* 顶栏品牌块 —— 与头像同一种圆角色块，把「这是哪个插件」立起来 */
@@ -122,10 +123,13 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 9px;
+  border-radius: var(--launcher-radius-sm);
   color: var(--launcher-accent);
-  background: var(--totp-soft-bg);
+  background:
+    linear-gradient(180deg, var(--launcher-glass-sheen), transparent 52%),
+    var(--totp-soft-bg);
   border: 1px solid var(--totp-soft-line);
+  box-shadow: inset 0 1px 0 var(--launcher-glass-hi);
 }
 
 .launcher-search {
@@ -208,14 +212,20 @@
 /* 账户卡片 */
 .launcher-card {
   border: 1px solid var(--launcher-line);
-  border-radius: 12px;
-  background: var(--launcher-panel);
+  border-radius: var(--launcher-radius-md);
+  background:
+    linear-gradient(180deg, var(--launcher-glass-sheen), transparent 48%),
+    var(--launcher-panel);
+  box-shadow: inset 0 1px 0 var(--launcher-glass-hi);
   transition:
     background var(--launcher-motion-fast) var(--launcher-ease-move),
-    border-color var(--launcher-motion-fast) var(--launcher-ease-move);
+    border-color var(--launcher-motion-fast) var(--launcher-ease-move),
+    box-shadow var(--launcher-motion-fast) var(--launcher-ease-move);
 }
 .launcher-card:hover {
-  background: var(--launcher-hover);
+  background:
+    linear-gradient(180deg, var(--launcher-glass-sheen), transparent 48%),
+    var(--launcher-hover);
 }
 .launcher-card.is-selected {
   background: var(--totp-sel-bg);
@@ -249,8 +259,8 @@
   cursor: grabbing;
   border-color: var(--launcher-line-strong);
   box-shadow:
-    0 10px 24px rgba(0, 0, 0, 0.16),
-    0 2px 6px rgba(0, 0, 0, 0.1);
+    inset 0 1px 0 var(--launcher-glass-hi),
+    var(--launcher-elev-2);
 }
 @media (prefers-reduced-motion: no-preference) {
   .launcher-list-moving .launcher-card {
@@ -272,14 +282,15 @@
   flex: none;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--launcher-radius-sm);
   color: #fff;
   font-size: 14px;
   font-weight: 600;
   user-select: none;
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
-    inset 0 -1px 3px rgba(0, 0, 0, 0.16);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    inset 0 -1px 3px rgba(0, 0, 0, 0.18),
+    0 4px 10px -6px rgba(0, 0, 0, 0.35);
 }
 
 /* 验证码：单击即复制 —— 平时不加装饰，悬停才浮出一层浅底 */
@@ -354,9 +365,13 @@
   width: 52px;
   height: 52px;
   margin: 0 auto;
-  border-radius: 16px;
+  border-radius: var(--launcher-radius-lg);
   color: var(--launcher-accent);
-  background: var(--totp-soft-bg);
+  background:
+    linear-gradient(180deg, var(--launcher-glass-sheen), transparent 50%),
+    var(--totp-soft-bg);
+  border: 1px solid var(--totp-soft-line);
+  box-shadow: inset 0 1px 0 var(--launcher-glass-hi);
 }
 
 .launcher-hint {

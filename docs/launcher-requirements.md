@@ -641,7 +641,7 @@ interface CommandDecl {
   name: string           // 唯一；等于脚本产物文件名
   title: string
   subtitle?: string
-  icon?: string          // lucide 图标名 / data URL / 插件内相对路径
+  icon?: string          // 内置图标字典名（兼容 lucide 命名）/ data URL / 插件内相对路径
   mode: 'view' | 'no-view' | 'script'
   searchable?: boolean   // 默认 false；true 时参与全局搜索并展示 placeholder
   placeholder?: string

@@ -70,7 +70,7 @@ const nameStyle = computed(() => {
   <div
     class="grid-item group"
     :class="[
-      selected ? 'is-selected' : 'hover:bg-[var(--hover)]',
+      selected ? 'is-selected' : '',
       result.stale ? 'opacity-45' : '',
       dragging ? 'is-dragging' : '',
       dropTarget ? 'is-drop-target' : '',
@@ -106,10 +106,10 @@ const nameStyle = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
   padding: 8px 4px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   cursor: default;
   user-select: none;
   overflow: hidden;
@@ -122,8 +122,19 @@ const nameStyle = computed(() => {
     transform var(--motion-instant) var(--motion-ease-move);
 }
 
+.grid-item:hover:not(.is-selected) {
+  background: color-mix(in srgb, var(--panel) 38%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-hi) 65%, transparent);
+}
+
 .grid-item.is-selected {
-  background: var(--sel);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--glass-hi) 75%, transparent), transparent 72%),
+    var(--sel);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 32%, transparent),
+    0 12px 26px -20px color-mix(in srgb, var(--color-accent) 85%, transparent);
 }
 
 /* 按下去「陷」一下：结果项点下去就执行，这是唯一能给的触感 */
@@ -144,6 +155,20 @@ const nameStyle = computed(() => {
   position: relative;
   flex-shrink: 0;
   display: block;
+  transition: transform var(--motion-instant) var(--motion-ease-move);
+}
+
+.grid-item:hover .grid-icon {
+  transform: translateY(-1px);
+}
+
+/* 选中 / 悬停时磁贴边缘亮起 —— 图标是格子里最重的视觉锚点 */
+.grid-item.is-selected :deep(.icon-tile) {
+  border-color: color-mix(in srgb, var(--color-accent) 48%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 26%, transparent),
+    0 12px 24px -14px color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
 
 .grid-badge {
@@ -156,7 +181,8 @@ const nameStyle = computed(() => {
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  border: 1.5px solid var(--bg-solid);
+  border: 1.5px solid color-mix(in srgb, var(--panel-strong) 92%, transparent);
+  box-shadow: 0 2px 6px -2px var(--tile-shadow);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -182,5 +208,6 @@ const nameStyle = computed(() => {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--glass-hi) 40%, transparent);
 }
 </style>

@@ -36,7 +36,7 @@ const widthClass = { sm: 'max-w-[380px]', md: 'max-w-[520px]', wide: 'max-w-[720
   <Transition name="launcher-mask" appear :duration="{ enter: 200, leave: 140 }">
     <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-4" @click.self="emit('close')">
       <div
-        class="launcher-dialog-pop flex max-h-[86vh] w-full flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl"
+        class="launcher-dialog-pop launcher-glass-strong flex max-h-[86vh] w-full flex-col overflow-hidden rounded-xl"
         :class="widthClass"
       >
         <header class="flex items-start gap-2 border-b border-line px-4 py-3">

@@ -178,6 +178,6 @@ function onBackgroundClick(event: MouseEvent): void {
 .grid-row {
   display: grid;
   grid-template-columns: repeat(var(--grid-cols, 7), minmax(0, 1fr));
-  gap: 0;
+  gap: 0 4px;
 }
 </style>

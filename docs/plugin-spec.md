@@ -1,6 +1,6 @@
 # 启动台插件接入规范 v2
 
-> 状态：v2（2026-09-17 起：逻辑层产物 = 可执行文件、宿主 spawn 子进程 + NDJSON；视图层规范与 v1 相同）｜ 日期：2026-09-14，最后更新：2026-11-02 ｜ 配套：`docs/launcher-requirements.md`（底座需求）
+> 状态：v2（2026-09-17 起：逻辑层产物 = 可执行文件、宿主 spawn 子进程 + NDJSON；视图层规范与 v1 相同）｜ 日期：2026-09-14，最后更新：2026-11-10 ｜ 配套：`docs/launcher-requirements.md`（底座需求）
 > 读者：插件作者（含我们自己）、内核实现者、评审者
 > 本文是**对外契约**。内核实现必须能逐条对应到 §14 的校验矩阵；本文没写的字段与行为，插件不得依赖。
 
@@ -116,7 +116,7 @@ my-plugin/
 | `title` | 必须 | string 1–40 | 搜索结果与命令面板的展示名 |
 | `mode` | 必须 | `view` \| `no-view` \| `script` | 见 §4 |
 | `subtitle` | 可选 | string ≤ 60 | 结果副标题 |
-| `icon` | 可选 | string | lucide 图标名（如 `terminal`）/ 插件内相对路径 / `data:image/...` |
+| `icon` | 可选 | string | 内置图标字典名（如 `terminal`，兼容 lucide 命名）/ 插件内相对路径 / `data:image/...` |
 | `searchable` | 可选 | boolean，默认 `false` | 入口型搜索（§9.1）：命令本身出现在搜索结果，命中后把用户的搜索串交给插件 |
 | `placeholder` | 可选 | string | `searchable: true` 时的输入提示 |
 | `keywords` | 可选 | string[] ≤ 10 | 该命令的别名 |
@@ -740,7 +740,7 @@ interface ResultItem {
   id: string                    // 插件内唯一且稳定；建议 `命令名:业务主键`
   title: string                 // ≤ 80 字符
   subtitle?: string             // ≤ 120 字符
-  icon?: string                 // lucide 名 / 相对路径 / data URL
+  icon?: string                 // 内置图标字典名 / 相对路径 / data URL
   score?: number                // 0..1 插件自评（可选）
   action: ActionDecl            // Enter 的默认动作
   actions?: ActionDecl[]        // 右键 / ⌘K 追加项
@@ -792,15 +792,29 @@ hostUi.setFooter([
     items: [{ name: '导出', icon: 'download', onSelect: () => {} }] }
 ])
 ```
-`icon` 用 lucide 图标名；`keys` **同时是触发键与展示提示**——但 v1 底座的 footer 只渲染按钮并接收点击，
+`icon` 用内置图标字典名（兼容 lucide 命名）；`keys` **同时是触发键与展示提示**——但 v1 底座的 footer 只渲染按钮并接收点击，
 `keys` 仅作展示；插件若依赖快捷键，请在插件页内自行处理键盘事件（`Esc` / `⌘W` 由宿主占用）。
 
 ### 10.4 图标
 
-- 命令/结果图标：lucide 名优先；插件私有图标用相对路径或 data URL，尺寸 ≥ 40×40（渲染 20×20）
-- **不得**引用远程图标 URL
-- 启动台内置了一份常用 lucide 图标子集（`packages/ui/lib/icons.ts`，宿主网格与设置页插件列表共用这一份）；名字写法不敏感（`git-compare` 与 `GitCompare` 等价）
-- **不在子集内的名字会退化成「名称首字母」占位方块**（不报错）；需要新图标就往那份字典里加一条（数据取自 lucide，许可见 `docs/THIRD-PARTY.md`）
+图标分三类资产，**同一套 Liquid Glass 图标语言**（squircle 容器、分层玻璃、镜面高光、明暗双版本、
+小尺寸仍可辨）；不允许用现成图标库拼凑。
+
+| 类别 | 真源 | 产物 | 约定 |
+|---|---|---|---|
+| 壳位图 | `scripts/make-icon.mjs` 里的 SVG 源 | `apps/shell/icons/` 下 8 个文件（`icon.{svg,png,icns,ico}`、`tray.{svg,png}`、`tray-win.{svg,png}`） | 1024 画布、824 squircle（n=5）、10 档 PNG、ico 六尺寸、tray 18pt/64px；**产物必须入库**（CI 不生成）；macOS 托盘是 template icon，Windows 托盘用彩色版 |
+| 内联图标字典 | `packages/ui/lib/icons.ts` | 宿主网格、设置页、插件页共用 | 24 viewBox、1.75 描边、圆头圆角、20px 光学尺寸；名字写法不敏感（`git-compare` / `GitCompare` 等价）；`UiIcon.vue` 也消费同一字典，避免两套风格分裂 |
+| 插件与命令图标 | 清单 `icon` 字段 | 由字典渲染 | 默认写字典名（即 lucide 命名习惯）；插件私有图标只能随包相对路径或 `data:` URL，顶层 `icon.png` ≥128×128、命令私有图标 ≥40×40；**禁止远程 URL**，`dist` 必须自包含 |
+
+规则：
+
+- **不新增远程图标 URL**；CSP `img-src 'self' data:` 保持不变。
+- 字典未命中的名字退化成「名称首字母」玻璃磁贴（不报错）；需要新图标就加到字典里。
+- 图标几何为本仓库自绘（见 `docs/THIRD-PARTY.md`），**不再内联 lucide 的 path 数据**；
+  名字继续沿用 lucide 命名只为兼容既有清单，不是数据来源。
+- 磁贴图标在宿主里由 `--tile-*` 令牌着色，插件页由 `--launcher-tile-*` 着色：明暗主题自动切换，
+  插件不得在模板里写死图标底色/前景色。
+- 修改图标后必须检查：16px 可辨、深浅两版都成立、不与相邻图标视觉重心打架。
 
 ### 10.5 i18n
 
@@ -864,6 +878,7 @@ pnpm test                       # 全量测试（含各插件的 core·view 用�
 - [ ] 可变数据只写 `dataPath`（N2）
 - [ ] 定时器/监听器都在 `onCleanup` 里清理（§6.2）
 - [ ] 深浅色都能看；`Esc` 行为符合 §10.2
+- [ ] 图标走内联字典或随包本地资产（§10.4）；磁贴底色消费 `--launcher-tile-*`，不写死颜色
 
 **安全**
 - [ ] 危险操作（写系统文件 / 提权）不接受调用方传入的目标路径

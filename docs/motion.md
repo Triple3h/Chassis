@@ -63,7 +63,69 @@
 - 窗口高度逐帧 `setHeight`（约 10 次 IPC / 160ms），顺序发送、不并发 —— 并发会让到达顺序不确定，窗口来回抖。
 - 任何新的隐藏入口都必须走 `hideWindowAnimated()`（内核侧）或 `window::toggle()`（壳侧），否则回执链路会断。
 
-## 4. 明确不采用
+## 4. 窗口材质：Liquid Glass 的全平台 CSS 近似
+
+> 2026-11-10 起，启动台与插件页统一采用 **Liquid Glass** 视觉语言：折射 + 镜面高光 + 半透明分层。
+> 不依赖 WKWebView 私有材质，也不引入 macOS 26 `NSGlassEffectView` 分支 —— 项目兼容 macOS 11+ 与
+> Windows 便携版，必须一套 CSS 全平台成立。
+
+### 4.1 三层结构
+
+| 层 | 绘制内容 | 落点 |
+|---|---|---|
+| **折射底** | `backdrop-filter: blur() saturate()` + 极淡的桌面透过色 | `.shell::before`（宿主）/ `.launcher-glass`（插件页） |
+| **镜面** | 顶部 1px 内高光、半透明描边、斜向 specular 渐变、底部内阴影 | `.shell::after`（宿主）/ 共享类 `.launcher-rim` |
+| **内容** | 文本、网格、输入框、浮层 | 普通子树，永远在玻璃层之上 |
+
+**硬约束（都是实测坑，别改回去）：**
+
+- **不能把 `backdrop-filter` 直接加到 `.shell`**：模糊层先按矩形绘制、再事后裁剪，圆角外会漏出一圈模糊像素；
+  而窗口系统阴影按内容 alpha 轮廓生成，角落一旦有像素，阴影就退化成矩形（底部两角出现直角灰边）。
+- **不能给 `.shell` 加 `box-shadow`**：阴影全在窗口裁切区外，一个像素都看不见，却会让 WebKit 把元素推进
+  「带外阴影的合成层」路径 —— 贴住窗口底边的两个圆角被画成直角。
+- 玻璃层只能放在**伪元素 / 内部绝对定位层**里，并用 `border-radius` + `clip-path: inset(0 round var(--radius-shell))`
+  双重裁剪；负 `z-index` 让它们位于内容之下、`.shell` 背景之上（`.shell` 需要 `isolation: isolate`）。
+- 折射用内联 SVG filter（`feTurbulence` + `feDisplacementMap`）只作用于**边缘 1–2px 的高光环**，
+  `scale` 控制在 2–6；不要对整块面板或文字做位移，否则会糊。
+- 不引入彩色光斑 / 渐变球：工具类界面保持中性色，玻璃只负责层次与光线。
+
+### 4.2 材质令牌
+
+宿主在 `apps/launcher-ui/src/styles/app.css`、插件侧在 `theme.css`（前缀 `--launcher-`）各有一份，**取值成对**：
+
+| 令牌 | 亮色 | 暗色 | 用途 |
+|---|---|---|---|
+| `--glass-tint` | `rgba(250,252,255,.62)` | `rgba(18,22,30,.58)` | 窗口底色（桌面透过的基色） |
+| `--glass-scrim` | `rgba(255,255,255,.20)` | `rgba(8,11,16,.26)` | 压在底色上的对比保护层 |
+| `--glass-panel` | `rgba(255,255,255,.74)` | `rgba(30,36,46,.72)` | 抬升面（菜单、详情、卡片） |
+| `--glass-panel-strong` | `rgba(255,255,255,.88)` | `rgba(34,41,52,.88)` | 浮层（对话框、右键菜单） |
+| `--glass-sunken` | `rgba(15,23,42,.045)` | `rgba(0,0,0,.22)` | 下沉面（输入框、凹槽） |
+| `--glass-hi` | `rgba(255,255,255,.90)` | `rgba(255,255,255,.16)` | 顶部 1px 内高光 |
+| `--glass-lo` | `rgba(15,23,42,.12)` | `rgba(0,0,0,.50)` | 底部内阴影 |
+| `--glass-rim` | `rgba(255,255,255,.55)` | `rgba(255,255,255,.14)` | 内描边（镜面环） |
+| `--glass-edge` | `rgba(15,23,42,.10)` | `rgba(255,255,255,.10)` | 外发丝线（语义色 `--border` 的来源） |
+| `--glass-specular` | 顶部白 55% → 透明 | 顶部白 10% → 透明 | 镜面渐变 |
+| `--glass-blur` | `32px` | 同值 | 背景模糊半径 |
+| `--glass-saturate` | `170%` | 同值 | 背景饱和 |
+| `--elev-1/2/3` | 冷灰软阴影 | 纯黑深阴影 | 层内浮起（**不含** `.shell` 自身） |
+
+圆角、字阶、间距同样收敛成令牌（`--radius-shell` 22px、`--radius-md` 12px、`--radius-lg` 16px、
+`--text-hero` 19px / `--text-body` 13px / `--text-caption` 11.5px、`--space-4` 8px 等），
+组件里不再写裸数值；插件侧镜像加 `--launcher-` 前缀。
+
+### 4.3 明暗与对比度
+
+- 明暗两版必须**成对**给出（插件侧沿用 `--launcher-if-light` / `--launcher-if-dark` 单行写法）。
+- 正文与背景的对比度不得低于 4.5:1：玻璃的透明度只用于「看得见材质」的边缘与大块面，
+  文本所在的内层面板保持 `--glass-panel-strong` 及以上不透明度。
+- 焦点环统一 `0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent)`，深浅主题都可见。
+
+### 4.4 动效与材质的关系
+
+材质不改变 §1 的时长档位。玻璃进出场沿用 `--motion-*` / `--motion-ease-*`；
+`prefers-reduced-motion` 仍然只重定义令牌，玻璃层不会因为透明而变成硬跳。
+
+## 5. 明确不采用
 
 - **壳侧加 `set_opacity` / NSWindow 动画**：壳保持零业务，CSS 已能画，多一条跨进程通道只增加同步负担。
 - **UI hold 住 hide（先演再让内核隐藏）**：裁决权会分裂到两个进程。**回执不是裁决** —— UI 只说「演完了」，落地仍由内核决定。

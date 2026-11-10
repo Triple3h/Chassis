@@ -1,7 +1,7 @@
 # 内核实现细节与差异记录
 
 > 读者：实现者、评审者 ｜ 需求源：`docs/launcher-requirements.md`（本文件不复制需求，只写"怎么实现"与"哪里不一样"）
-> 最后更新：2026-11-02｜内核语言与协议见 §1，Windows 更新边界见 §11
+> 最后更新：2026-11-10｜内核语言与协议见 §1，Windows 更新边界见 §11
 > 约定：**遇到需求没写的行为，先补本文件再写代码。**
 
 ---
@@ -262,6 +262,7 @@ active → degraded（脚本连续失败 3 次）
 | D20 | §6.1「壳只提供系统原语，零业务逻辑」 | **应用（壳）自更新归壳**（2026-09-19）：检查 / 下载 / 解压由内核侧编排（复用 `internal-store` 的 `check-app` / `download-app`，同一套代理降级 + 白名单 + sha256），**候选包自检 / 台账 / 替换 / 重启在壳**（`apps/shell/src/update.rs` + 脱离壳进程树的 helper） | 壳就是应用本体，「换自己」只能是它的职责：它要在内核起不来时也能更新自己，而替换动作必须发生在壳**完全退出之后**（内核随后被停掉，整个应用一起重启）。这不是业务逻辑而是自身运维，与「零能力」不冲突；触发时机由内核守护掌握（`spawn_app_update_check` 只检查并提示：托盘常驻「检查更新…」点击打开更新页，「关于」页更新卡片；`config.autoUpdateCheck` 可关；**下载 / 替换 / 重启由用户确认后触发**），机制细节见 `docs/shell-hot-update.md` |
 | D21 | §3.1「窗口几何记忆」（2026-09-17 新增「尺寸记忆」；2026-09-20 扩展为位置 + 尺寸、按窗口态分别记） | 记忆值存**内核 config**：`windowBounds.host` / `.plugin:<id>`（各 `{x?,y?,width?,height?}`，位置 = 屏幕物理坐标、尺寸 = 逻辑像素；`plugin` 键 = 所有插件页的兜底，旧数据沿用）；UI 负责"什么时候读/写"（关闭前 / 切换窗口态时用 `window.bounds` 读回、缩放后 debounce 400ms 落盘；唤出 / 进插件页用 `window.setBounds` 应用），内核只做 `patchConfig` 清洗 / 钳制，并在启动时把宿主几何经 `window.restoreBounds` 推给壳（跨重启恢复） | 一开始写在 UI 侧且只活在本次会话（离场复位）；用户随后要求"下次打开仍是这个大小" ⇒ **必须落盘**，而 UI 的 localStorage 随内核端口变化（每次启动都变）不可用。放 config 还顺带让几何跟着 `config/changed` 广播走已有的同步链路。**位置的两条硬约束**：① 唤出时由壳裁决（窗口中心仍在鼠标所在屏 ⇒ 保持，否则居中），所以 UI 唤出时只应用尺寸、不应用位置 —— 否则跨屏唤出会被拉回旧位置；② 跨重启恢复走壳的 `window.restoreBounds`，且壳**只在窗口隐藏时应用** —— 内核热更新后的重新推送可能撞上用户正开着的插件页，不能挪走它 |
 | D22 | §3.1「状态显示」（2026-09-17 新增） | 状态条显示的是**启动台自身**的占用：内核报自己（`sysinfo` 读本进程 RSS + 累计 CPU），壳用新原语 `app.usage` 报另一半（`task_info(MACH_TASK_BASIC_INFO)` 的 resident_size + user/system time），内核合并并差分出"占整机百分比"；UI 每 3s 拉 `/api/system/stats`；**不进插件 API**（底座自用，与 `app.info` 同级） | 用户要判断的是"这个启动台轻不轻"，所以要的是两个进程之和，不是整机负载 —— 整机数字（`sysinfo`）只留作 tooltip 里的对照。跨进程的"另一半"只有壳给得了（内核自己的 `os` 看不到壳的 RSS） |
+| D23 | §3.1 未规定窗口材质 | **Liquid Glass 全平台 CSS 近似**（2026-11-10）：`backdrop-filter: blur() saturate()` 打底 + 内联 SVG `feTurbulence` / `feDisplacementMap` 做边缘折射 + 1px 内高光 / 半透明描边 / 镜面渐变；玻璃层只放在伪元素里，用 `clip-path` 在圆角内裁剪 | 不采用 macOS 26 `NSGlassEffectView` 与 WKWebView 私有材质：项目承诺 macOS 11+ 与 Windows 便携版，壳层不引入平台材质分支；`.shell` 上直接加 `backdrop-filter` / `box-shadow` 的实测退化见 [`motion.md`](motion.md) §4。材质令牌与动效同源（`app.css` / `theme.css`），插件页只消费令牌 |
 
 ---
 
