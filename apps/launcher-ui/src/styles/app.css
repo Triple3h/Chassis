@@ -17,28 +17,107 @@
 
   --color-accent: #4f8cff;
   --color-accent-soft: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  --color-success: #2f9e6f;
+  --color-warn: #cf8a2c;
+  --color-danger: #e05a5a;
 
-  --radius-shell: 16px;
+  --radius-shell: 22px;
+  --radius-tile: 12px;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, 'Cascadia Mono', 'Cascadia Code',
+    'JetBrains Mono', Menlo, Consolas, monospace;
 }
 
 :root {
-  --bg: rgba(255, 255, 255, 0.92);
-  --bg-solid: #ffffff;
+  /* ── 玻璃材质（亮色）─────────────────────────────────────────
+     明文警告：这些值只给伪元素 / 浮层用。.shell 自身不许 backdrop-filter、
+     不许 box-shadow —— 两个实测退化见下方 .shell 注释。 */
+  --glass-tint: rgba(250, 252, 255, 0.62);
+  --glass-scrim: rgba(255, 255, 255, 0.2);
+  --glass-panel: rgba(255, 255, 255, 0.74);
+  --glass-panel-strong: rgba(255, 255, 255, 0.89);
+  --glass-sunken: rgba(15, 23, 42, 0.045);
+  --glass-hi: rgba(255, 255, 255, 0.9);
+  --glass-lo: rgba(15, 23, 42, 0.12);
+  --glass-rim: rgba(255, 255, 255, 0.56);
+  --glass-edge: rgba(15, 23, 42, 0.1);
+  --glass-glow: rgba(160, 205, 255, 0.16);
+  --glass-specular: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 40%);
+  --glass-rim-gradient: linear-gradient(
+    140deg,
+    rgba(255, 255, 255, 0.95),
+    rgba(255, 255, 255, 0.22) 30%,
+    rgba(255, 255, 255, 0) 54%,
+    rgba(255, 255, 255, 0.34)
+  );
+  --glass-refract-opacity: 0.55;
+  --glass-blur: 32px;
+  --glass-saturate: 170%;
+
+  /* 层内浮起：只给面板 / 菜单 / 卡片，.shell 自身永远不用 */
+  --elev-1: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 20px -14px rgba(15, 23, 42, 0.22);
+  --elev-2: 0 18px 40px -20px rgba(15, 23, 42, 0.3), 0 2px 8px rgba(15, 23, 42, 0.06);
+  --elev-3: 0 30px 72px -28px rgba(15, 23, 42, 0.38), 0 6px 18px rgba(15, 23, 42, 0.1);
+
+  /* 语义色（组件只读这些，不直接读材质原值） */
+  --bg: var(--glass-tint);
+  --bg-solid: #f3f5f9;
   --fg: var(--color-ink-900);
   --fg-muted: var(--color-ink-500);
-  --border: rgba(15, 23, 42, 0.08);
-  --hover: rgba(15, 23, 42, 0.05);
-  --sel: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  --panel: rgba(248, 250, 252, 0.96);
-  --shadow: 0 24px 60px rgba(15, 23, 42, 0.22), 0 2px 8px rgba(15, 23, 42, 0.08);
+  --border: var(--glass-edge);
+  --hover: rgba(15, 23, 42, 0.055);
+  --sel: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --panel: var(--glass-panel);
+  --panel-strong: var(--glass-panel-strong);
+  --sunken: var(--glass-sunken);
+  --shadow: var(--elev-3);
+
+  /* 图标磁贴：中性玻璃，不跟随插件专有色 */
+  --tile-from: rgba(255, 255, 255, 0.9);
+  --tile-to: rgba(222, 228, 238, 0.86);
+  --tile-edge: rgba(15, 23, 42, 0.1);
+  --tile-sheen: rgba(255, 255, 255, 0.95);
+  --tile-shadow: rgba(15, 23, 42, 0.22);
 
   /* 滚动条滑块：只由前景色调出来（深浅主题各自动取值），几何见文件末尾的 ::-webkit-scrollbar 块 */
   --scroll-thumb: color-mix(in srgb, var(--fg) 16%, transparent);
   --scroll-thumb-hover: color-mix(in srgb, var(--fg) 34%, transparent);
   --scroll-thumb-active: color-mix(in srgb, var(--fg) 50%, transparent);
 
+  /* ── 圆角 / 字阶 / 间距 / 层级 ─────────────────────────────── */
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 26px;
+  --radius-pill: 999px;
+
+  --text-hero: 19px;
+  --text-title: 14px;
+  --text-body: 13px;
+  --text-caption: 11.5px;
+  --text-micro: 10.5px;
+  --leading-tight: 1.2;
+  --leading-body: 1.45;
+  --tracking-label: 0.08em;
+
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --space-8: 32px;
+
+  --z-content: 1;
+  --z-detail: 20;
+  --z-menu: 50;
+  --z-toast: 50;
+  --z-handle: 60;
+
   /* ── 动效令牌 ────────────────────────────────────────────────
-     全仓库动效的唯一来源（插件侧同名镜像见 packages/ui/styles/theme.css）。
+     全仓库动效的唯一来源（插件侧同名镜像见 theme.css）。
      刻意不叫 --ease-* / --duration-*：那是 Tailwind 的命名空间，同名会被覆盖。
      时长只留四档、曲线只留四条 —— 想加第五档之前先问「现有的哪一档不够用」。 */
   --motion-instant: 90ms; /* 按压反馈、hover */
@@ -69,19 +148,45 @@
     --motion-pop-scale: 1;
     --motion-pop-shift: 0px;
     --motion-ease-spring: linear;
+    --glass-refract-opacity: 0;
   }
 }
 
 [data-theme='dark'] {
-  --bg: rgba(21, 26, 36, 0.9);
-  --bg-solid: #151a24;
+  --glass-tint: rgba(18, 22, 30, 0.58);
+  --glass-scrim: rgba(8, 11, 16, 0.26);
+  --glass-panel: rgba(30, 36, 46, 0.72);
+  --glass-panel-strong: rgba(34, 41, 52, 0.88);
+  --glass-sunken: rgba(0, 0, 0, 0.22);
+  --glass-hi: rgba(255, 255, 255, 0.16);
+  --glass-lo: rgba(0, 0, 0, 0.5);
+  --glass-rim: rgba(255, 255, 255, 0.14);
+  --glass-edge: rgba(255, 255, 255, 0.1);
+  --glass-glow: rgba(110, 160, 230, 0.1);
+  --glass-specular: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 42%);
+  --glass-rim-gradient: linear-gradient(
+    140deg,
+    rgba(255, 255, 255, 0.3),
+    rgba(255, 255, 255, 0.06) 30%,
+    rgba(255, 255, 255, 0) 54%,
+    rgba(255, 255, 255, 0.12)
+  );
+
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 20px -14px rgba(0, 0, 0, 0.55);
+  --elev-2: 0 18px 40px -20px rgba(0, 0, 0, 0.62), 0 2px 8px rgba(0, 0, 0, 0.34);
+  --elev-3: 0 30px 72px -28px rgba(0, 0, 0, 0.72), 0 6px 18px rgba(0, 0, 0, 0.4);
+
+  --bg-solid: #131821;
   --fg: var(--color-ink-50);
   --fg-muted: var(--color-ink-400);
-  --border: rgba(255, 255, 255, 0.09);
-  --hover: rgba(255, 255, 255, 0.06);
-  --sel: color-mix(in srgb, var(--color-accent) 22%, transparent);
-  --panel: rgba(13, 17, 25, 0.96);
-  --shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --hover: rgba(255, 255, 255, 0.065);
+  --sel: color-mix(in srgb, var(--color-accent) 24%, transparent);
+
+  --tile-from: rgba(78, 88, 106, 0.78);
+  --tile-to: rgba(38, 44, 56, 0.9);
+  --tile-edge: rgba(255, 255, 255, 0.11);
+  --tile-sheen: rgba(255, 255, 255, 0.18);
+  --tile-shadow: rgba(0, 0, 0, 0.55);
 }
 
 html,
@@ -97,30 +202,27 @@ body {
   /* 分平台字体栈：macOS 走 SF / 苹方，Windows 走 Segoe UI / 微软雅黑（§B4） */
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'PingFang SC',
     'Microsoft YaHei UI', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
-  font-size: 13px;
+  font-size: var(--text-body);
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* ── 窗口弹入 / 弹出（对标 macOS 面板：从略小略高处落下，走强减速曲线）──────
-   用「两个稳定态之间做 transition」而不是 keyframes 动画：
-   隐藏态本身就是一个静止态（opacity 0），所以唤出时不需要「重启动画」那套 hack，
-   而且窗口被壳提前隐藏、webview 暂停渲染时也不会把元素卡在动画中途。 */
+/* ── 窗口：Liquid Glass 三层 ─────────────────────────────────────
+   ① 底色 + ② 模糊/折射层（::before）+ ③ 镜面环（::after），内容在中间。
+   为什么玻璃层只能放伪元素：直接给 .shell 加 backdrop-filter 时，模糊层先在元素的
+   矩形边界内绘制完、再被事后裁剪，圆角外会漏出一圈模糊像素（WebKit 尤其明显）；
+   窗口系统阴影按「内容的 alpha 轮廓」生成 —— 角落一旦有像素，阴影就退化成矩形，
+   表现就是底部两角出现与圆角对不齐的直角灰边。
+   同理不给 .shell 加 box-shadow：它一个像素都看不见（阴影全在窗口裁切区外），
+   却会让 WebKit 把元素推进「带外阴影的合成层」路径 —— 贴住底边的两个圆角被画成直角。
+   阴影交给壳的系统窗口投影；层内浮起用 --elev-* 加在浮层自己身上。 */
 .shell {
+  position: relative;
+  isolation: isolate; /* 让负 z-index 的玻璃层留在 .shell 内部，不穿到窗口背景后面 */
   background: var(--bg);
-  /* 这里刻意**不用** backdrop-filter。
-     它是唯一会在 border-radius 之外留下像素的东西：模糊层在元素的矩形边界内先绘制完、
-     再被事后裁剪，圆角外会漏出一圈模糊像素（WebKit 上尤其明显）。
-     而窗口的系统阴影是按「内容的 alpha 轮廓」生成的 —— 角落一旦有像素，阴影就退化成
-     矩形，表现就是底部两角出现与圆角对不齐的直角灰边。
-     底色本来就有 0.9+ 不透明度，模糊的视觉贡献几乎为零，去掉只赚不亏。 */
   border: 1px solid var(--border);
   border-radius: var(--radius-shell);
-  /* 这里**不要**加 box-shadow（`--shadow` 令牌留给将来真正的窗口留白场景）。
-     它一个像素都看不见 —— 阴影全在 .shell 之外，而 .shell 铺满窗口，等于全被 macOS 裁掉；
-     却足以让 WebKit 把元素推进「带外阴影的合成层」那条渲染路径：实测副作用是**贴住窗口底边的
-     两个圆角被画成直角**（顶部两角正常，半径只剩 2-4px），而窗口尺寸与视口完全一致、没有任何裁切。
-     窗口的投影由壳的系统阴影负责，别在这里补。 */
   overflow: hidden;
   /* 比 overflow 更硬的圆角裁剪：贴住视口底边的元素在 WebKit 下偶尔漏画底部圆角，这条兜底。 */
   clip-path: inset(0 round var(--radius-shell));
@@ -133,6 +235,61 @@ body {
     transform var(--motion-base) var(--motion-ease-enter);
 }
 
+/* ② 模糊 / 调色 / 折射底：在内容之下、底色之上 */
+.shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border-radius: inherit;
+  clip-path: inset(0 round var(--radius-shell));
+  pointer-events: none;
+  background:
+    var(--glass-specular),
+    radial-gradient(120% 82% at 14% -10%, var(--glass-glow), transparent 60%),
+    var(--glass-scrim);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/* ③ 镜面环：只画 1px 内高光 + 内阴影，不铺满整块面（否则会盖住内容） */
+.shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  clip-path: inset(0 round var(--radius-shell));
+  pointer-events: none;
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    inset 1px 0 0 color-mix(in srgb, var(--glass-hi) 55%, transparent),
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 -30px 44px -40px var(--glass-lo);
+}
+
+/* 边缘折射：1.5px 的镜面环经 SVG 位移滤镜轻微扰动，模拟玻璃边缘的折射；
+   只作用于环，不碰内容与文字。滤镜定义见 App.vue 的 #lg-refract。 */
+.shell-refraction {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  padding: 1.5px;
+  background: var(--glass-rim-gradient);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  filter: url(#lg-refract);
+  opacity: var(--glass-refract-opacity);
+}
+
 /* 窗口已被壳隐藏（或正在隐藏）：收得更快、用加速曲线，不拖泥带水 */
 .shell.is-window-hidden {
   opacity: 0;
@@ -141,6 +298,47 @@ body {
     opacity var(--motion-fast) var(--motion-ease-exit),
     transform var(--motion-fast) var(--motion-ease-exit);
   pointer-events: none;
+}
+
+/* ── 通用玻璃面（浮层 / 卡片 / 下拉）────────────────────────────
+   内容面用 panel-strong，保证文字对比度；只有边缘与大面积留白透出材质。 */
+.glass-panel {
+  background:
+    linear-gradient(180deg, var(--glass-hi) 0, transparent 44%),
+    var(--glass-panel);
+  border: 1px solid var(--border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--elev-2);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+}
+
+.glass-strong {
+  background: var(--glass-panel-strong);
+  border: 1px solid var(--border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-rim) 60%, transparent),
+    var(--elev-3);
+  -webkit-backdrop-filter: blur(30px) saturate(170%);
+  backdrop-filter: blur(30px) saturate(170%);
+}
+
+.glass-sunken {
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 2px var(--glass-lo);
+}
+
+.glass-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
 }
 
 .hairline {
@@ -185,11 +383,14 @@ body {
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border);
-  background: var(--hover);
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    0 1px 0 color-mix(in srgb, var(--border) 60%, transparent);
   color: var(--fg-muted);
-  font-size: 10.5px;
+  font-size: var(--text-micro);
   font-family: inherit;
 }
 

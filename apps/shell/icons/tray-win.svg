@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="-228.5 -228.5 457.0 457.0">
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="-231.4 -231.4 462.8 462.8">
 <defs>
   <linearGradient id="winTray" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="#1C5CF5" />
-    <stop offset="1" stop-color="#A32BEE" />
+    <stop offset="0" stop-color="#5E97FF" />
+    <stop offset="1" stop-color="#2B5CC4" />
   </linearGradient>
-</defs><g transform="scale(1.00000) translate(-18.63 -18.63)" fill="none" stroke="url(#winTray)" stroke-width="78" stroke-linecap="round">
-    <circle cx="0" cy="0" r="148" />
+</defs><g transform="scale(1.00000) translate(-21.63 -21.63)" fill="none" stroke="url(#winTray)" stroke-width="80" stroke-linecap="round">
+    <circle cx="0" cy="0" r="142" />
     <line x1="99.0" y1="99.0" x2="185.3" y2="185.3" />
   </g>
 </svg>

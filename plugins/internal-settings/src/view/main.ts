@@ -53,7 +53,7 @@ interface PluginLike {
   version: string
   description?: string
   author?: string
-  /** 清单 `icon`：lucide 名 / `data:image/...`（插件内相对路径的图标这里够不到，见 `pluginLogo`） */
+  /** 清单 `icon`：内置图标字典名（兼容 lucide 命名）/ `data:image/...`（插件内相对路径的图标这里够不到，见 `pluginLogo`） */
   icon?: string
   state: string
   error?: string
@@ -329,19 +329,20 @@ function stateDot(state: string): string {
 }
 
 /**
- * 插件 logo 磁贴：清单 `icon`（lucide 名）→ 内置图标表；`data:` / `http(s):` 直接当图片画。
+ * 插件 logo 磁贴：清单 `icon`（内置字典名，兼容 lucide 命名）→ 内置图标表；
+ * `data:` / `http(s):` 直接当图片画。
  *
- * 观感与宿主结果网格一致（`IconGlyph.vue`：圆角 = 22% 边长、磁贴底色 `--hover`、字形占 56%）。
+ * 观感与宿主结果网格一致（`IconGlyph.vue`：圆角 = 30% 边长、玻璃磁贴、字形占 54%）。
  * 画不出来的（没有 icon、名字不在表里、插件内相对路径的图标 —— iframe 的 CSP 只放行 self，
  * 够不到别的插件端口）退回首字母磁贴，不留下空位。
  */
 function pluginLogo(plugin: PluginLike, size: number): string {
-  const box = `width:${size}px;height:${size}px;border-radius:${Math.round(size * 0.22)}px`
+  const box = `width:${size}px;height:${size}px;border-radius:${Math.round(size * 0.3)}px`
   const icon = plugin.icon
   if (icon && /^(https?:|data:)/.test(icon)) {
     return `<span class="plogo" style="${box}"><img src="${escapeHtml(icon)}" alt="" draggable="false" /></span>`
   }
-  const svg = iconSvg(icon, Math.round(size * 0.56))
+  const svg = iconSvg(icon, Math.round(size * 0.54))
   if (svg) return `<span class="plogo" style="${box}">${svg}</span>`
   const initial = (plugin.title || plugin.id).replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '').slice(0, 1).toUpperCase() || '·'
   return `<span class="plogo letter" style="${box};font-size:${Math.round(size * 0.42)}px">${escapeHtml(initial)}</span>`

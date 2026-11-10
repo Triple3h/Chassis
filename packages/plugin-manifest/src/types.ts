@@ -16,7 +16,7 @@ export interface CommandDecl {
   name: string
   title: string
   subtitle?: string
-  /** lucide 图标名 / 插件内相对路径 / data:image/... */
+  /** 内置图标字典名（兼容 lucide 命名）/ 插件内相对路径 / data:image/... */
   icon?: string
   mode: CommandMode
   /** 入口型搜索：命令本身参与搜索结果 */

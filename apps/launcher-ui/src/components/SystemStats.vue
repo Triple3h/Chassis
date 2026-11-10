@@ -221,21 +221,28 @@ function formatBytes(bytes: number): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 999px;
+  border: 1px solid var(--border);
   color: var(--fg-muted);
-  background: var(--hover);
+  background:
+    linear-gradient(180deg, var(--glass-hi), transparent 58%),
+    color-mix(in srgb, var(--panel) 42%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
   cursor: default;
-  transition: color var(--motion-instant) var(--motion-ease-move);
+  transition:
+    color var(--motion-instant) var(--motion-ease-move),
+    border-color var(--motion-instant) var(--motion-ease-move);
 }
 
 .stats-chip:hover {
   color: var(--fg);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
 
 .stats-sep {
@@ -263,14 +270,16 @@ function formatBytes(bytes: number): string {
   width: min(340px, calc(100vw - 84px));
   max-height: calc(100vh - 72px);
   overflow-y: auto;
-  padding: 10px 12px 12px;
+  padding: 11px 13px 13px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--panel);
-  backdrop-filter: blur(18px);
+  border-radius: var(--radius-lg);
+  background: var(--panel-strong);
   box-shadow:
-    0 16px 40px rgba(0, 0, 0, 0.28),
-    0 2px 8px rgba(0, 0, 0, 0.12);
+    inset 0 1px 0 var(--glass-hi),
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-rim) 55%, transparent),
+    var(--elev-3);
+  -webkit-backdrop-filter: blur(30px) saturate(170%);
+  backdrop-filter: blur(30px) saturate(170%);
   color: var(--fg);
   font-size: 11.5px;
   line-height: 1.5;
@@ -341,7 +350,7 @@ function formatBytes(bytes: number): string {
 }
 
 .stats-total td {
-  background: var(--hover);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
   font-weight: 500;
   color: var(--fg);
 }

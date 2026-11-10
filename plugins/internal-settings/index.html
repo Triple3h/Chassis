@@ -5,13 +5,31 @@
     <title>设置</title>
     <style>
       :root {
-        --bg: #ffffff;
-        --panel: #ffffff;
+        --bg: #eef1f6;
+        --panel: rgba(255, 255, 255, 0.74);
+        --panel-strong: rgba(255, 255, 255, 0.9);
+        --panel-2: rgba(15, 23, 42, 0.045);
         --fg: #151a24;
-        --muted: #6b7488;
+        --muted: #667085;
         --border: rgba(15, 23, 42, 0.1);
-        --hover: rgba(15, 23, 42, 0.05);
-        --accent: #4f8cff;
+        --hover: rgba(15, 23, 42, 0.055);
+        --accent: #2f6fe4;
+        --success: #1f8f5f;
+        --warn: #b87315;
+        --danger: #d64545;
+        --glass-hi: rgba(255, 255, 255, 0.9);
+        --glass-lo: rgba(15, 23, 42, 0.12);
+        --glass-rim: rgba(255, 255, 255, 0.56);
+        --glass-edge: rgba(15, 23, 42, 0.1);
+        --tile-from: rgba(255, 255, 255, 0.9);
+        --tile-to: rgba(222, 228, 238, 0.86);
+        --tile-sheen: rgba(255, 255, 255, 0.95);
+        --radius-sm: 9px;
+        --radius-md: 12px;
+        --radius-lg: 16px;
+        --radius-pill: 999px;
+        --base: radial-gradient(120% 90% at 12% -10%, #ffffff 0%, rgba(255, 255, 255, 0) 58%),
+          linear-gradient(180deg, #f7f9fc, #e9edf4);
         /* UA 自绘控件的明暗（原生焦点环、取色器、滚动条…）由它决定 */
         color-scheme: light;
         /* 滚动条滑块：只由前景色调出来，深浅主题各自动取值 */
@@ -20,12 +38,27 @@
         --scroll-thumb-active: color-mix(in srgb, var(--fg) 50%, transparent);
       }
       [data-theme='dark'] {
-        --bg: #151a24;
-        --panel: #1e2430;
-        --fg: #f7f8fa;
-        --muted: #8c95a8;
+        --bg: #12161e;
+        --panel: rgba(34, 41, 52, 0.72);
+        --panel-strong: rgba(38, 45, 57, 0.9);
+        --panel-2: rgba(0, 0, 0, 0.22);
+        --fg: #eceef2;
+        --muted: #9aa3b5;
         --border: rgba(255, 255, 255, 0.1);
-        --hover: rgba(255, 255, 255, 0.06);
+        --hover: rgba(255, 255, 255, 0.065);
+        --accent: #74a8ff;
+        --success: #63d69c;
+        --warn: #f0b55e;
+        --danger: #ff8c8c;
+        --glass-hi: rgba(255, 255, 255, 0.16);
+        --glass-lo: rgba(0, 0, 0, 0.5);
+        --glass-rim: rgba(255, 255, 255, 0.14);
+        --glass-edge: rgba(255, 255, 255, 0.1);
+        --tile-from: rgba(78, 88, 106, 0.78);
+        --tile-to: rgba(38, 44, 56, 0.9);
+        --tile-sheen: rgba(255, 255, 255, 0.18);
+        --base: radial-gradient(120% 90% at 12% -10%, rgba(110, 160, 230, 0.12), transparent 58%),
+          linear-gradient(180deg, #171c26, #0f131a);
         color-scheme: dark;
       }
       * { box-sizing: border-box; }
@@ -47,10 +80,12 @@
       ::-webkit-scrollbar-thumb:active { background-color: var(--scroll-thumb-active); }
       html, body { margin: 0; height: 100%; }
       body {
-        background: var(--bg);
+        background-color: var(--bg);
+        background-image: var(--base);
         color: var(--fg);
         font: 13px/1.5 -apple-system, 'SF Pro Text', 'PingFang SC', sans-serif;
         -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
       }
       .wrap { display: flex; height: 100%; }
       .tabs {
@@ -62,11 +97,16 @@
         gap: 2px;
       }
       .tab {
-        text-align: left; padding: 6px 10px; border-radius: 8px; border: 0;
+        text-align: left; padding: 6px 10px; border-radius: var(--radius-sm); border: 0;
         background: transparent; color: var(--fg); font: inherit; cursor: pointer;
+        transition: background-color 0.09s, color 0.09s;
       }
       .tab:hover { background: var(--hover); }
-      .tab.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
+      .tab.active {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent); font-weight: 600;
+        box-shadow: inset 0 1px 0 var(--glass-hi);
+      }
       .panel { flex: 1; overflow: auto; padding: 16px 20px 32px; }
       h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; }
       .row {
@@ -79,17 +119,20 @@
          与插件套件 packages/ui/styles/theme.css 的 .launcher-input / .launcher-select*
          同源（滚动条也是这么约定的），改参数请两处一起改。 */
       input[type='text'], input[type='number'] {
-        background: var(--hover); border: 1px solid var(--border); color: var(--fg);
-        border-radius: 7px; padding: 4px 8px; font: inherit; min-width: 160px;
-        transition: border-color 0.15s, box-shadow 0.15s;
+        background: var(--panel-2); border: 1px solid var(--border); color: var(--fg);
+        border-radius: var(--radius-md); padding: 5px 9px; font: inherit; min-width: 160px;
+        box-shadow: inset 0 1px 2px var(--glass-lo);
+        transition: border-color 0.14s, box-shadow 0.14s, background-color 0.14s;
       }
       input[type='text']:hover, input[type='number']:hover {
         border-color: color-mix(in srgb, var(--fg) 22%, transparent);
       }
       /* focus 环一律用主题色：原生的系统蓝不跟 --accent，改主题色时会残留 */
       input[type='text']:focus, input[type='number']:focus {
-        outline: none; border-color: var(--accent);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+        outline: none; border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+        box-shadow:
+          inset 0 1px 2px var(--glass-lo),
+          0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
       }
       /* ── 自绘下拉（对应 @launcher/ui 的 UiSelect.vue）────────────────
          原生 <select> 的**弹出菜单**是 macOS 系统绘制（NSMenu）：不跟主题、
@@ -98,14 +141,17 @@
       .lselect { position: relative; min-width: 160px; }
       .lselect-trigger {
         display: flex; align-items: center; gap: 8px; width: 100%;
-        background: var(--hover); border: 1px solid var(--border); color: var(--fg);
-        border-radius: 7px; padding: 4px 8px; font: inherit; text-align: left; cursor: pointer;
-        transition: border-color 0.15s, box-shadow 0.15s;
+        background: var(--panel-2); border: 1px solid var(--border); color: var(--fg);
+        border-radius: var(--radius-md); padding: 5px 9px; font: inherit; text-align: left; cursor: pointer;
+        box-shadow: inset 0 1px 2px var(--glass-lo);
+        transition: border-color 0.14s, box-shadow 0.14s;
       }
       .lselect-trigger:hover { border-color: color-mix(in srgb, var(--fg) 22%, transparent); }
       .lselect-trigger:focus-visible, .lselect.open > .lselect-trigger {
-        outline: none; border-color: var(--accent);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+        outline: none; border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+        box-shadow:
+          inset 0 1px 2px var(--glass-lo),
+          0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
       }
       .lselect-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       /* 箭头用 clip-path 画三角：颜色直接吃 --muted，深浅主题自动跟 */
@@ -117,9 +163,14 @@
       .lselect.open .lselect-caret { transform: rotate(180deg); }
       .lselect-menu {
         position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
-        padding: 4px; display: flex; flex-direction: column; gap: 2px;
-        background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
-        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
+        padding: 5px; display: flex; flex-direction: column; gap: 2px;
+        background: var(--panel-strong); border: 1px solid var(--border); border-radius: var(--radius-lg);
+        box-shadow:
+          inset 0 1px 0 var(--glass-hi),
+          inset 0 0 0 1px color-mix(in srgb, var(--glass-rim) 55%, transparent),
+          0 24px 56px -24px rgba(15, 23, 42, 0.42);
+        -webkit-backdrop-filter: blur(30px) saturate(170%);
+        backdrop-filter: blur(30px) saturate(170%);
         animation: lselect-pop 0.12s ease-out;
       }
       /* 必须显式声明：[hidden] 的 UA 样式是 display:none，会被上面的 display:flex 覆盖掉 */
@@ -128,8 +179,8 @@
       @keyframes lselect-pop { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
       .lselect-option {
         display: flex; align-items: center; gap: 6px; width: 100%;
-        border: 0; border-radius: 6px; background: transparent; color: var(--fg);
-        font: inherit; font-size: 12.5px; text-align: left; padding: 5px 8px; cursor: pointer;
+        border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg);
+        font: inherit; font-size: 12.5px; text-align: left; padding: 6px 8px; cursor: pointer;
       }
       .lselect-option:hover, .lselect-option:focus { background: var(--hover); outline: none; }
       .lselect-option.is-on {
@@ -140,13 +191,13 @@
       .lselect-option.is-on .lselect-check { opacity: 1; }
       input[type='color'] {
         width: 42px; height: 24px; padding: 2px; border: 1px solid var(--border);
-        border-radius: 6px; background: var(--hover); cursor: pointer;
-        transition: border-color 0.15s, box-shadow 0.15s;
+        border-radius: var(--radius-sm); background: var(--panel-2); cursor: pointer;
+        transition: border-color 0.14s, box-shadow 0.14s;
       }
       input[type='color']:hover { border-color: color-mix(in srgb, var(--fg) 22%, transparent); }
       input[type='color']:focus-visible {
-        outline: none; border-color: var(--accent);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+        outline: none; border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
       }
       /* macOS 的原生色块自带渐变描边与圆角，清掉后是一片干净的圆角色面 */
       input[type='color']::-webkit-color-swatch-wrapper { padding: 0; }
@@ -154,13 +205,28 @@
       input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--accent); }
       input[type='checkbox']:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       button.btn {
-        border: 1px solid var(--border); background: transparent; color: var(--fg);
-        border-radius: 7px; padding: 4px 10px; font: inherit; cursor: pointer;
+        border: 1px solid var(--border); background:
+          linear-gradient(180deg, var(--glass-hi), transparent 52%),
+          var(--panel-2);
+        color: var(--fg);
+        border-radius: var(--radius-sm); padding: 5px 10px; font: inherit; cursor: pointer;
+        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-hi) 70%, transparent);
+        transition: background-color 0.09s, border-color 0.09s, transform 0.09s;
       }
       button.btn:hover { background: var(--hover); }
-      button.btn.danger { color: #ef4444; }
-      button.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
-      .card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+      button.btn:active { transform: scale(0.97); }
+      button.btn.danger { color: var(--danger); }
+      button.btn.primary {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 56%), var(--accent);
+        color: #fff; border-color: transparent; font-weight: 600;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+      }
+      .card {
+        border: 1px solid var(--border); border-radius: var(--radius-lg);
+        padding: 12px 14px; margin-bottom: 10px;
+        background: color-mix(in srgb, var(--panel) 55%, transparent);
+        box-shadow: inset 0 1px 0 var(--glass-hi);
+      }
       /* 更新说明（notes）：分类 + 圆点条目；与 @launcher/ui 的 ChangelogNotes 同款 */
       .cl-notes { margin-top: 6px; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
       .cl-notes .cl-group + .cl-group { margin-top: 6px; }
@@ -179,12 +245,15 @@
         font-size: 10.5px; background: var(--hover); border-radius: 4px; padding: 0 3px;
       }
       .badge {
-        display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: 10.5px;
-        background: var(--hover); color: var(--muted);
+        display: inline-block; padding: 1px 6px; border-radius: var(--radius-xs, 6px); font-size: 10.5px;
+        background: color-mix(in srgb, var(--panel) 60%, transparent);
+        border: 1px solid var(--border);
+        box-shadow: inset 0 1px 0 var(--glass-hi);
+        color: var(--muted);
       }
-      .badge.ok { color: #10b981; }
-      .badge.err { color: #ef4444; }
-      .badge.warn { color: #f59e0b; }
+      .badge.ok { color: var(--success); }
+      .badge.err { color: var(--danger); }
+      .badge.warn { color: var(--warn); }
       .badge.accent { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 
       /* ── 最近审计：主行 = 插件 → 内核方法（域高亮）+ 所需能力 + 结果 ── */
@@ -208,7 +277,14 @@
       pre { white-space: pre-wrap; word-break: break-all; font-size: 11.5px; color: var(--muted); margin: 4px 0 0; }
       .toast {
         position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
-        background: var(--fg); color: var(--bg); padding: 5px 12px; border-radius: 8px; font-size: 12px;
+        background: var(--panel-strong); color: var(--fg);
+        border: 1px solid var(--border);
+        box-shadow:
+          inset 0 1px 0 var(--glass-hi),
+          0 24px 56px -24px rgba(15, 23, 42, 0.42);
+        -webkit-backdrop-filter: blur(30px) saturate(170%);
+        backdrop-filter: blur(30px) saturate(170%);
+        padding: 6px 13px; border-radius: var(--radius-md); font-size: 12px;
       }
       .muted { color: var(--muted); }
 
@@ -237,18 +313,25 @@
       .mitem.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
       .mitem .mname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .mitem .mmeta { color: var(--muted); font-size: 11px; }
-      /* 插件 logo 磁贴：与宿主结果网格同一套观感（圆角 22%、--hover 底、字形 56%，见 IconGlyph.vue） */
+      /* 插件 logo 磁贴：与宿主结果网格同一套玻璃观感（圆角 30%、分层高光、字形 54%，见 IconGlyph.vue） */
       .plogo {
         display: inline-flex; align-items: center; justify-content: center; flex: none;
-        background: var(--hover); color: var(--muted); overflow: hidden;
+        background:
+          linear-gradient(160deg, var(--tile-sheen), transparent 46%),
+          linear-gradient(155deg, var(--tile-from), var(--tile-to));
+        border: 1px solid var(--border);
+        box-shadow:
+          inset 0 1px 0 var(--glass-hi),
+          0 8px 18px -12px rgba(15, 23, 42, 0.3);
+        color: var(--muted); overflow: hidden;
       }
       .plogo.letter { font-weight: 600; }
       .plogo img { width: 100%; height: 100%; object-fit: contain; }
       .plogo-wrap { position: relative; display: inline-flex; flex: none; }
-      .plogo-wrap .dot { position: absolute; right: -2px; bottom: -2px; box-shadow: 0 0 0 2px var(--bg); }
+      .plogo-wrap .dot { position: absolute; right: -2px; bottom: -2px; box-shadow: 0 0 0 2px var(--panel-strong); }
       .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
-      .dot.ok { background: #10b981; }
-      .dot.err { background: #ef4444; }
+      .dot.ok { background: var(--success); }
+      .dot.err { background: var(--danger); }
       .mdot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; }
       .tag {
         font-size: 10px; line-height: 15px; padding: 0 5px; border-radius: 4px; flex: none;
@@ -259,7 +342,7 @@
         width: 26px; height: 15px; border-radius: 999px; flex: none; position: relative;
         background: var(--border); opacity: 0; transition: opacity 0.15s;
       }
-      .mtoggle.on { background: #10b981; opacity: 0.4; }
+      .mtoggle.on { background: var(--success); opacity: 0.4; }
       .mtoggle:not(.on) { opacity: 1; background: var(--muted); }
       .mitem:hover .mtoggle, .mitem.active .mtoggle, .mtoggle:focus-visible { opacity: 1; }
       .mtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -282,7 +365,10 @@
         position: sticky; top: 0; z-index: 2;
         display: flex; align-items: flex-end; gap: 2px;
         margin: 0 0 10px; padding-top: 2px;
-        background: var(--bg); border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--panel-strong) 92%, transparent);
+        -webkit-backdrop-filter: blur(16px) saturate(160%);
+        backdrop-filter: blur(16px) saturate(160%);
+        border-bottom: 1px solid var(--border);
       }
       .dtab {
         display: inline-flex; align-items: center; gap: 5px;
@@ -316,10 +402,10 @@
         border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 11.5px; cursor: pointer;
       }
       .cap:hover { border-color: var(--accent); color: var(--accent); }
-      .cap.denied { color: #ef4444; text-decoration: line-through; }
-      .cmd { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+      .cap.denied { color: var(--danger); text-decoration: line-through; }
+      .cmd { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 12px; margin-bottom: 8px; background: color-mix(in srgb, var(--panel) 45%, transparent); }
       .cmd-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-      .cmd-head code { background: var(--hover); padding: 1px 6px; border-radius: 5px; font-size: 11.5px; }
+      .cmd-head code { background: var(--panel-2); padding: 1px 6px; border-radius: var(--radius-xs, 6px); font-size: 11.5px; }
       .kwords { margin-top: 2px; }
       .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
       .chip {
@@ -342,7 +428,7 @@
       .path { word-break: break-all; }
       .dactions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
       .dactions .btn.danger { margin-left: auto; }
-      .danger-text { color: #ef4444; }
+      .danger-text { color: var(--danger); }
     </style>
   </head>
   <body>

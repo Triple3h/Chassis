@@ -6,8 +6,11 @@
  * 手工放一张位图在高分屏 / 小尺寸下都会糊。这里用 SVG 作为唯一源，任何尺寸都是重绘。
  *
  * 两个字形：
- *   应用图标 = 「输入框」（胶囊外框 + 文字光标 + 上箭头），即"输入即搜、回车即启"
+ *   应用图标 = 「输入框」（玻璃胶囊 + 文字光标 + 上箭头），即"输入即搜、回车即启"
  *   托盘     = 放大镜（18pt 下输入框的内里会糊，放大镜轮廓更清楚）
+ *
+ * 视觉语言：Liquid Glass —— 深色中性玻璃盘 + 边缘镜面高光 + 内部半透明胶囊。
+ * 不依赖彩色光斑；蓝色只作为极淡的环境光，保证浅色 / 深色桌面下都读得清。
  *
  * 依赖：rsvg-convert（brew install librsvg）、iconutil（macOS 自带）
  * 用法：npm run icon
@@ -32,23 +35,25 @@ const PLATE_OFFSET = (CANVAS - PLATE) / 2
 const PLATE_CENTER = PLATE_OFFSET + PLATE / 2
 const SQUIRCLE_N = 5 // 超椭圆指数：4.5–5 最接近 Apple 的连续圆角
 
-// 蓝 → 靛 → 亮紫，方向为左下 → 右上（与 launcher-ui 的强调色同一族，但更深）
+// 中性石板蓝：左上环境光、右下压暗；蓝色只做很淡的冷光，不做彩色渐变球
 const PALETTE = {
-  from: '#1C5CF5', // 左下：蓝
-  mid: '#5B34E8', // 中段：靛
-  to: '#A32BEE', // 右上：亮紫
-  glow: '#C558FF', // 右上角高光
-  shade: '#0C1250', // 底部压暗
+  from: '#2A3850', // 左下：石板蓝
+  mid: '#19222F', // 中段：深石墨
+  to: '#0D121B', // 右上：近黑
+  glow: '#6FA8FF', // 右上冷光（低透明度）
+  shade: '#04070D', // 底部压暗
+  trayFrom: '#5E97FF', // Windows 托盘：浅色任务栏也看得清
+  trayTo: '#2B5CC4',
 }
 
-const MARK = { w: 420, h: 175 } // 应用图标字形（宽 51% / 高 21% 图稿）
+const MARK = { w: 540, h: 250 } // 玻璃胶囊（宽 53% / 高 24% 图稿）
 
 /**
  * 菜单栏字形：放大镜 —— **刻意与应用图标不同**。
  * 应用图标那个「输入框」在 18pt 下内里的光标/箭头会糊掉，放大镜的轮廓干净得多。
  * 值是以环心为原点的绝对坐标（字形框边长 = to·u + r + stroke）。
  */
-const MAGNIFIER = { r: 148, stroke: 78, from: 140, to: 262, fill: 0.9 }
+const MAGNIFIER = { r: 142, stroke: 80, from: 140, to: 262, fill: 0.88 }
 
 // ── 超椭圆路径：比 SVG 的 rx 圆弧更接近 macOS 图标的连续圆角 ──────
 function squirclePath(size, n, samples = 72) {
@@ -66,42 +71,6 @@ function squirclePath(size, n, samples = 72) {
     points.push([a + x, a + y])
   }
   return `M${points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join('L')}Z`
-}
-
-/**
- * 字形几何。全部尺寸由胶囊高度 `h` 推导，所以整组缩放时比例不变。
- * 坐标以胶囊中心为原点，调用方负责 translate。
- *
- * 关键：光标与箭头按**内孔**（扣掉描边后的可用区域）定位，不能按外框宽度 ——
- * 否则胶囊一变窄（菜单栏那版），光标就贴到边框上，视觉上和边框糊成一体。
- */
-function markGeometry(w, h, lineScale = 0.14) {
-  const stroke = h * 0.195
-  const frameW = w - stroke // 描边中线框：外扩 stroke/2 后正好是 w × h
-  const frameH = h - stroke
-  return {
-    stroke,
-    line: h * lineScale,
-    capsule: { w: frameW, h: frameH, r: frameH / 2 },
-    caret: { x: -frameW / 2 + frameH * 0.47, half: frameH * 0.3 },
-    chevron: {
-      apex: [frameW / 2 - frameH * 0.72, -frameH * 0.13],
-      arm: [frameH * 0.26, frameH * 0.24],
-    },
-  }
-}
-
-function markMarkup({ w, h, color, shadow, lineScale }) {
-  const g = markGeometry(w, h, lineScale)
-  const [ax, ay] = g.chevron.apex
-  const [dx, dy] = g.chevron.arm
-  const n = (v) => v.toFixed(1)
-  return `
-  <g${shadow ? ' filter="url(#markShadow)"' : ''} fill="none" stroke="${color}" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="${n(-g.capsule.w / 2)}" y="${n(-g.capsule.h / 2)}" width="${n(g.capsule.w)}" height="${n(g.capsule.h)}" rx="${n(g.capsule.r)}" stroke-width="${n(g.stroke)}" />
-    <line x1="${n(g.caret.x)}" y1="${n(-g.caret.half)}" x2="${n(g.caret.x)}" y2="${n(g.caret.half)}" stroke-width="${n(g.line)}" />
-    <polyline points="${n(ax - dx)},${n(ay + dy)} ${n(ax)},${n(ay)} ${n(ax + dx)},${n(ay + dy)}" stroke-width="${n(g.line)}" />
-  </g>`
 }
 
 /** 字形框边长（含描边） */
@@ -125,26 +94,44 @@ function magnifierMarkup({ size, color }) {
 
 function defs(platePath) {
   return `<defs>
-    <linearGradient id="plate" x1="0.1" y1="0.95" x2="0.78" y2="0.02">
+    <linearGradient id="plate" x1="0.08" y1="0.95" x2="0.82" y2="0.02">
       <stop offset="0" stop-color="${PALETTE.from}" />
-      <stop offset="0.5" stop-color="${PALETTE.mid}" />
+      <stop offset="0.52" stop-color="${PALETTE.mid}" />
       <stop offset="1" stop-color="${PALETTE.to}" />
     </linearGradient>
-    <radialGradient id="glow" cx="0.88" cy="0.1" r="0.72">
-      <stop offset="0" stop-color="${PALETTE.glow}" stop-opacity="0.6" />
+    <radialGradient id="glow" cx="0.82" cy="0.12" r="0.7">
+      <stop offset="0" stop-color="${PALETTE.glow}" stop-opacity="0.34" />
       <stop offset="1" stop-color="${PALETTE.glow}" stop-opacity="0" />
     </radialGradient>
-    <radialGradient id="sheen" cx="0.18" cy="0.04" r="0.8">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22" />
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.05" />
+    <linearGradient id="specular" x1="0.08" y1="0" x2="0.82" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.26" />
+      <stop offset="0.42" stop-color="#ffffff" stop-opacity="0.04" />
+      <stop offset="0.44" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.16" cy="0.02" r="0.7">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.2" />
       <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
     </radialGradient>
-    <linearGradient id="shade" x1="0.5" y1="1" x2="0.5" y2="0.45">
-      <stop offset="0" stop-color="${PALETTE.shade}" stop-opacity="0.34" />
+    <linearGradient id="shade" x1="0.5" y1="1" x2="0.5" y2="0.5">
+      <stop offset="0" stop-color="${PALETTE.shade}" stop-opacity="0.46" />
       <stop offset="1" stop-color="${PALETTE.shade}" stop-opacity="0" />
     </linearGradient>
-    <filter id="markShadow" x="-30%" y="-50%" width="160%" height="200%">
-      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#1B0B63" flood-opacity="0.42" />
+    <linearGradient id="plateRim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.5" />
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.08" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.26" />
+    </linearGradient>
+    <linearGradient id="glassFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.42" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.16" />
+    </linearGradient>
+    <linearGradient id="glassStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="1" />
+      <stop offset="0.52" stop-color="#ffffff" stop-opacity="0.5" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.8" />
+    </linearGradient>
+    <filter id="capsuleShadow" x="-30%" y="-45%" width="160%" height="200%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#04070D" flood-opacity="0.55" />
     </filter>
     <clipPath id="plateClip"><path d="${platePath}" transform="translate(${PLATE_OFFSET} ${PLATE_OFFSET})" /></clipPath>
   </defs>`
@@ -154,20 +141,28 @@ function iconSvg() {
   const d = squirclePath(PLATE, SQUIRCLE_N)
   const plateRect = `<path d="${d}" transform="translate(${PLATE_OFFSET} ${PLATE_OFFSET})"`
   const washRect = `<rect x="${PLATE_OFFSET}" y="${PLATE_OFFSET}" width="${PLATE}" height="${PLATE}"`
+  const halfW = MARK.w / 2
+  const halfH = MARK.h / 2
+  const r = halfH
+  const stroke = 18
+  const n = (v) => Number(v).toFixed(1)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
 ${defs(d)}
   <g clip-path="url(#plateClip)">
     ${plateRect} fill="url(#plate)" />
     ${washRect} fill="url(#glow)" />
     ${washRect} fill="url(#sheen)" />
+    ${washRect} fill="url(#specular)" />
     ${washRect} fill="url(#shade)" />
+    <path d="${d}" transform="translate(${PLATE_OFFSET} ${PLATE_OFFSET})" fill="none" stroke="url(#plateRim)" stroke-width="7" opacity="0.6" />
   </g>
-  <g transform="translate(${PLATE_CENTER} ${PLATE_CENTER})">${markMarkup({
-    w: MARK.w,
-    h: MARK.h,
-    color: '#ffffff',
-    shadow: true,
-  })}
+  <g transform="translate(${PLATE_CENTER} ${PLATE_CENTER})" filter="url(#capsuleShadow)">
+    <rect x="${n(-halfW)}" y="${n(-halfH)}" width="${MARK.w}" height="${MARK.h}" rx="${n(r)}" fill="url(#glassFill)" stroke="url(#glassStroke)" stroke-width="${stroke}" />
+    <rect x="${n(-halfW + 22)}" y="${n(-halfH + 22)}" width="${MARK.w - 44}" height="${MARK.h - 44}" rx="${n(r - 22)}" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="3" />
+    <path d="M ${n(-halfW + 92)} ${n(-halfH + 12)} H ${n(halfW - 156)}" fill="none" stroke="#ffffff" stroke-opacity="0.4" stroke-width="8" stroke-linecap="round" />
+    <line x1="-180" y1="-46" x2="-180" y2="46" stroke="#ffffff" stroke-width="22" stroke-linecap="round" />
+    <polyline points="110,30 152,-12 194,30" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M -142 74 H 96" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="10" stroke-linecap="round" />
   </g>
 </svg>
 `
@@ -206,8 +201,8 @@ function winTraySvg() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${side}" height="${side}" viewBox="${(-canvas / 2).toFixed(1)} ${(-canvas / 2).toFixed(1)} ${canvas.toFixed(1)} ${canvas.toFixed(1)}">
 <defs>
   <linearGradient id="winTray" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="${PALETTE.from}" />
-    <stop offset="1" stop-color="${PALETTE.to}" />
+    <stop offset="0" stop-color="${PALETTE.trayFrom}" />
+    <stop offset="1" stop-color="${PALETTE.trayTo}" />
   </linearGradient>
 </defs>${magnifierMarkup({ size: box, color: 'url(#winTray)' })}
 </svg>

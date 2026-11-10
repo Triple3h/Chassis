@@ -98,16 +98,16 @@ const items = computed(() => {
 <template>
   <div
     ref="el"
-    class="menu fixed z-50 min-w-[220px] rounded-[10px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur-xl py-1 shadow-[0_16px_40px_rgba(0,0,0,0.35)]"
+    class="menu glass-strong fixed z-50 min-w-[230px] rounded-2xl py-1.5"
     :style="{ left: `${pos.left}px`, top: `${pos.top}px`, '--motion-origin': origin }"
   >
-    <div class="px-3 py-1 text-[10.5px] text-[var(--fg-muted)] uppercase tracking-wider">{{ pluginTitle }}</div>
+    <div class="px-3.5 py-1 text-[10px] text-[var(--fg-muted)] uppercase tracking-[0.08em]">{{ pluginTitle }}</div>
     <button
       v-for="item in items"
       :key="item.id"
       type="button"
-      class="menu-item w-full flex items-center gap-2.5 px-3 py-1.5 text-left"
-      :class="item.danger ? 'text-red-400' : ''"
+      class="menu-item w-full flex items-center gap-2.5 px-3.5 py-1.5 text-left text-[12.5px]"
+      :class="item.danger ? 'text-[var(--color-danger)]' : ''"
       @click="
         () => {
           item.run()
@@ -125,11 +125,13 @@ const items = computed(() => {
 .menu-item {
   transition:
     background-color var(--motion-instant) var(--motion-ease-move),
-    color var(--motion-instant) var(--motion-ease-move);
+    color var(--motion-instant) var(--motion-ease-move),
+    box-shadow var(--motion-instant) var(--motion-ease-move);
 }
 
 .menu-item:hover {
-  background: var(--hover);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
 }
 
 /* 按压反馈：菜单点下去的那一下要有回应，否则点了没反应会觉得是没点上 */
