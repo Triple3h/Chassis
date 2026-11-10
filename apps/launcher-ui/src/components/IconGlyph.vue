@@ -34,7 +34,7 @@ const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px
   <span
     v-else-if="markup"
     class="shrink-0 flex items-center justify-center"
-    :class="tile ? 'icon-tile text-[var(--fg-muted)]' : 'text-[var(--fg-muted)]'"
+    :class="tile ? 'icon-tile text-[var(--fg-muted)]' : 'text-current'"
     :style="tile ? { ...box, borderRadius: radius } : undefined"
   >
     <svg

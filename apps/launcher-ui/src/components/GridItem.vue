@@ -164,6 +164,7 @@ const nameStyle = computed(() => {
 
 /* 选中 / 悬停时磁贴边缘亮起 —— 图标是格子里最重的视觉锚点 */
 .grid-item.is-selected :deep(.icon-tile) {
+  color: var(--fg);
   border-color: color-mix(in srgb, var(--color-accent) 48%, transparent);
   box-shadow:
     inset 0 1px 0 var(--glass-hi),
