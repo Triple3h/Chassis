@@ -17,14 +17,43 @@ const props = defineProps<{
   pinIndex?: number
   dragging?: boolean
   dropTarget?: boolean
+  /** hover 简介的标题与正文（插件入口用清单 description） */
+  introTitle?: string
+  introText?: string
 }>()
+
+interface IntroPayload {
+  title: string
+  text: string
+  left: number
+  top: number
+  bottom: number
+  width: number
+}
 
 const emit = defineEmits<{
   (e: 'hover', index: number): void
   (e: 'activate', index: number): void
   (e: 'context', index: number, event: MouseEvent): void
   (e: 'grab', event: MouseEvent): void
+  (e: 'intro', payload: IntroPayload): void
+  (e: 'introLeave'): void
 }>()
+
+function onEnter(event: MouseEvent): void {
+  emit('hover', props.index)
+  const text = props.introText?.trim()
+  if (!text) return
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  emit('intro', {
+    title: props.introTitle || props.result.item.title,
+    text,
+    left: rect.left,
+    top: rect.top,
+    bottom: rect.bottom,
+    width: rect.width,
+  })
+}
 
 interface Segment {
   text: string
@@ -73,7 +102,8 @@ const nameStyle = computed(() => {
     :style="{ height: `${metrics.itemHeight}px` }"
     :data-pin-index="draggable ? pinIndex : undefined"
     :data-selected="selected ? 'true' : undefined"
-    @mouseenter="emit('hover', index)"
+    @mouseenter="onEnter"
+    @mouseleave="emit('introLeave')"
     @click="emit('activate', index)"
     @contextmenu.prevent="emit('context', index, $event)"
     @mousedown="draggable && emit('grab', $event)"

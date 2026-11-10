@@ -261,6 +261,15 @@ const sections = computed(() =>
     expanded: ui.expandedGroups,
   }),
 )
+
+/** 插件 id → 清单简介：网格 hover 时展示；结果项本身不带顶层 description */
+const pluginDescriptions = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {}
+  for (const plugin of data.plugins) {
+    if (plugin.description) map[plugin.id] = plugin.description
+  }
+  return map
+})
 const rows = computed(() => buildGridRows(sections.value, columns.value))
 const items = computed(() => flattenItems(rows.value))
 const selectedResult = computed<RankedResult | null>(() => items.value[ui.selected] ?? null)
@@ -981,6 +990,7 @@ const defaultHints = computed(() => {
           :columns="columns"
           :viewport-height="viewportHeight"
           :pin-draggable="pinDraggable"
+          :plugin-descriptions="pluginDescriptions"
           @hover="(index) => (ui.selected = index)"
           @activate="activate"
           @context="onContext"

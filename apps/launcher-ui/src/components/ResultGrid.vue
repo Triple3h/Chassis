@@ -14,6 +14,8 @@ const props = defineProps<{
   viewportHeight: number
   /** 固定区当前可拖拽重排（空输入且已展开） */
   pinDraggable: boolean
+  /** 插件 id → 清单简介：hover 时展示（结果项本身不带顶层 description） */
+  pluginDescriptions: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -122,13 +124,75 @@ function onBackgroundClick(event: MouseEvent): void {
   if (target?.closest('.grid-item') || target?.closest('.section-header')) return
   emit('background')
 }
+
+// ── 插件简介：hover 延迟展示，离开 / 滚动立即收起 ──────────────
+interface IntroPayload {
+  title: string
+  text: string
+  left: number
+  top: number
+  bottom: number
+  width: number
+}
+
+const INTRO_DELAY_MS = 320
+const intro = ref<IntroPayload | null>(null)
+let introTimer = 0
+
+function showIntro(payload: IntroPayload): void {
+  window.clearTimeout(introTimer)
+  introTimer = window.setTimeout(() => {
+    intro.value = payload
+  }, INTRO_DELAY_MS)
+}
+
+function hideIntro(): void {
+  window.clearTimeout(introTimer)
+  introTimer = 0
+  intro.value = null
+}
+
+function onScrollWithIntro(event: Event): void {
+  hideIntro()
+  onScroll(event)
+}
+
+/** 优先放在格子下方；下方放不下且上方有空间就翻到上方，左右夹在视口内 */
+const introStyle = computed<Record<string, string>>(() => {
+  const tip = intro.value
+  if (!tip) return {}
+  const gap = 8
+  const half = 160
+  const left = Math.min(Math.max(tip.left + tip.width / 2, half), window.innerWidth - half)
+  const below = tip.bottom + gap
+  if (below + 100 <= window.innerHeight) {
+    return { left: `${left}px`, top: `${below}px`, transform: 'translateX(-50%)' }
+  }
+  return {
+    left: `${left}px`,
+    top: `${tip.top - gap}px`,
+    transform: 'translate(-50%, -100%)',
+  }
+})
+
+function introTitleOf(result: RankedResult, group: GridRow['group']): string {
+  return group === 'plugins' ? result.pluginTitle : result.item.title
+}
+
+function introTextOf(result: RankedResult, group: GridRow['group']): string {
+  const plugin = props.pluginDescriptions[result.pluginId] ?? ''
+  if (group === 'plugins') return plugin || result.item.subtitle || ''
+  return result.item.subtitle || plugin || ''
+}
+
+onUnmounted(() => hideIntro())
 </script>
 
 <template>
   <div
     ref="container"
     class="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain no-scrollbar relative"
-    @scroll="onScroll"
+    @scroll="onScrollWithIntro"
     @click="onBackgroundClick"
   >
     <div
@@ -162,15 +226,27 @@ function onBackgroundClick(event: MouseEvent): void {
               :pin-index="item.row.start + i"
               :dragging="drag?.active === true && drag.from.itemKey === result.itemKey"
               :drop-target="drag?.over?.itemKey === result.itemKey"
+              :intro-title="introTitleOf(result, item.row.group)"
+              :intro-text="introTextOf(result, item.row.group)"
               @hover="(index) => !drag?.active && emit('hover', index)"
               @activate="(index) => !drag?.active && emit('activate', index)"
               @context="(index, event) => emit('context', index, event)"
               @grab="(event) => startDrag(result, event)"
+              @intro="showIntro"
+              @intro-leave="hideIntro"
             />
           </div>
         </template>
       </div>
     </div>
+
+    <!-- 插件简介：fixed 定位，避开选中框；只作提示，不接收指针 -->
+    <Transition name="motion-fade" :duration="{ enter: 120, leave: 90 }">
+      <div v-if="intro" class="intro-tip" :style="introStyle" role="tooltip">
+        <div class="intro-title">{{ intro.title }}</div>
+        <p class="intro-text">{{ intro.text }}</p>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -179,5 +255,43 @@ function onBackgroundClick(event: MouseEvent): void {
   display: grid;
   grid-template-columns: repeat(var(--grid-cols, 7), minmax(0, 1fr));
   gap: 0 4px;
+}
+
+/* 插件简介：一块抬升的玻璃浮层，固定定位在格子下方；不遮选中框、不吃指针 */
+.intro-tip {
+  position: fixed;
+  z-index: 55;
+  width: max-content;
+  max-width: 300px;
+  padding: 9px 11px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--panel-strong);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-rim) 55%, transparent),
+    var(--elev-3);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  backdrop-filter: blur(24px) saturate(170%);
+  color: var(--fg);
+  font-size: 11.5px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.intro-title {
+  margin-bottom: 3px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.intro-text {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+  color: var(--fg-muted);
 }
 </style>
