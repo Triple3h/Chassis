@@ -150,17 +150,17 @@ mod tests {
 
     #[test]
     fn critical_and_caution_are_separated() {
-        let critical = if cfg!(target_os = "macos") { "kernel_task" } else { "lsass.exe" };
-        assert_eq!(evaluate(99, critical, false), Risk::Blocked);
-        let caution = if cfg!(target_os = "macos") { "Finder" } else { "explorer.exe" };
-        assert_eq!(evaluate(99, caution, false), Risk::Caution);
+        // 名字取自当前平台的名单：CI 的 Linux 也有一份，硬编码 mac 名字会误判成 Safe
+        assert_eq!(evaluate(99, critical_names()[0], false), Risk::Blocked);
+        assert_eq!(evaluate(99, caution_names()[0], false), Risk::Caution);
         assert_eq!(evaluate(99, "node", false), Risk::Safe);
     }
 
     #[test]
     fn names_are_case_insensitive() {
-        assert_eq!(evaluate(99, "WindowServer", false), Risk::Blocked);
-        assert_eq!(evaluate(99, "windowserver", false), Risk::Blocked);
-        assert_eq!(evaluate(99, "WINDOWSERVER", false), Risk::Blocked);
+        for name in critical_names() {
+            let upper = name.to_ascii_uppercase();
+            assert_eq!(evaluate(99, &upper, false), Risk::Blocked, "{upper} 应被拦截");
+        }
     }
 }
