@@ -45,11 +45,6 @@ const segments = computed<Segment[]>(() => {
   ].filter((s) => s.text.length > 0)
 })
 
-/** 格子里放不下副标题，进 tooltip */
-const tooltip = computed(() =>
-  [props.result.item.title, props.result.item.subtitle, props.result.pluginTitle].filter(Boolean).join('\n'),
-)
-
 /** 图标外框：与 metrics.icon 同尺寸，右侧的角标以它为定位基准 */
 const boxStyle = computed(() => ({
   width: `${props.metrics.icon}px`,
@@ -61,7 +56,7 @@ const nameStyle = computed(() => {
   return {
     fontSize: `${props.metrics.name}px`,
     lineHeight: `${lineHeight}px`,
-    height: `${lineHeight * 2}px`,
+    maxHeight: `${lineHeight * 2}px`,
   }
 })
 </script>
@@ -76,7 +71,6 @@ const nameStyle = computed(() => {
       dropTarget ? 'is-drop-target' : '',
     ]"
     :style="{ height: `${metrics.itemHeight}px` }"
-    :title="tooltip"
     :data-pin-index="draggable ? pinIndex : undefined"
     :data-selected="selected ? 'true' : undefined"
     @mouseenter="emit('hover', index)"
@@ -106,6 +100,7 @@ const nameStyle = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 7px;
   width: 100%;
   padding: 8px 4px;
