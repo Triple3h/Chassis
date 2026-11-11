@@ -2,6 +2,12 @@
 
 本文件由 `pnpm ship` 维护，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.1.16] - 2026-11-11
+
+### Fixed
+
+- **ui**: 真正唤出时回到首页（插件页不跨窗口保留）
+
 ## [0.1.15] - 2026-11-11
 
 ### Changed
