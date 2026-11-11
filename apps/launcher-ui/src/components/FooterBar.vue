@@ -33,7 +33,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="footer-bar flex items-center gap-3 px-4 h-[36px] text-[11px] text-[var(--fg-muted)]">
+  <div class="footer-bar flex items-center gap-3 px-4 h-[36px] text-[11.5px] text-[var(--fg-muted)]">
     <!-- 退出入口：与插件自己的按钮之间留一道竖线，别让「返回」混进主要动作里被误点 -->
     <template v-if="back">
       <div class="flex items-center gap-1.5">
@@ -74,25 +74,24 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-/* 底栏是玻璃面板的下边缘：一条发丝线 + 极淡的向上反光，不再铺实底 */
+/* 底栏是面板的下边缘：一条发丝线，不铺底 */
 .footer-bar {
   border-top: 1px solid var(--border);
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--panel) 26%, transparent));
 }
 
 .footer-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   border-radius: var(--radius-sm);
-  padding: 2px 7px;
+  padding: 2px 8px;
   transition:
     background-color var(--motion-instant) var(--motion-ease-move),
     color var(--motion-instant) var(--motion-ease-move);
 }
 
 .footer-btn:hover {
-  background: color-mix(in srgb, var(--panel) 40%, transparent);
+  background: var(--hover);
   color: var(--fg);
 }
 
@@ -106,15 +105,12 @@ const emit = defineEmits<{
   flex: none;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   border-radius: var(--radius-sm);
   padding: 2px 8px;
   color: var(--fg);
-  background:
-    linear-gradient(180deg, var(--glass-hi), transparent 60%),
-    color-mix(in srgb, var(--panel) 52%, transparent);
+  background: var(--panel-2);
   border: 1px solid var(--border);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
   transition:
     background-color var(--motion-instant) var(--motion-ease-move),
     border-color var(--motion-instant) var(--motion-ease-move),

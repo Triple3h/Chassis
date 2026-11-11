@@ -16,16 +16,16 @@ const groups = computed(() => parseChangelog(props.notes))
 <template>
   <div v-if="groups.length" class="mt-1.5 space-y-1.5 text-[11.5px] leading-[1.5] text-faint">
     <div v-for="(group, groupIndex) in groups" :key="groupIndex">
-      <div v-if="group.title" class="mb-0.5 text-[10.5px] font-medium tracking-wide text-muted">
+      <div v-if="group.title" class="mb-1 text-[11.5px] font-medium text-muted">
         {{ group.title }}
       </div>
       <ul class="space-y-0.5">
-        <li v-for="(item, itemIndex) in group.items" :key="itemIndex" class="flex gap-1.5">
-          <span class="mt-[7px] size-[3px] shrink-0 rounded-full bg-accent/60" />
+        <li v-for="(item, itemIndex) in group.items" :key="itemIndex" class="flex gap-2">
+          <span class="mt-2 size-[3px] shrink-0 rounded-full bg-accent/60" />
           <span class="min-w-0 break-words">
             <template v-for="(segment, segmentIndex) in item" :key="segmentIndex">
               <strong v-if="segment.bold" class="font-medium text-muted">{{ segment.text }}</strong>
-              <code v-else-if="segment.code" class="rounded bg-hover px-1 py-px font-mono text-[10.5px]">{{ segment.text }}</code>
+              <code v-else-if="segment.code" class="rounded bg-hover px-1 py-px font-mono text-[11.5px]">{{ segment.text }}</code>
               <template v-else>{{ segment.text }}</template>
             </template>
           </span>

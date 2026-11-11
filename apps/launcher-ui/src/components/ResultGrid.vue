@@ -198,7 +198,7 @@ onUnmounted(() => hideIntro())
     <div
       :style="{
         '--grid-cols': String(columns),
-        padding: '6px 12px',
+        padding: '8px 12px',
         ...(enabled ? { height: `${totalHeight}px`, position: 'relative' } : {}),
       }"
     >
@@ -257,32 +257,29 @@ onUnmounted(() => hideIntro())
   gap: 0 4px;
 }
 
-/* 插件简介：一块抬升的玻璃浮层，固定定位在格子下方；不遮选中框、不吃指针 */
+/* 插件简介：一块抬升的表面，固定定位在格子下方；不遮选中框、不吃指针 */
 .intro-tip {
   position: fixed;
   z-index: 55;
   width: max-content;
   max-width: 300px;
-  padding: 9px 11px;
-  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--panel-strong);
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    inset 0 0 0 1px color-mix(in srgb, var(--glass-rim) 55%, transparent),
-    var(--elev-3);
-  -webkit-backdrop-filter: blur(24px) saturate(170%);
-  backdrop-filter: blur(24px) saturate(170%);
+  box-shadow: var(--elev-2);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--fg);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
   pointer-events: none;
 }
 
 .intro-title {
-  margin-bottom: 3px;
-  font-size: 12px;
-  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
 }
 
 .intro-text {

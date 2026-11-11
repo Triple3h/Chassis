@@ -19,17 +19,18 @@
   --launcher-if-dark: ;
 
   /* ── 基础语义色 ─────────────────────────────────────────────── */
-  --launcher-bg: var(--launcher-if-light, #eef1f6) var(--launcher-if-dark, #12161e);
-  --launcher-panel: var(--launcher-if-light, rgba(255, 255, 255, 0.74)) var(--launcher-if-dark, rgba(34, 41, 52, 0.72));
-  --launcher-panel-strong: var(--launcher-if-light, rgba(255, 255, 255, 0.9)) var(--launcher-if-dark, rgba(38, 45, 57, 0.9));
-  --launcher-panel-2: var(--launcher-if-light, rgba(15, 23, 42, 0.045)) var(--launcher-if-dark, rgba(0, 0, 0, 0.22));
-  --launcher-hover: var(--launcher-if-light, rgba(15, 23, 42, 0.055)) var(--launcher-if-dark, rgba(255, 255, 255, 0.065));
-  --launcher-active: var(--launcher-if-light, rgba(15, 23, 42, 0.085)) var(--launcher-if-dark, rgba(255, 255, 255, 0.105));
-  --launcher-line: var(--launcher-if-light, rgba(15, 23, 42, 0.1)) var(--launcher-if-dark, rgba(255, 255, 255, 0.1));
-  --launcher-line-strong: var(--launcher-if-light, rgba(15, 23, 42, 0.2)) var(--launcher-if-dark, rgba(255, 255, 255, 0.18));
-  --launcher-fg: var(--launcher-if-light, #151a24) var(--launcher-if-dark, #eceef2);
-  --launcher-muted: var(--launcher-if-light, #667085) var(--launcher-if-dark, #9aa3b5);
-  --launcher-faint: var(--launcher-if-light, #98a1b2) var(--launcher-if-dark, #737d8f);
+  --launcher-bg: var(--launcher-if-light, #fafafa) var(--launcher-if-dark, #141415);
+  --launcher-panel: var(--launcher-if-light, rgba(255, 255, 255, 0.98)) var(--launcher-if-dark, rgba(25, 25, 27, 0.98));
+  --launcher-panel-strong: var(--launcher-if-light, #ffffff) var(--launcher-if-dark, #1c1c1e);
+  --launcher-panel-2: var(--launcher-if-light, rgba(15, 23, 42, 0.04)) var(--launcher-if-dark, rgba(255, 255, 255, 0.05));
+  --launcher-hover: var(--launcher-if-light, rgba(15, 23, 42, 0.05)) var(--launcher-if-dark, rgba(255, 255, 255, 0.05));
+  --launcher-active: var(--launcher-if-light, rgba(15, 23, 42, 0.08)) var(--launcher-if-dark, rgba(255, 255, 255, 0.08));
+  --launcher-line: var(--launcher-if-light, rgba(15, 23, 42, 0.08)) var(--launcher-if-dark, rgba(255, 255, 255, 0.08));
+  --launcher-line-strong: var(--launcher-if-light, rgba(15, 23, 42, 0.16)) var(--launcher-if-dark, rgba(255, 255, 255, 0.16));
+  --launcher-fg: var(--launcher-if-light, #171717) var(--launcher-if-dark, #ededed);
+  --launcher-muted: var(--launcher-if-light, #6b7487) var(--launcher-if-dark, #a1a1a6);
+  --launcher-faint: var(--launcher-if-light, #98a1b2) var(--launcher-if-dark, #85858b);
+  --launcher-icon-fg: var(--launcher-if-light, #4b5565) var(--launcher-if-dark, #c7c7cc);
   --launcher-accent: var(--launcher-if-light, #2f6fe4) var(--launcher-if-dark, #74a8ff);
   --launcher-accent-fg: var(--launcher-if-light, #ffffff) var(--launcher-if-dark, #0b1220);
   --launcher-danger: var(--launcher-if-light, #d64545) var(--launcher-if-dark, #ff8c8c);
@@ -47,35 +48,33 @@
   /* ── 玻璃材质（与宿主同值同档）────────────────────────────────
      插件页是独立文档，看不到桌面，所以材质是「在底色上叠半透明层」的近似：
      .launcher-glass / .launcher-glass-strong 消费下面这组令牌，边缘透出底色与镜面环。 */
-  --launcher-glass: var(--launcher-if-light, rgba(255, 255, 255, 0.7)) var(--launcher-if-dark, rgba(34, 41, 52, 0.7));
-  --launcher-glass-strong: var(--launcher-if-light, rgba(255, 255, 255, 0.89)) var(--launcher-if-dark, rgba(38, 45, 57, 0.9));
-  --launcher-glass-hi: var(--launcher-if-light, rgba(255, 255, 255, 0.9)) var(--launcher-if-dark, rgba(255, 255, 255, 0.16));
-  --launcher-glass-lo: var(--launcher-if-light, rgba(15, 23, 42, 0.12)) var(--launcher-if-dark, rgba(0, 0, 0, 0.5));
-  --launcher-glass-rim: var(--launcher-if-light, rgba(255, 255, 255, 0.56)) var(--launcher-if-dark, rgba(255, 255, 255, 0.14));
-  --launcher-glass-edge: var(--launcher-if-light, rgba(15, 23, 42, 0.1)) var(--launcher-if-dark, rgba(255, 255, 255, 0.1));
-  --launcher-glass-sheen: var(--launcher-if-light, rgba(255, 255, 255, 0.5)) var(--launcher-if-dark, rgba(255, 255, 255, 0.09));
-  --launcher-glass-glow: var(--launcher-if-light, rgba(160, 205, 255, 0.16)) var(--launcher-if-dark, rgba(110, 160, 230, 0.1));
-  --launcher-glass-blur: 28px;
-  --launcher-glass-saturate: 170%;
+  --launcher-glass: var(--launcher-if-light, rgba(255, 255, 255, 0.98)) var(--launcher-if-dark, rgba(25, 25, 27, 0.98));
+  --launcher-glass-strong: var(--launcher-if-light, #ffffff) var(--launcher-if-dark, #1c1c1e);
+  --launcher-glass-hi: var(--launcher-if-light, transparent) var(--launcher-if-dark, transparent);
+  --launcher-glass-lo: var(--launcher-if-light, rgba(15, 23, 42, 0.1)) var(--launcher-if-dark, rgba(0, 0, 0, 0.4));
+  --launcher-glass-rim: var(--launcher-if-light, rgba(15, 23, 42, 0.08)) var(--launcher-if-dark, rgba(255, 255, 255, 0.08));
+  --launcher-glass-edge: var(--launcher-if-light, rgba(15, 23, 42, 0.08)) var(--launcher-if-dark, rgba(255, 255, 255, 0.08));
+  --launcher-glass-sheen: var(--launcher-if-light, transparent) var(--launcher-if-dark, transparent);
+  --launcher-glass-blur: 20px;
 
-  --launcher-elev-1: var(--launcher-if-light, 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 20px -14px rgba(15, 23, 42, 0.22)) var(--launcher-if-dark, 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 20px -14px rgba(0, 0, 0, 0.55));
-  --launcher-elev-2: var(--launcher-if-light, 0 18px 40px -20px rgba(15, 23, 42, 0.3), 0 2px 8px rgba(15, 23, 42, 0.06)) var(--launcher-if-dark, 0 18px 40px -20px rgba(0, 0, 0, 0.62), 0 2px 8px rgba(0, 0, 0, 0.34));
-  --launcher-elev-3: var(--launcher-if-light, 0 30px 72px -28px rgba(15, 23, 42, 0.38), 0 6px 18px rgba(15, 23, 42, 0.1)) var(--launcher-if-dark, 0 30px 72px -28px rgba(0, 0, 0, 0.72), 0 6px 18px rgba(0, 0, 0, 0.4));
+  --launcher-elev-1: var(--launcher-if-light, 0 1px 2px rgba(15, 23, 42, 0.06)) var(--launcher-if-dark, 0 1px 2px rgba(0, 0, 0, 0.3));
+  --launcher-elev-2: var(--launcher-if-light, 0 8px 24px rgba(15, 23, 42, 0.08)) var(--launcher-if-dark, 0 8px 24px rgba(0, 0, 0, 0.35));
+  --launcher-elev-3: var(--launcher-if-light, 0 12px 32px rgba(15, 23, 42, 0.1)) var(--launcher-if-dark, 0 12px 32px rgba(0, 0, 0, 0.4));
   --launcher-shadow: var(--launcher-elev-3);
 
-  /* 图标磁贴：中性玻璃，明暗自动切换 */
-  --launcher-tile-from: var(--launcher-if-light, rgba(255, 255, 255, 0.9)) var(--launcher-if-dark, rgba(78, 88, 106, 0.78));
-  --launcher-tile-to: var(--launcher-if-light, rgba(222, 228, 238, 0.86)) var(--launcher-if-dark, rgba(38, 44, 56, 0.9));
-  --launcher-tile-edge: var(--launcher-if-light, rgba(15, 23, 42, 0.1)) var(--launcher-if-dark, rgba(255, 255, 255, 0.11));
-  --launcher-tile-sheen: var(--launcher-if-light, rgba(255, 255, 255, 0.95)) var(--launcher-if-dark, rgba(255, 255, 255, 0.18));
-  --launcher-tile-shadow: var(--launcher-if-light, rgba(15, 23, 42, 0.22)) var(--launcher-if-dark, rgba(0, 0, 0, 0.55));
+  /* 图标磁贴：中性表面，明暗自动切换 */
+  --launcher-tile-from: var(--launcher-if-light, #f4f4f5) var(--launcher-if-dark, #232325);
+  --launcher-tile-to: var(--launcher-if-light, #f4f4f5) var(--launcher-if-dark, #232325);
+  --launcher-tile-edge: var(--launcher-if-light, rgba(15, 23, 42, 0.08)) var(--launcher-if-dark, rgba(255, 255, 255, 0.1));
+  --launcher-tile-sheen: var(--launcher-if-light, transparent) var(--launcher-if-dark, transparent);
+  --launcher-tile-shadow: var(--launcher-if-light, rgba(15, 23, 42, 0.1)) var(--launcher-if-dark, transparent);
 
-  /* 页面底色：极淡的顶部光泽 + 纵向渐变，给玻璃层一个可透出的底 */
-  --launcher-base: var(--launcher-if-light, radial-gradient(120% 90% at 12% -10%, #ffffff 0%, rgba(255, 255, 255, 0) 58%), linear-gradient(180deg, #f7f9fc, #e9edf4)) var(--launcher-if-dark, radial-gradient(120% 90% at 12% -10%, rgba(110, 160, 230, 0.12), transparent 58%), linear-gradient(180deg, #171c26, #0f131a));
+  /* 页面底色：一层中性底色，不再有径向光斑与纵向渐变 */
+  --launcher-base: var(--launcher-if-light, #fafafa) var(--launcher-if-dark, #141415);
 
   /* ── 圆角 / 字阶 / 间距 / 层级（与宿主同值）────────────────── */
   --launcher-radius-xs: 6px;
-  --launcher-radius-sm: 9px;
+  --launcher-radius-sm: 8px;
   --launcher-radius-md: 12px;
   --launcher-radius-lg: 16px;
   --launcher-radius-xl: 20px;
@@ -86,14 +85,14 @@
   --launcher-text-title: 14px;
   --launcher-text-body: 13px;
   --launcher-text-caption: 11.5px;
-  --launcher-text-micro: 10.5px;
+  --launcher-text-micro: 11px;
   --launcher-leading-tight: 1.2;
   --launcher-leading-body: 1.45;
-  --launcher-tracking-label: 0.08em;
+  --launcher-tracking-label: 0;
 
   --launcher-space-1: 2px;
   --launcher-space-2: 4px;
-  --launcher-space-3: 6px;
+  --launcher-space-3: 8px;
   --launcher-space-4: 8px;
   --launcher-space-5: 12px;
   --launcher-space-6: 16px;
@@ -119,15 +118,15 @@
 
   /* ── 动效令牌（与宿主 apps/launcher-ui/src/styles/app.css 同值同档）──
      插件页视觉要与宿主一致，动效也得同一手感；改档位请两边一起改。 */
-  --launcher-motion-instant: 90ms;
-  --launcher-motion-fast: 140ms;
-  --launcher-motion-base: 200ms;
+  --launcher-motion-instant: 140ms;
+  --launcher-motion-fast: 180ms;
+  --launcher-motion-base: 220ms;
   --launcher-motion-slow: 320ms;
 
-  --launcher-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --launcher-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
   --launcher-ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --launcher-ease-move: cubic-bezier(0.4, 0, 0.2, 1);
-  --launcher-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --launcher-ease-move: cubic-bezier(0.22, 1, 0.36, 1);
+  --launcher-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -217,26 +216,19 @@ body {
 }
 
 .launcher-glass {
-  background:
-    linear-gradient(180deg, var(--launcher-glass-sheen), transparent 44%),
-    var(--launcher-glass);
+  background: var(--launcher-glass);
   border: 1px solid var(--launcher-glass-edge);
-  box-shadow:
-    inset 0 1px 0 var(--launcher-glass-hi),
-    var(--launcher-elev-2);
-  -webkit-backdrop-filter: blur(var(--launcher-glass-blur)) saturate(var(--launcher-glass-saturate));
-  backdrop-filter: blur(var(--launcher-glass-blur)) saturate(var(--launcher-glass-saturate));
+  box-shadow: var(--launcher-elev-2);
+  -webkit-backdrop-filter: blur(var(--launcher-glass-blur));
+  backdrop-filter: blur(var(--launcher-glass-blur));
 }
 
 .launcher-glass-strong {
   background: var(--launcher-glass-strong);
   border: 1px solid var(--launcher-glass-edge);
-  box-shadow:
-    inset 0 1px 0 var(--launcher-glass-hi),
-    inset 0 0 0 1px color-mix(in srgb, var(--launcher-glass-rim) 60%, transparent),
-    var(--launcher-elev-3);
-  -webkit-backdrop-filter: blur(30px) saturate(170%);
-  backdrop-filter: blur(30px) saturate(170%);
+  box-shadow: var(--launcher-elev-3);
+  -webkit-backdrop-filter: blur(var(--launcher-glass-blur));
+  backdrop-filter: blur(var(--launcher-glass-blur));
 }
 
 .launcher-glass-sunken {
@@ -245,27 +237,20 @@ body {
   box-shadow: inset 0 1px 2px var(--launcher-glass-lo);
 }
 
-/* 图标磁贴：中性玻璃底座；字形用 currentColor，明暗自动反转 */
+/* 图标磁贴：一块中性表面 + 发丝线；字形取 --launcher-icon-fg，明暗各自一档 */
 .launcher-tile {
-  background:
-    linear-gradient(160deg, var(--launcher-tile-sheen), transparent 46%),
-    linear-gradient(155deg, var(--launcher-tile-from), var(--launcher-tile-to));
+  background: var(--launcher-tile-from);
   border: 1px solid var(--launcher-tile-edge);
-  box-shadow:
-    inset 0 1px 0 var(--launcher-glass-hi),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.08),
-    0 8px 18px -12px var(--launcher-tile-shadow);
+  color: var(--launcher-icon-fg);
 }
 
-/* 页面级顶栏 / 底栏：不需要每个插件各写一遍，共享一层镜面高光 */
+/* 页面级顶栏 / 底栏：一条发丝线划出层级，不再叠镜面高光 */
 .launcher-shell > header {
-  background-image: linear-gradient(180deg, var(--launcher-glass-sheen), transparent 58%);
-  box-shadow: inset 0 1px 0 var(--launcher-glass-hi);
+  box-shadow: inset 0 -1px 0 var(--launcher-line);
 }
 
 .launcher-shell > footer {
-  background-image: linear-gradient(0deg, var(--launcher-glass-sheen), transparent 58%);
-  box-shadow: inset 0 -1px 0 var(--launcher-glass-hi);
+  box-shadow: inset 0 1px 0 var(--launcher-line);
 }
 
 /* ── 滚动条：宿主同款「极简滚动条」──────────────────────────────
@@ -389,12 +374,9 @@ button:focus {
   background: var(--launcher-glass-strong);
   border: 1px solid var(--launcher-line);
   border-radius: var(--launcher-radius-lg);
-  box-shadow:
-    inset 0 1px 0 var(--launcher-glass-hi),
-    inset 0 0 0 1px color-mix(in srgb, var(--launcher-glass-rim) 55%, transparent),
-    var(--launcher-elev-3);
-  -webkit-backdrop-filter: blur(30px) saturate(170%);
-  backdrop-filter: blur(30px) saturate(170%);
+  box-shadow: var(--launcher-elev-3);
+  -webkit-backdrop-filter: blur(var(--launcher-glass-blur));
+  backdrop-filter: blur(var(--launcher-glass-blur));
 }
 .launcher-menu-item {
   display: flex;
@@ -428,10 +410,7 @@ button:focus {
   gap: 6px;
   border-radius: var(--launcher-radius-sm);
   border: 1px solid var(--launcher-line);
-  background:
-    linear-gradient(180deg, var(--launcher-glass-hi), transparent 52%),
-    var(--launcher-panel-2);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--launcher-glass-hi) 70%, transparent);
+  background: var(--launcher-panel-2);
   padding: 5px 10px;
   font-size: 12.5px;
   line-height: 18px;
@@ -449,24 +428,17 @@ button:focus {
   transform: scale(0.97);
 }
 .launcher-btn:hover {
-  background:
-    linear-gradient(180deg, var(--launcher-glass-hi), transparent 52%),
-    var(--launcher-active);
+  background: var(--launcher-active);
 }
 .launcher-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 .launcher-btn.primary {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 56%),
-    var(--launcher-accent);
+  background: var(--launcher-accent);
   border-color: transparent;
   color: var(--launcher-accent-fg);
   font-weight: 600;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 8px 18px -12px color-mix(in srgb, var(--launcher-accent) 70%, transparent);
 }
 .launcher-btn.primary:hover {
   filter: brightness(1.06);
@@ -488,9 +460,8 @@ button:focus {
   align-items: center;
   gap: 4px;
   border-radius: var(--launcher-radius-xs);
-  background: color-mix(in srgb, var(--launcher-panel) 60%, transparent);
+  background: var(--launcher-panel-2);
   border: 1px solid var(--launcher-line);
-  box-shadow: inset 0 1px 0 var(--launcher-glass-hi);
   padding: 1px 6px;
   font-size: 11px;
   color: var(--launcher-muted);
@@ -505,11 +476,8 @@ button:focus {
   height: 18px;
   padding: 0 5px;
   border-radius: var(--launcher-radius-xs);
-  background: color-mix(in srgb, var(--launcher-panel) 60%, transparent);
+  background: var(--launcher-panel-2);
   border: 1px solid var(--launcher-line);
-  box-shadow:
-    inset 0 1px 0 var(--launcher-glass-hi),
-    0 1px 0 color-mix(in srgb, var(--launcher-line) 60%, transparent);
   font-size: 11px;
   color: var(--launcher-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

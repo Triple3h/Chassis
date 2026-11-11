@@ -32,17 +32,14 @@ const emit = defineEmits<{ (e: 'reset'): void }>()
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 999px;
+  gap: 8px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   color: var(--fg-muted);
-  background:
-    linear-gradient(180deg, var(--glass-hi), transparent 58%),
-    color-mix(in srgb, var(--panel) 42%, transparent);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
-  font-size: 11px;
+  background: var(--panel-2);
+  font-size: 11.5px;
   transition:
     color var(--motion-instant) var(--motion-ease-move),
     border-color var(--motion-instant) var(--motion-ease-move),
@@ -50,7 +47,7 @@ const emit = defineEmits<{ (e: 'reset'): void }>()
 }
 
 .reset-size-labeled {
-  padding: 0 9px;
+  padding: 0 10px;
 }
 
 .reset-size:hover {

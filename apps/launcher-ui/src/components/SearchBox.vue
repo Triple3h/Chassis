@@ -10,7 +10,7 @@ const emit = defineEmits<{
 
 const input = ref<HTMLInputElement | null>(null)
 
-const placeholderText = computed(() => props.placeholder || '搜索应用、命令或文件…')
+const placeholderText = computed(() => props.placeholder || '搜索')
 
 watch(
   () => props.modelValue,
@@ -34,7 +34,7 @@ defineExpose({ focus, input })
 
 <template>
   <!-- data-drag-region：这一行（除输入框与按钮外）是「按住拖动窗口」的手柄，见 App.vue -->
-  <div class="search-row flex items-center gap-2.5 px-3.5 h-[58px] shrink-0" data-drag-region>
+  <div class="search-row flex items-center gap-3 px-4 h-[56px] shrink-0" data-drag-region>
     <div class="search-well">
       <span class="search-glyph"><IconGlyph name="search" :size="18" /></span>
       <input
@@ -60,7 +60,7 @@ defineExpose({ focus, input })
 </template>
 
 <style scoped>
-/* 搜索井：一块下沉玻璃，焦点时才亮起镜面环 —— 整块面板里唯一需要“可输入”的提示 */
+/* 搜索井：一块下沉表面，焦点时亮起一条蓝边 */
 .search-well {
   display: flex;
   align-items: center;
@@ -69,12 +69,9 @@ defineExpose({ focus, input })
   min-width: 0;
   height: 40px;
   padding: 0 12px;
-  border-radius: 14px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--sunken);
-  box-shadow:
-    inset 0 1px 2px var(--glass-lo),
-    inset 0 -1px 0 color-mix(in srgb, var(--glass-hi) 45%, transparent);
   transition:
     border-color var(--motion-fast) var(--motion-ease-move),
     background-color var(--motion-fast) var(--motion-ease-move),
@@ -82,12 +79,8 @@ defineExpose({ focus, input })
 }
 
 .search-well:focus-within {
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--panel) 42%, transparent);
-  box-shadow:
-    inset 0 1px 2px var(--glass-lo),
-    0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent),
-    0 10px 24px -20px color-mix(in srgb, var(--color-accent) 80%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .search-glyph {
@@ -111,13 +104,13 @@ defineExpose({ focus, input })
   color: var(--fg);
   font-size: var(--text-hero);
   font-weight: 400;
-  letter-spacing: -0.012em;
+  letter-spacing: 0;
   line-height: 1;
 }
 
 .search-input::placeholder {
   color: var(--fg-muted);
-  font-weight: 300;
+  font-weight: 400;
   letter-spacing: 0;
 }
 
@@ -144,10 +137,7 @@ defineExpose({ focus, input })
   justify-content: center;
   color: var(--fg-muted);
   border: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, var(--glass-hi), transparent 55%),
-    color-mix(in srgb, var(--panel) 46%, transparent);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
+  background: transparent;
   transition:
     color var(--motion-instant) var(--motion-ease-move),
     background-color var(--motion-instant) var(--motion-ease-move),
@@ -156,11 +146,8 @@ defineExpose({ focus, input })
 }
 
 .settings-btn:hover {
-  color: var(--color-accent);
-  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
-  background:
-    linear-gradient(180deg, var(--glass-hi), transparent 55%),
-    var(--sel);
+  color: var(--fg);
+  background: var(--hover);
 }
 
 .settings-btn:active {

@@ -16,11 +16,11 @@ export interface GridMetrics {
 }
 
 export const GRID_METRICS: Record<'comfortable' | 'compact', GridMetrics> = {
-  comfortable: { icon: 36, name: 12, itemHeight: 90 },
-  compact: { icon: 30, name: 11, itemHeight: 82 },
+  comfortable: { icon: 36, name: 12, itemHeight: 88 },
+  compact: { icon: 30, name: 11, itemHeight: 80 },
 }
 
-export const GRID_HEADER_HEIGHT = 30
+export const GRID_HEADER_HEIGHT = 32
 /** 左右内边距（列表容器 px-3） */
 export const GRID_PADDING_X = 12
 /** 上下内边距（列表容器 py-1.5） */

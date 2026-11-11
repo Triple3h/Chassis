@@ -182,10 +182,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   padding: 4px 12px;
   border: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, var(--glass-hi), transparent 58%),
-    color-mix(in srgb, var(--panel) 42%, transparent);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
+  background: var(--panel-2);
   transition:
     background-color var(--motion-instant) var(--motion-ease-move),
     border-color var(--motion-instant) var(--motion-ease-move);

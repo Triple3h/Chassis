@@ -98,15 +98,15 @@ const items = computed(() => {
 <template>
   <div
     ref="el"
-    class="menu glass-strong fixed z-50 min-w-[230px] rounded-2xl py-1.5"
+    class="menu glass-strong fixed z-50 min-w-[240px] rounded-2xl py-2"
     :style="{ left: `${pos.left}px`, top: `${pos.top}px`, '--motion-origin': origin }"
   >
-    <div class="px-3.5 py-1 text-[10px] text-[var(--fg-muted)] uppercase tracking-[0.08em]">{{ pluginTitle }}</div>
+    <div class="px-3 py-2 text-[11.5px] font-medium text-[var(--fg-muted)]">{{ pluginTitle }}</div>
     <button
       v-for="item in items"
       :key="item.id"
       type="button"
-      class="menu-item w-full flex items-center gap-2.5 px-3.5 py-1.5 text-left text-[12.5px]"
+      class="menu-item w-full flex items-center gap-2 px-3 py-2 text-left text-[13px]"
       :class="item.danger ? 'text-[var(--color-danger)]' : ''"
       @click="
         () => {
@@ -130,8 +130,7 @@ const items = computed(() => {
 }
 
 .menu-item:hover {
-  background: color-mix(in srgb, var(--panel) 55%, transparent);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
+  background: var(--hover);
 }
 
 /* 按压反馈：菜单点下去的那一下要有回应，否则点了没反应会觉得是没点上 */

@@ -131,10 +131,10 @@ const nameStyle = computed(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
   width: 100%;
   padding: 8px 4px;
-  border-radius: var(--radius-md);
+  border-radius: 10px;
   cursor: default;
   user-select: none;
   overflow: hidden;
@@ -148,22 +148,23 @@ const nameStyle = computed(() => {
 }
 
 .grid-item:hover:not(.is-selected) {
-  background: color-mix(in srgb, var(--panel) 38%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-hi) 65%, transparent);
+  background: var(--hover);
 }
 
-.grid-item.is-selected {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--glass-hi) 62%, transparent), transparent 86%),
-    color-mix(in srgb, var(--color-accent) 10%, transparent);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--glass-hi) 85%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent),
-    0 10px 22px -18px color-mix(in srgb, var(--color-accent) 55%, transparent);
+/* 选中只落在磁贴的一条边线上：不再给格子铺面、不叠彩色阴影 */
+.grid-item.is-selected :deep(.icon-tile) {
+  border-color: color-mix(in srgb, var(--color-accent) 65%, transparent);
+  color: var(--fg);
 }
 
 .grid-item.is-selected .grid-name {
-  font-weight: 600;
+  /* 强调色当文字用时压暗一档，浅色主题下也够 4.5:1 */
+  color: color-mix(in srgb, var(--color-accent) 72%, var(--fg));
+  font-weight: 500;
+}
+
+[data-theme='dark'] .grid-item.is-selected .grid-name {
+  color: var(--color-accent);
 }
 
 /* 按下去「陷」一下：结果项点下去就执行，这是唯一能给的触感 */
@@ -191,16 +192,7 @@ const nameStyle = computed(() => {
   transform: translateY(-1px);
 }
 
-/* 选中 / 悬停时磁贴边缘亮起 —— 图标是格子里最重的视觉锚点 */
-.grid-item.is-selected :deep(.icon-tile) {
-  color: var(--fg);
-  border-color: color-mix(in srgb, var(--color-accent) 48%, transparent);
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    0 0 0 1px color-mix(in srgb, var(--color-accent) 26%, transparent),
-    0 12px 24px -14px color-mix(in srgb, var(--color-accent) 55%, transparent);
-}
-
+/* 选中只在磁贴边线上体现；徽标保持一个圆点和一条发丝边 */
 .grid-badge {
   position: absolute;
   top: -4px;
@@ -211,10 +203,9 @@ const nameStyle = computed(() => {
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  border: 1.5px solid color-mix(in srgb, var(--panel-strong) 92%, transparent);
-  box-shadow: 0 2px 6px -2px var(--tile-shadow);
-  font-size: 10px;
-  font-weight: 700;
+  border: 1.5px solid var(--bg-solid);
+  font-size: 11px;
+  font-weight: 600;
   line-height: 1;
 }
 
@@ -223,14 +214,20 @@ const nameStyle = computed(() => {
   color: #fff;
 }
 
+[data-theme='dark'] .grid-badge.pin {
+  color: #0b1220;
+}
+
 .grid-badge.warn {
   background: var(--fg-muted);
   color: var(--bg-solid);
 }
 
+/* 名字固定两行高：一格一行的图标才对齐，长名字也不会把行高撑乱 */
 .grid-name {
   width: 100%;
-  font-weight: 500;
+  height: 2.64em;
+  font-weight: 400;
   text-align: center;
   word-break: break-word;
   display: -webkit-box;
@@ -238,6 +235,5 @@ const nameStyle = computed(() => {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  text-shadow: 0 1px 0 color-mix(in srgb, var(--glass-hi) 40%, transparent);
 }
 </style>

@@ -15,14 +15,14 @@
   --color-ink-900: #151a24;
   --color-ink-950: #0d1119;
 
-  --color-accent: #4f8cff;
+  --color-accent: #2f6fe4;
   --color-accent-soft: color-mix(in srgb, var(--color-accent) 18%, transparent);
   --color-success: #2f9e6f;
   --color-warn: #cf8a2c;
   --color-danger: #e05a5a;
 
-  --radius-shell: 22px;
-  --radius-tile: 12px;
+  --radius-shell: 18px;
+  --radius-tile: 10px;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, 'Cascadia Mono', 'Cascadia Code',
     'JetBrains Mono', Menlo, Consolas, monospace;
 }
@@ -31,52 +31,42 @@
   /* ── 玻璃材质（亮色）─────────────────────────────────────────
      明文警告：这些值只给伪元素 / 浮层用。.shell 自身不许 backdrop-filter、
      不许 box-shadow —— 两个实测退化见下方 .shell 注释。 */
-  --glass-tint: rgba(250, 252, 255, 0.62);
-  --glass-scrim: rgba(255, 255, 255, 0.2);
-  --glass-panel: rgba(255, 255, 255, 0.74);
-  --glass-panel-strong: rgba(255, 255, 255, 0.89);
-  --glass-sunken: rgba(15, 23, 42, 0.045);
-  --glass-hi: rgba(255, 255, 255, 0.9);
-  --glass-lo: rgba(15, 23, 42, 0.12);
-  --glass-rim: rgba(255, 255, 255, 0.56);
-  --glass-edge: rgba(15, 23, 42, 0.1);
-  --glass-glow: rgba(160, 205, 255, 0.16);
-  --glass-specular: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 40%);
-  --glass-rim-gradient: linear-gradient(
-    140deg,
-    rgba(255, 255, 255, 0.95),
-    rgba(255, 255, 255, 0.22) 30%,
-    rgba(255, 255, 255, 0) 54%,
-    rgba(255, 255, 255, 0.34)
-  );
-  --glass-refract-opacity: 0.55;
-  --glass-blur: 32px;
-  --glass-saturate: 170%;
+  --glass-tint: rgba(247, 247, 249, 0.95);
+  --glass-panel: rgba(255, 255, 255, 0.98);
+  --glass-panel-strong: #ffffff;
+  --glass-sunken: rgba(15, 23, 42, 0.04);
+  --glass-hi: transparent; /* 表面靠层级与发丝线区分，不再有内高光 */
+  --glass-lo: rgba(15, 23, 42, 0.1);
+  --glass-rim: rgba(15, 23, 42, 0.08);
+  --glass-edge: rgba(15, 23, 42, 0.08);
+  --glass-blur: 20px;
 
   /* 层内浮起：只给面板 / 菜单 / 卡片，.shell 自身永远不用 */
-  --elev-1: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 20px -14px rgba(15, 23, 42, 0.22);
-  --elev-2: 0 18px 40px -20px rgba(15, 23, 42, 0.3), 0 2px 8px rgba(15, 23, 42, 0.06);
-  --elev-3: 0 30px 72px -28px rgba(15, 23, 42, 0.38), 0 6px 18px rgba(15, 23, 42, 0.1);
+  --elev-1: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --elev-2: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --elev-3: 0 12px 32px rgba(15, 23, 42, 0.1);
 
   /* 语义色（组件只读这些，不直接读材质原值） */
   --bg: var(--glass-tint);
   --bg-solid: #f3f5f9;
   --fg: var(--color-ink-900);
   --fg-muted: var(--color-ink-500);
+  /* 图标专用一档：比次要文字亮/暗一点，细描边才立得住 */
+  --icon-fg: #4b5565;
   --border: var(--glass-edge);
-  --hover: rgba(15, 23, 42, 0.055);
-  --sel: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --hover: rgba(15, 23, 42, 0.05);
+  --sel: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --panel: var(--glass-panel);
   --panel-strong: var(--glass-panel-strong);
   --sunken: var(--glass-sunken);
   --shadow: var(--elev-3);
 
-  /* 图标磁贴：中性玻璃，不跟随插件专有色 */
-  --tile-from: rgba(255, 255, 255, 0.9);
-  --tile-to: rgba(222, 228, 238, 0.86);
-  --tile-edge: rgba(15, 23, 42, 0.1);
-  --tile-sheen: rgba(255, 255, 255, 0.95);
-  --tile-shadow: rgba(15, 23, 42, 0.22);
+  /* 图标磁贴：中性表面，不跟随插件专有色 */
+  --tile-from: #f4f4f5;
+  --tile-to: #f4f4f5;
+  --tile-edge: rgba(15, 23, 42, 0.08);
+  --tile-sheen: transparent;
+  --tile-shadow: rgba(15, 23, 42, 0.1);
 
   /* 滚动条滑块：只由前景色调出来（深浅主题各自动取值），几何见文件末尾的 ::-webkit-scrollbar 块 */
   --scroll-thumb: color-mix(in srgb, var(--fg) 16%, transparent);
@@ -85,7 +75,7 @@
 
   /* ── 圆角 / 字阶 / 间距 / 层级 ─────────────────────────────── */
   --radius-xs: 6px;
-  --radius-sm: 9px;
+  --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 20px;
@@ -96,14 +86,14 @@
   --text-title: 14px;
   --text-body: 13px;
   --text-caption: 11.5px;
-  --text-micro: 10.5px;
+  --text-micro: 11px;
   --leading-tight: 1.2;
   --leading-body: 1.45;
-  --tracking-label: 0.08em;
+  --tracking-label: 0;
 
   --space-1: 2px;
   --space-2: 4px;
-  --space-3: 6px;
+  --space-3: 8px;
   --space-4: 8px;
   --space-5: 12px;
   --space-6: 16px;
@@ -120,15 +110,15 @@
      全仓库动效的唯一来源（插件侧同名镜像见 theme.css）。
      刻意不叫 --ease-* / --duration-*：那是 Tailwind 的命名空间，同名会被覆盖。
      时长只留四档、曲线只留四条 —— 想加第五档之前先问「现有的哪一档不够用」。 */
-  --motion-instant: 90ms; /* 按压反馈、hover */
-  --motion-fast: 140ms; /* 离场、小元件 */
-  --motion-base: 200ms; /* 进场、面板 */
+  --motion-instant: 140ms; /* 按压反馈、hover */
+  --motion-fast: 180ms; /* 离场、小元件 */
+  --motion-base: 220ms; /* 进场、面板 */
   --motion-slow: 320ms; /* 大块内容（骨架淡出） */
 
-  --motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1); /* 强减速：进场「落到位」 */
-  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1); /* 加速：离场「果断走」 */
-  --motion-ease-move: cubic-bezier(0.4, 0, 0.2, 1); /* 位移 / 颜色变化 */
-  --motion-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1); /* 轻微过冲：只给「弹出」用 */
+  --motion-ease-enter: cubic-bezier(0.22, 1, 0.36, 1); /* 进场：减速落位 */
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1); /* 离场：加速离开 */
+  --motion-ease-move: cubic-bezier(0.22, 1, 0.36, 1); /* 位移 / 颜色变化 */
+  --motion-ease-spring: cubic-bezier(0.22, 1, 0.36, 1); /* 旧名保留，不再过冲 */
 
   /* 窗口弹出：起点缩放与位移，改这两个值即可整体调整弹窗手感（对标聚焦搜索的落差） */
   --motion-pop-scale: 0.94;
@@ -148,45 +138,35 @@
     --motion-pop-scale: 1;
     --motion-pop-shift: 0px;
     --motion-ease-spring: linear;
-    --glass-refract-opacity: 0;
   }
 }
 
 [data-theme='dark'] {
-  --glass-tint: rgba(18, 22, 30, 0.58);
-  --glass-scrim: rgba(8, 11, 16, 0.26);
-  --glass-panel: rgba(30, 36, 46, 0.72);
-  --glass-panel-strong: rgba(34, 41, 52, 0.88);
-  --glass-sunken: rgba(0, 0, 0, 0.22);
-  --glass-hi: rgba(255, 255, 255, 0.16);
-  --glass-lo: rgba(0, 0, 0, 0.5);
-  --glass-rim: rgba(255, 255, 255, 0.14);
-  --glass-edge: rgba(255, 255, 255, 0.1);
-  --glass-glow: rgba(110, 160, 230, 0.1);
-  --glass-specular: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 42%);
-  --glass-rim-gradient: linear-gradient(
-    140deg,
-    rgba(255, 255, 255, 0.3),
-    rgba(255, 255, 255, 0.06) 30%,
-    rgba(255, 255, 255, 0) 54%,
-    rgba(255, 255, 255, 0.12)
-  );
+  --glass-tint: rgba(20, 20, 21, 0.95);
+  --glass-panel: rgba(25, 25, 27, 0.98);
+  --glass-panel-strong: #1c1c1e;
+  --glass-sunken: rgba(255, 255, 255, 0.04);
+  --glass-hi: transparent;
+  --glass-lo: rgba(0, 0, 0, 0.4);
+  --glass-rim: rgba(255, 255, 255, 0.08);
+  --glass-edge: rgba(255, 255, 255, 0.08);
 
-  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 20px -14px rgba(0, 0, 0, 0.55);
-  --elev-2: 0 18px 40px -20px rgba(0, 0, 0, 0.62), 0 2px 8px rgba(0, 0, 0, 0.34);
-  --elev-3: 0 30px 72px -28px rgba(0, 0, 0, 0.72), 0 6px 18px rgba(0, 0, 0, 0.4);
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --elev-2: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.4);
 
-  --bg-solid: #131821;
-  --fg: var(--color-ink-50);
-  --fg-muted: var(--color-ink-400);
-  --hover: rgba(255, 255, 255, 0.065);
-  --sel: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  --bg-solid: #141415;
+  --fg: #ededed;
+  --fg-muted: #a1a1a6;
+  --icon-fg: #c7c7cc;
+  --hover: rgba(255, 255, 255, 0.05);
+  --sel: color-mix(in srgb, var(--color-accent) 14%, transparent);
 
-  --tile-from: rgba(78, 88, 106, 0.78);
-  --tile-to: rgba(38, 44, 56, 0.9);
-  --tile-edge: rgba(255, 255, 255, 0.11);
-  --tile-sheen: rgba(255, 255, 255, 0.18);
-  --tile-shadow: rgba(0, 0, 0, 0.55);
+  --tile-from: #232325;
+  --tile-to: #232325;
+  --tile-edge: rgba(255, 255, 255, 0.1);
+  --tile-sheen: transparent;
+  --tile-shadow: transparent;
 }
 
 html,
@@ -244,15 +224,12 @@ body {
   border-radius: inherit;
   clip-path: inset(0 round var(--radius-shell));
   pointer-events: none;
-  background:
-    var(--glass-specular),
-    radial-gradient(120% 82% at 14% -10%, var(--glass-glow), transparent 60%),
-    var(--glass-scrim);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  background: transparent;
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
 }
 
-/* ③ 镜面环：只画 1px 内高光 + 内阴影，不铺满整块面（否则会盖住内容） */
+/* ③ 边缘：一条发丝线。深度只由表面层级和它表达，没有镜面高光。 */
 .shell::after {
   content: '';
   position: absolute;
@@ -261,33 +238,7 @@ body {
   border-radius: inherit;
   clip-path: inset(0 round var(--radius-shell));
   pointer-events: none;
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    inset 1px 0 0 color-mix(in srgb, var(--glass-hi) 55%, transparent),
-    inset 0 0 0 1px var(--glass-rim),
-    inset 0 -30px 44px -40px var(--glass-lo);
-}
-
-/* 边缘折射：1.5px 的镜面环经 SVG 位移滤镜轻微扰动，模拟玻璃边缘的折射；
-   只作用于环，不碰内容与文字。滤镜定义见 App.vue 的 #lg-refract。 */
-.shell-refraction {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  padding: 1.5px;
-  background: var(--glass-rim-gradient);
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  filter: url(#lg-refract);
-  opacity: var(--glass-refract-opacity);
+  box-shadow: inset 0 0 0 1px var(--glass-rim);
 }
 
 /* 窗口已被壳隐藏（或正在隐藏）：收得更快、用加速曲线，不拖泥带水 */
@@ -303,26 +254,19 @@ body {
 /* ── 通用玻璃面（浮层 / 卡片 / 下拉）────────────────────────────
    内容面用 panel-strong，保证文字对比度；只有边缘与大面积留白透出材质。 */
 .glass-panel {
-  background:
-    linear-gradient(180deg, var(--glass-hi) 0, transparent 44%),
-    var(--glass-panel);
+  background: var(--glass-panel);
   border: 1px solid var(--border);
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    var(--elev-2);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--elev-2);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .glass-strong {
   background: var(--glass-panel-strong);
   border: 1px solid var(--border);
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    inset 0 0 0 1px color-mix(in srgb, var(--glass-rim) 60%, transparent),
-    var(--elev-3);
-  -webkit-backdrop-filter: blur(30px) saturate(170%);
-  backdrop-filter: blur(30px) saturate(170%);
+  box-shadow: var(--elev-3);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .glass-sunken {
@@ -337,8 +281,7 @@ body {
   gap: var(--space-2);
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
+  background: var(--panel-2);
 }
 
 .hairline {
@@ -385,10 +328,7 @@ body {
   padding: 0 4px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 60%, transparent);
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    0 1px 0 color-mix(in srgb, var(--border) 60%, transparent);
+  background: var(--panel-2);
   color: var(--fg-muted);
   font-size: var(--text-micro);
   font-family: inherit;

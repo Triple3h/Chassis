@@ -9,16 +9,16 @@ defineEmits<{ (e: 'close'): void }>()
     class="detail-panel glass-strong absolute inset-y-0 right-0 z-20 w-[320px] flex flex-col overflow-hidden rounded-l-2xl"
   >
     <div class="flex items-center gap-2 px-3.5 h-[40px] shrink-0 border-b border-[var(--border)]">
-      <span class="text-[10.5px] uppercase tracking-[0.08em] text-[var(--fg-muted)] truncate">{{ title }}</span>
+      <span class="text-[11.5px] font-medium text-[var(--fg-muted)] truncate">{{ title }}</span>
       <button
         type="button"
-        class="detail-close ml-auto rounded-md px-2 py-0.5 text-[11px]"
+        class="detail-close ml-auto rounded-md px-2 py-0.5 text-[11.5px]"
         @click="$emit('close')"
       >
         ← 收起
       </button>
     </div>
-    <pre class="flex-1 overflow-auto px-3.5 pb-3.5 pt-3 text-[12px] leading-relaxed whitespace-pre-wrap break-words font-sans">{{
+    <pre class="flex-1 overflow-auto px-4 pb-4 pt-3 text-[12.5px] leading-relaxed whitespace-pre-wrap break-words font-sans">{{
       text
     }}</pre>
   </div>

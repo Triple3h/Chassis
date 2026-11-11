@@ -940,9 +940,6 @@ const defaultHints = computed(() => {
 
 <template>
   <div class="shell" :class="{ 'is-window-hidden': windowHidden }" @mousedown="onPanelMouseDown">
-    <!-- 玻璃边缘折射：1.5px 镜面环经 SVG 位移滤镜轻微扰动（滤镜定义见本模板末尾） -->
-    <div class="shell-refraction" aria-hidden="true" />
-
     <!-- 顶缘拖拽热区：搜索栏上方那几像素空白，专门用来"按住搬窗口"（无边框窗口没有标题栏） -->
     <div class="drag-strip" data-drag-region />
 
@@ -1003,7 +1000,7 @@ const defaultHints = computed(() => {
           <span class="empty-state-icon">
             <IconGlyph name="search" :size="20" />
           </span>
-          <span class="text-[12.5px] text-[var(--fg-muted)]">{{
+          <span class="text-[13px] text-[var(--fg-muted)]">{{
             ui.query ? `没有匹配「${ui.query}」的结果` : '还没有安装任何插件'
           }}</span>
         </div>
@@ -1051,30 +1048,12 @@ const defaultHints = computed(() => {
 
     <!-- 四边 / 四角的缩放把手（无边框窗口没有系统边框可抓） -->
     <WindowResizeHandles @resize-start="onResizeStart" />
-
-    <!-- 玻璃折射滤镜定义：0×0 隐藏 SVG，只提供 #lg-refract -->
-    <svg class="glass-defs" width="0" height="0" aria-hidden="true" focusable="false">
-      <defs>
-        <filter id="lg-refract" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
-          <feTurbulence type="fractalNoise" baseFrequency="0.009 0.014" numOctaves="2" seed="7" result="noise" />
-          <feGaussianBlur in="noise" stdDeviation="1.1" result="soft" />
-          <feDisplacementMap in="SourceGraphic" in2="soft" scale="3.5" xChannelSelector="R" yChannelSelector="G" />
-        </filter>
-      </defs>
-    </svg>
   </div>
 </template>
 
 <style scoped>
-.glass-defs {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
 
-/* 空态：一块玻璃底托，避免文字直接悬在壁纸透过的材质上 */
+/* 空态：一块中性底托，避免文字直接悬在壁纸透过的材质上 */
 .empty-state-icon {
   display: grid;
   place-items: center;
@@ -1082,13 +1061,8 @@ const defaultHints = computed(() => {
   height: 44px;
   border-radius: var(--radius-lg);
   color: var(--fg-muted);
-  background:
-    linear-gradient(160deg, var(--tile-sheen), transparent 46%),
-    linear-gradient(155deg, var(--tile-from), var(--tile-to));
+  background: var(--tile-from);
   border: 1px solid var(--tile-edge);
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    0 10px 22px -16px var(--tile-shadow);
 }
 
 .toast {

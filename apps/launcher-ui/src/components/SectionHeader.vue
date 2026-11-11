@@ -31,37 +31,35 @@ defineEmits<{ (e: 'toggle'): void }>()
 }
 
 .section-header.is-collapsible:hover {
-  background: color-mix(in srgb, var(--panel) 30%, transparent);
+  background: var(--hover);
 }
 
 .section-title {
   flex: none;
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: color-mix(in srgb, var(--fg) 82%, var(--fg-muted));
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--fg-muted);
 }
 
 /* 标题右侧的发丝线：把“分区”这件事画出来，而不是只靠字号 */
 .section-rule {
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, var(--border), transparent);
+  background: var(--border);
 }
 
 .section-action {
   flex: none;
   display: inline-flex;
   align-items: center;
-  height: 19px;
-  padding: 0 7px;
-  border-radius: var(--radius-pill);
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 45%, transparent);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--fg-muted);
-  opacity: 0.75;
+  opacity: 0.85;
   transition:
     opacity var(--motion-instant) var(--motion-ease-move),
     color var(--motion-instant) var(--motion-ease-move);

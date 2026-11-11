@@ -220,16 +220,13 @@ function formatBytes(bytes: number): string {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
+  gap: 8px;
+  padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--fg-muted);
-  background:
-    linear-gradient(180deg, var(--glass-hi), transparent 58%),
-    color-mix(in srgb, var(--panel) 42%, transparent);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
-  font-size: 11px;
+  background: var(--panel-2);
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   user-select: none;
@@ -237,12 +234,12 @@ function formatBytes(bytes: number): string {
   cursor: default;
   transition:
     color var(--motion-instant) var(--motion-ease-move),
-    border-color var(--motion-instant) var(--motion-ease-move);
+    background-color var(--motion-instant) var(--motion-ease-move);
 }
 
 .stats-chip:hover {
   color: var(--fg);
-  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  background: var(--hover);
 }
 
 .stats-sep {
@@ -270,18 +267,15 @@ function formatBytes(bytes: number): string {
   width: min(340px, calc(100vw - 84px));
   max-height: calc(100vh - 72px);
   overflow-y: auto;
-  padding: 11px 13px 13px;
+  padding: 12px 16px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--panel-strong);
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    inset 0 0 0 1px color-mix(in srgb, var(--glass-rim) 55%, transparent),
-    var(--elev-3);
-  -webkit-backdrop-filter: blur(30px) saturate(170%);
-  backdrop-filter: blur(30px) saturate(170%);
+  box-shadow: var(--elev-2);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
   color: var(--fg);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
   user-select: text;
