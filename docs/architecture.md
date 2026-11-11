@@ -247,7 +247,7 @@ active → degraded（脚本连续失败 3 次）
 | D5 | §8.1 目录树是「安装后形态」（`<name>.mjs` 在插件根） | 增加「`<dir>/dist` 即插件根」的识别规则 | 源码工程与产物必须分离；否则出厂插件要么污染源码目录、要么无法扫描 |
 | D6 | §3.3 动作菜单「打开插件所在目录」等固定动作 | 保持不变；另外把 `ActionDecl` 的能力边界写实：`open` 需要 `shell.open`、`copy` 需要 `clipboard.write` | 需求未规定，但不加约束的话"纯前端插件"可以靠结果项打开任意 URL，P5 会被绕过 |
 | D7 | §3.2 `Enter` 执行默认动作、`⌘Enter/⇧Enter` 执行第二动作 | 一致；`→/←` 二级面板用 `ResultItem.detail` | — |
-| D8 | §3.1「输入框内容保留上次的选中状态但默认清空（可配置）」 | `config.keepQuery`；当前实现是"UI 唤出时清空，插件可通过 `hostUi.setSearchContent` 回填" | UI 无法感知"唤出"事件（内核/壳才知道），已在 `ui/searchContent` 事件上留好通道 |
+| D8 | §3.1「输入框内容保留上次的选中状态但默认清空（可配置）」 | `config.keepQuery`；UI 在 `shell/visibility` 显示时自己复位：未开 `keepQuery` 就清空查询，插件页一律回到首页；另保留 `ui/searchContent` 供插件回填 | UI 只认得「显示」事件、拿不到"唤出"意图，所以以 `shell/visibility` 为准；热键连按的快速离场路径不复位 |
 | D9 | §11 契约测试用 `echo-plugin` | 已实现（`tests/fixtures/echo-plugin` + `tests/contract/*.test.ts`，真 HTTP） | — |
 | D10 | §10「主线程 > 50ms 的必须进 Worker」（拼音索引构建、大文件解析） | 拼音索引规模小（命令级），暂未进 Worker；历史文件 ≤ 2000 条，读取在毫秒级 | 记为待办：命令数量破千或历史破万时迁移 |
 | D11 | §6.3 打包体积/冷启动指标 | 未做基准；自用版（`pnpm app:local`）已实机运行 | 需要真机 `tauri build` 才能量体积；自用不分发，暂不阻塞 |

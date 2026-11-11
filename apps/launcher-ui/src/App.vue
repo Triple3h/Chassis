@@ -109,6 +109,19 @@ let exitAckTimer = 0
 const EXIT_ACK_MARGIN_MS = 100
 
 /**
+ * 唤出 = 回到首页：插件页不跨窗口保留（`setQuery` 会顺带关掉它的内核会话）；
+ * 查询默认清空，`keepQuery`（设置「唤出时保留上次输入」）打开时留着。
+ * 只在真正的重新唤出时调用 —— 热键连按的快速路径要保持原样。
+ */
+function resetToHome(): void {
+  if (data.config?.keepQuery) {
+    ui.closePluginView()
+    return
+  }
+  ui.setQuery('')
+}
+
+/**
  * 窗口显隐 → 界面相位。**隐藏立刻做，显示要等到「窗口真的能画」了再做。**
  *
  * 为什么显示不能立刻摘掉隐藏态：窗口一旦被壳藏起来，webview 的绘制会被系统挂起，
@@ -139,6 +152,9 @@ function setWindowVisible(visible: boolean): void {
     windowHidden.value = false
     return
   }
+  // 真正的重新唤出（离场已经演完，不是热键连按）：回到首页。
+  // 上一次的插件页 / 查询不跨窗口保留 —— 每次唤出都是一次新搜索。
+  resetToHome()
   const reveal = (): void => {
     if (token !== visibilityToken) return
     void waitForPaint().then(() => {
@@ -147,6 +163,9 @@ function setWindowVisible(visible: boolean): void {
       // 唤出 = 回到"这个窗口态该有的尺寸"：有记忆就用记忆，没有就内容自适应。
       // 位置不在这里应用 —— 壳已经裁决过了（窗口中心还在鼠标所在屏就保持原位、换屏了才居中）
       applyGeometry(geometryKey.value, false)
+      // 从插件页复位回来时 SearchBox 刚重新挂载，DOM 焦点跟着旧 iframe 一起没了；
+      // 等窗口真的能画之后再拿焦点，否则打不进字。
+      searchBox.value?.focus()
     })
   }
   if (document.visibilityState === 'hidden') {
