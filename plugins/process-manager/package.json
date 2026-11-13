@@ -3,7 +3,7 @@
   "title": "进程与端口",
   "author": "triple3h",
   "description": "查端口被谁占用、看进程 CPU / 内存、安全终止进程；macOS 与 Windows 一致可用",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "apiVersion": "2",

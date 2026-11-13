@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import EmptyState from '@launcher/ui/EmptyState.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useVirtualList } from '@launcher/ui/virtual'
 import { useToast } from '@launcher/ui/toast'
@@ -149,12 +152,17 @@ function initial(a: Account): string {
   return ((a.issuer || a.name || '?').trim()[0] ?? '?').toUpperCase()
 }
 
-/** 头像底色由服务名散列而来：同一个服务永远同色，不同服务一眼可辨 */
+/**
+ * 头像底色由服务名散列而来：同一个服务永远同色，不同服务一眼可辨。
+ *
+ * 固定 S/L 只让色相变化 —— 任何色相下白字都在 6:1 以上，深浅主题都不用另配色。
+ * 曾经是 145° 双色渐变（色相差 26°）：一个头像两个色相，既没有含义也没必要。
+ */
 function avatarStyle(a: Account): Record<string, string> {
   const text = a.issuer || a.name || '?'
   let hash = 0
   for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) % 360
-  return { background: `linear-gradient(145deg, hsl(${hash} 58% 54%), hsl(${(hash + 26) % 360} 56% 41%))` }
+  return { background: `hsl(${hash} 42% 38%)` }
 }
 
 /** 临期提示：最后 10 秒转警示色，最后 5 秒转危险色并轻微呼吸 */
@@ -719,12 +727,12 @@ watch(selected, (i) => {
 <template>
   <AppShell>
     <!-- ══ 顶栏：身份 / 搜索 / 动作 ══════════════════════════════ -->
-    <header class="flex h-[54px] shrink-0 items-center gap-3 border-b border-line bg-panel px-3.5">
+    <PageHeader>
       <div class="flex shrink-0 items-center gap-2.5">
         <span class="launcher-brand"><UiIcon name="shield" :size="15" /></span>
         <span class="leading-tight">
-          <span class="block text-[12.5px] font-semibold">双重验证器</span>
-          <span class="block text-[10.5px] text-faint">
+          <span class="block text-[13px] font-semibold">双重验证器</span>
+          <span class="block text-[11px] text-muted">
             {{ accounts.length }} 个账户<template v-if="vault"> · 已加密</template>
           </span>
         </span>
@@ -764,24 +772,21 @@ watch(selected, (i) => {
           <UiIcon name="sliders" :size="13" />
         </button>
       </div>
-    </header>
+    </PageHeader>
 
     <!-- ══ 分组标签（账户都没填分组时整条不出现） ══════════════════ -->
-    <div
-      v-if="groups.length"
-      class="launcher-noscroll flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-line px-3.5 py-2"
-    >
-      <button class="launcher-filter" :class="{ 'is-active': !groupFilter }" @click="setGroup('')">
-        全部<span class="launcher-n">{{ accounts.length }}</span>
+    <div v-if="groups.length" class="launcher-tabbar launcher-noscroll overflow-x-auto">
+      <button class="launcher-tab" :class="{ 'is-active': !groupFilter }" @click="setGroup('')">
+        全部<span class="launcher-tab-n">{{ accounts.length }}</span>
       </button>
       <button
         v-for="g in groups"
         :key="g.name"
-        class="launcher-filter"
+        class="launcher-tab"
         :class="{ 'is-active': groupFilter === g.name }"
         @click="setGroup(g.name)"
       >
-        {{ g.name }}<span class="launcher-n">{{ g.count }}</span>
+        {{ g.name }}<span class="launcher-tab-n">{{ g.count }}</span>
       </button>
     </div>
 
@@ -826,7 +831,7 @@ watch(selected, (i) => {
               <span
                 :key="displayCode(account, startIndex + i)"
                 class="launcher-code launcher-code-big launcher-code-swap"
-                :class="codeVisible(startIndex + i) ? 'text-fg' : 'text-faint'"
+                :class="codeVisible(startIndex + i) ? 'text-fg' : 'text-muted'"
                 >{{ displayCode(account, startIndex + i) }}</span
               >
             </button>
@@ -872,29 +877,25 @@ watch(selected, (i) => {
       </div>
 
       <div v-if="!loading && !filtered.length" class="absolute inset-0 grid place-items-center px-6">
-        <div class="text-center">
-          <span class="launcher-empty-icon"><UiIcon name="shield" :size="24" /></span>
-          <p class="mt-3 text-[13.5px] font-semibold">
-            {{ accounts.length ? '没有匹配的账户' : '还没有账户' }}
-          </p>
-          <p class="mx-auto mt-1 max-w-[330px] text-[11.5px] text-muted">
-            {{
-              accounts.length
-                ? '换个关键词，或点上方的分组标签'
-                : '扫码导入 Google Authenticator 的迁移二维码，也可以手动填入密钥'
-            }}
-          </p>
-          <div class="mt-4 flex justify-center gap-2">
+        <EmptyState
+          icon="shield"
+          :title="accounts.length ? '没有匹配的账户' : '还没有账户'"
+          :hint="
+            accounts.length
+              ? '换个关键词，或点上方的分组标签'
+              : '扫码导入 Google Authenticator 的迁移二维码，也可以手动填入密钥'
+          "
+        >
+          <template #actions>
             <button class="launcher-btn primary" @click="dialog = 'import'">
               <UiIcon name="qr" :size="13" />扫码导入
             </button>
             <button class="launcher-btn" @click="openAdd"><UiIcon name="plus" :size="13" />手动添加</button>
-          </div>
-        </div>
+          </template>
+        </EmptyState>
       </div>
     </div>
-
-    <footer class="flex shrink-0 items-center gap-3 border-t border-line px-3.5 py-2 text-[11px] text-faint">
+    <PageFooter>
       <span class="launcher-hint"><span class="launcher-kbd">↑</span><span class="launcher-kbd">↓</span>选择</span>
       <span class="launcher-hint"><span class="launcher-kbd">↵</span>复制</span>
       <span class="launcher-hint">单击整行即可复制</span>
@@ -902,13 +903,15 @@ watch(selected, (i) => {
         复制 {{ settings.clearClipboardAfter }} 秒后清空剪贴板
       </span>
       <span class="launcher-hint ml-auto"><UiIcon name="lock" :size="11" />密钥仅存本机，插件不联网</span>
-    </footer>
+    </PageFooter>
 
     <!-- 解锁：整页遮住（加密状态下列表本就不该渲染出来） -->
     <div v-if="!unlocked" class="absolute inset-0 z-30 grid place-items-center bg-bg">
       <div class="launcher-dialog-pop w-[330px] rounded-2xl border border-line bg-panel p-5 shadow-lg">
-        <span class="launcher-empty-icon"><UiIcon name="lock" :size="22" /></span>
-        <p class="mt-3 text-center text-[13.5px] font-semibold">输入口令解锁</p>
+        <span class="mx-auto grid h-9 w-9 place-items-center rounded-full bg-panel2 text-muted">
+          <UiIcon name="lock" :size="20" />
+        </span>
+        <p class="mt-3 text-center text-[13px] font-semibold">输入口令解锁</p>
         <p class="mt-1 text-center text-[11.5px] text-muted">
           账户表已用 PBKDF2 + AES-GCM 加密。口令只在本机内存里用于解密，不会被保存。
         </p>

@@ -3,7 +3,7 @@
   "title": "录屏助手",
   "author": "triple3h",
   "description": "全屏 / 区域 / 窗口三种录制模式，可带麦克风与鼠标点击高亮；顺手也能截图（macOS 走 screencapture，Windows 走 ffmpeg + 原生 GDI）",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "apiVersion": "2",

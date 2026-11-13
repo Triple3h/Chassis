@@ -56,7 +56,7 @@ async function copyCommand() {
     <div class="flex flex-col gap-3">
       <!-- 当前状态 -->
       <div class="flex items-start gap-2 rounded-lg border border-line bg-panel2 p-3">
-        <span class="mt-0.5" :class="writable ? 'text-accent' : 'text-warn'">
+        <span class="mt-0.5" :class="writable ? 'text-accentink' : 'text-warn'">
           <UiIcon :name="writable ? 'unlock' : 'lock'" :size="14" />
         </span>
         <div class="min-w-0 flex-1 text-[12.5px] leading-relaxed">
@@ -82,7 +82,7 @@ async function copyCommand() {
 
       <!-- 未开启：说明 + 开启 -->
       <template v-if="!writable && supported">
-        <div class="rounded-lg border border-line bg-panel2 p-3 text-[12px] leading-relaxed text-muted">
+        <div class="rounded-lg border border-line bg-panel2 p-3 text-[12.5px] leading-relaxed text-muted">
           开启「免授权写入」：把 <span class="launcher-mono">{{ path }}</span> 的写权限
           <span v-if="username">授给当前账户（<span class="launcher-mono">{{ username }}</span>）</span>
           一次，之后保存直接写入、不再弹窗 —— 与 uTools / SwitchHosts 引导你手动做的是同一件事。

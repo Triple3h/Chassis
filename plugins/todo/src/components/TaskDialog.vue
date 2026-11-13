@@ -56,7 +56,7 @@ function clearDue(): void {
         <div class="w-[120px]">
           <UiSelect :model-value="priority" :options="priorityOptions" @update:model-value="(value) => (priority = Number(value) as Priority)" />
         </div>
-        <span class="ml-auto text-[11px] text-faint">已完成 {{ task.pomodoros }} 个番茄</span>
+        <span class="ml-auto text-[11px] text-muted">已完成 {{ task.pomodoros }} 个番茄</span>
       </div>
 
       <div class="flex items-center gap-2">

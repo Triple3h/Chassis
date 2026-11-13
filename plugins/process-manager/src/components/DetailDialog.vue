@@ -49,7 +49,7 @@ const uptime = computed(() => formatUptime(props.detail.startedAt, nowMs.value))
         <span v-if="RISK_HINT[detail.risk]" class="text-muted">{{ RISK_HINT[detail.risk] }}</span>
       </div>
 
-      <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg border border-line bg-panel2 p-3 text-[12px]">
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg border border-line bg-panel2 p-3 text-[12.5px]">
         <div class="flex justify-between gap-2"><span class="text-muted">PID</span><span class="launcher-mono">{{ detail.pid }}</span></div>
         <div class="flex justify-between gap-2"><span class="text-muted">用户</span><span class="launcher-mono">{{ detail.user || '—' }}</span></div>
         <div class="flex justify-between gap-2">

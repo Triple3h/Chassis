@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import UiSelect from '@launcher/ui/UiSelect.vue'
 import { useToast } from '@launcher/ui/toast'
@@ -485,8 +487,8 @@ onUnmounted(() => {
 
 <template>
   <AppShell>
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2">
-      <UiIcon name="video" :size="16" class="text-accent" />
+    <PageHeader>
+      <UiIcon name="video" :size="16" class="text-accentink" />
       <span class="text-[13px] font-semibold">录屏助手</span>
       <button
         v-if="env?.supported"
@@ -498,7 +500,7 @@ onUnmounted(() => {
         <UiIcon name="shield" :size="11" />
         {{ env === null ? '检查环境…' : env.granted ? '已授权' : '缺屏幕录制权限' }}
       </button>
-      <span v-if="env?.backend" class="launcher-chip text-faint" :title="'当前后端：' + backendLabel(env.backend)">
+      <span v-if="env?.backend" class="launcher-chip text-muted" :title="'当前后端：' + backendLabel(env.backend)">
         {{ backendLabel(env.backend) }}
       </span>
       <div class="ml-auto flex items-center gap-1.5">
@@ -511,7 +513,7 @@ onUnmounted(() => {
           刷新
         </button>
       </div>
-    </header>
+    </PageHeader>
 
     <div v-if="!hasExec" class="border-b border-line bg-[color:var(--launcher-del-bg)] px-3 py-2 text-[11.5px]">
       没有拿到 <span class="launcher-kbd">exec.spawn</span> 能力，录屏 / 截图都跑不起来 —— 到设置页的插件管理里重新授权（或重装本插件）。
@@ -528,7 +530,7 @@ onUnmounted(() => {
           <UiIcon :name="issue.tone === 'error' ? 'alert' : 'info'" :size="14" class="mt-0.5 shrink-0" />
           <div class="min-w-0 flex-1">
             <p class="text-[12.5px]">{{ issue.message }}</p>
-            <pre v-if="issue.detail" class="mt-1 max-h-24 overflow-auto whitespace-pre-wrap text-[10.5px] leading-4 text-faint">{{ issue.detail }}</pre>
+            <pre v-if="issue.detail" class="mt-1 max-h-24 overflow-auto whitespace-pre-wrap text-[11px] leading-4 text-muted">{{ issue.detail }}</pre>
             <div v-if="issue.actions?.length" class="mt-1.5 flex flex-wrap items-center gap-1.5">
               <button v-for="action in issue.actions" :key="action.id" class="launcher-btn ghost" @click="runIssueAction(action.id)">
                 {{ action.label }}
@@ -550,13 +552,13 @@ onUnmounted(() => {
           <span class="text-[12.5px] font-semibold text-danger">
             {{ waitingPick ? '等待选择…' : recording?.paused ? '已暂停' : '正在录制' }} · {{ modeLabel(recording?.mode ?? mode) }}
           </span>
-          <span v-if="recording?.interactive && recording?.size" class="text-[11px] text-faint">（已在录制选区）</span>
-          <span v-else-if="waitingPick" class="text-[11px] text-faint">（系统选择框已弹出，选完才开始）</span>
+          <span v-if="recording?.interactive && recording?.size" class="text-[11px] text-muted">（已在录制选区）</span>
+          <span v-else-if="waitingPick" class="text-[11px] text-muted">（系统选择框已弹出，选完才开始）</span>
           <span v-if="!waitingPick" class="rec-clock ml-auto">{{ formatClock(elapsed) }}</span>
         </div>
-        <div class="mt-1.5 flex items-center gap-2 text-[11.5px] text-faint">
+        <div class="mt-1.5 flex items-center gap-2 text-[11.5px] text-muted">
           <span class="min-w-0 flex-1 truncate" :title="recording?.path ?? ''">{{ recording?.path }}</span>
-          <span v-if="recording?.audio" title="带麦克风">🎙</span>
+          <span v-if="recording?.audio" class="text-muted">含音轨</span>
           <span v-if="recording?.size">{{ formatBytes(recording?.size) }}</span>
           <span v-if="maxSeconds && !waitingPick">{{ '剩余 ' + formatClock(remaining) }}</span>
         </div>
@@ -588,11 +590,11 @@ onUnmounted(() => {
             :disabled="isRecording"
             @click="mode = item.value"
           >
-            <span class="flex items-center gap-1.5 text-[12.5px] font-medium" :class="mode === item.value ? 'text-accent' : ''">
+            <span class="flex items-center gap-1.5 text-[12.5px] font-medium" :class="mode === item.value ? 'text-accentink' : ''">
               <UiIcon :name="item.icon" :size="14" />
               {{ item.label }}
             </span>
-            <span class="text-[11px] leading-4 text-faint">{{ item.hint }}</span>
+            <span class="text-[11px] leading-4 text-muted">{{ item.hint }}</span>
           </button>
         </div>
       </section>
@@ -619,7 +621,7 @@ onUnmounted(() => {
         <button
           v-if="features.audio"
           class="launcher-btn ghost"
-          :class="audio ? 'text-accent' : ''"
+          :class="audio ? 'text-accentink' : ''"
           :disabled="isRecording"
           title="用系统默认输入设备（麦克风）录一条音轨；首次会弹麦克风授权"
           @click="audio = !audio"
@@ -630,7 +632,7 @@ onUnmounted(() => {
         <button
           v-if="features.clicks"
           class="launcher-btn ghost"
-          :class="clicks ? 'text-accent' : ''"
+          :class="clicks ? 'text-accentink' : ''"
           :disabled="isRecording"
           title="录制时高亮鼠标点击"
           @click="clicks = !clicks"
@@ -641,7 +643,7 @@ onUnmounted(() => {
         <button
           v-if="features.cursor"
           class="launcher-btn ghost"
-          :class="cursor ? 'text-accent' : ''"
+          :class="cursor ? 'text-accentink' : ''"
           :disabled="isRecording"
           :title="isInteractive ? '截图时带光标（交互式录制下系统不支持把光标录进视频）' : '截图与录制都带上鼠标指针'"
           @click="cursor = !cursor"
@@ -664,11 +666,11 @@ onUnmounted(() => {
             <UiIcon :name="shot.icon" :size="12" />
             {{ shot.label }}
           </button>
-          <button v-if="lastShot?.path" class="launcher-btn ghost text-accent" @click="reveal(lastShot.path ?? '')">
+          <button v-if="lastShot?.path" class="launcher-btn ghost text-accentink" @click="reveal(lastShot.path ?? '')">
             <UiIcon name="folder" :size="12" />
             显示刚存的那张
           </button>
-          <span v-if="lastShot?.clipboard" class="text-[11.5px] text-faint">上一张已进剪贴板</span>
+          <span v-if="lastShot?.clipboard" class="text-[11.5px] text-muted">上一张已进剪贴板</span>
         </div>
       </section>
 
@@ -680,19 +682,19 @@ onUnmounted(() => {
             v-for="kind in recentKinds"
             :key="kind.value"
             class="launcher-btn ghost"
-            :class="recentKind === kind.value ? 'bg-active text-accent' : ''"
+            :class="recentKind === kind.value ? 'bg-active text-accentink' : ''"
             @click="recentKind = kind.value"
           >
             {{ kind.label }}
           </button>
-          <span class="ml-auto truncate text-[10.5px] text-faint" :title="recentDir">{{ recentDir }}</span>
+          <span class="ml-auto truncate text-[11px] text-muted" :title="recentDir">{{ recentDir }}</span>
         </div>
         <div v-if="recent.length" class="flex flex-col">
           <div v-for="file in recent" :key="file.path" class="group flex items-center gap-2 border-b border-line py-1.5">
             <UiIcon :name="recentKind === 'video' ? 'video' : 'image'" :size="13" class="shrink-0 text-faint" />
             <div class="min-w-0 flex-1">
-              <div class="truncate text-[12px]">{{ file.name }}</div>
-              <div class="text-[10.5px] text-faint">{{ formatWhen(file.mtimeMs, now) }} · {{ formatBytes(file.size) }}</div>
+              <div class="truncate text-[12.5px]">{{ file.name }}</div>
+              <div class="text-[11px] text-muted">{{ formatWhen(file.mtimeMs, now) }} · {{ formatBytes(file.size) }}</div>
             </div>
             <button class="launcher-btn ghost shrink-0 opacity-0 group-hover:opacity-100" @click="openPath(file.path)">
               <UiIcon name="external" :size="12" />
@@ -704,23 +706,23 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <p v-else class="py-3 text-[11.5px] text-faint">
+        <p v-else class="py-3 text-[11.5px] text-muted">
           还没有{{ recentKind === 'video' ? '录制' : '截图' }}记录。{{ env?.granted ? '' : '（先解决屏幕录制权限）' }}
         </p>
       </section>
 
-      <p class="mt-3 text-[10.5px] leading-4 text-faint">{{ backendLine }}</p>
-      <ul v-if="features.notes.length" class="mt-1.5 flex flex-col gap-0.5 text-[10.5px] leading-4 text-faint">
+      <p class="mt-3 text-[11px] leading-4 text-muted">{{ backendLine }}</p>
+      <ul v-if="features.notes.length" class="mt-1.5 flex flex-col gap-0.5 text-[11px] leading-4 text-muted">
         <li v-for="note in features.notes" :key="note">· {{ note }}</li>
       </ul>
     </div>
-
-    <footer class="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <PageFooter>
       <span><span class="launcher-kbd">{{ modLabel }}Enter</span> 开始 / 停止</span>
       <span><span class="launcher-kbd">{{ modLabel }}⇧S</span> 框选截图</span>
       <span class="ml-auto">
         {{ !ready ? '录制依赖未就绪（截图可用）' : env?.granted === false && env?.supported ? '缺屏幕录制权限' : '就绪' }}
       </span>
-    </footer>
+    </PageFooter>
+
   </AppShell>
 </template>

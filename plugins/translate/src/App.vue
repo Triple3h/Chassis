@@ -10,6 +10,7 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiDialog from '@launcher/ui/UiDialog.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import UiSelect from '@launcher/ui/UiSelect.vue'
@@ -80,9 +81,6 @@ const expandedHistory = ref<string | null>(null)
 const historyVariants = ref<Record<string, Variant[]>>({})
 
 const variants = computed<Variant[]>(() => reply.value?.variants ?? [])
-const targetLabel = computed(
-  () => targetOptions.value.find((item) => item.value === target.value)?.label ?? target.value,
-)
 const metaLine = computed(() => {
   const data = reply.value
   if (!data?.translation) return ''
@@ -333,11 +331,13 @@ watch([target, provider], () => {
   <AppShell>
     <div class="flex h-full flex-col">
       <!-- 顶栏：标题 + 引擎/语言（改了就重译；下拉用 UiSelect，原生 select 的菜单是系统绘制的） -->
-      <header class="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
-        <UiIcon name="languages" :size="15" class="text-accent" />
+    <PageHeader>
+        <UiIcon name="languages" :size="15" class="text-accentink" />
         <span class="text-[13px] font-semibold">聚合翻译</span>
-        <span class="launcher-chip">{{ configured ? metaLine || targetLabel : '未配置 API' }}</span>
+        <span v-if="!configured" class="launcher-chip text-warn">未配置 API</span>
+        <span v-else-if="metaLine" class="launcher-chip truncate">{{ metaLine }}</span>
         <span class="flex-1" />
+        <!-- 两个下拉各让出 40px：原来 160+176 把顶栏塞满，标题都快挤没了 -->
         <button
           class="launcher-btn ghost"
           :title="history.length ? `历史翻译（${history.length}）` : '历史翻译'"
@@ -345,15 +345,15 @@ watch([target, provider], () => {
         >
           <UiIcon name="history" :size="14" />
           历史
-          <span v-if="history.length" class="launcher-chip">{{ history.length }}</span>
+          <span v-if="history.length" class="launcher-tab-n">{{ history.length }}</span>
         </button>
-        <div class="w-[160px]">
+        <div class="w-[112px]">
           <UiSelect v-model="target" :options="targetOptions" />
         </div>
-        <div class="w-[176px]">
+        <div class="w-[140px]">
           <UiSelect v-model="provider" :options="providerOptions" />
         </div>
-      </header>
+    </PageHeader>
 
       <div class="launcher-scroll min-h-0 flex-1 px-4 py-3">
         <!-- 输入 -->
@@ -367,7 +367,7 @@ watch([target, provider], () => {
             @paste="onPaste"
           />
           <div class="flex items-center gap-2 border-t border-line px-2.5 py-1.5">
-            <span class="text-[11px] text-faint">{{ source.length }} 字</span>
+            <span class="text-[11px] text-muted">{{ source.length }} 字</span>
             <span class="flex-1" />
             <button
               class="launcher-btn ghost"
@@ -436,7 +436,7 @@ watch([target, provider], () => {
             <p>打开「设置 → 插件 → 聚合翻译」，填一家的凭据即可（都有免费额度）：</p>
             <p class="mt-1">· 有道智云：AppKey + AppSecret</p>
             <p>· 百度翻译开放平台：AppID + 密钥</p>
-            <p class="mt-1 text-faint">
+            <p class="mt-1 text-muted">
               百度的通用文本翻译与大模型文本翻译共用同一对凭据，大模型服务需先在控制台单独开通。
             </p>
           </template>
@@ -499,13 +499,13 @@ watch([target, provider], () => {
                 <span class="tr-variant-value">{{ variant.value || '—' }}</span>
               </button>
             </template>
-            <p v-else class="col-span-2 text-[11.5px] text-faint">正在计算命名风格…</p>
+            <p v-else class="col-span-2 text-[11.5px] text-muted">正在计算命名风格…</p>
           </div>
         </div>
       </div>
 
       <template #footer>
-        <span class="text-[11.5px] text-faint">{{ history.length }} / {{ HISTORY_MAX }}</span>
+        <span class="text-[11.5px] text-muted">{{ history.length }} / {{ HISTORY_MAX }}</span>
         <span class="flex-1" />
         <button class="launcher-btn ghost" :disabled="!history.length" @click="clearHistory">
           <UiIcon name="trash" :size="14" />

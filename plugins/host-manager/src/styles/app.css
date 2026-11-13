@@ -6,29 +6,29 @@
 @source "../../../../packages/ui";
 
 /* ── 块色号（左栏卡片与右栏行底色共用）──────────────────────────────
+   色号是**功能**：左栏块的边条颜色 = 右栏最终文件里那一段行的底色，
+   一眼能对上是哪个块写的。所以保留六个色相，但全部压到「低饱和的染色表面」，
+   不再是六个原色条 —— 原来那套（#2563eb / #16a34a / #7b5cff …）在 720px 的窗口里
+   比主强调色还抢眼，而且蓝色和主色撞在一起分不清哪个是「可点」。
+
    显式的 rgba 成对写死：**不要用 color-mix** —— 构建器（Lightning CSS）会把它拆成
    「实色兜底 + 真值」两条规则，在没有 color-mix 的引擎上整块会被刷成纯色。
    明暗两值成对写在同一个 `--launcher-if-light` / `--launcher-if-dark` 行里（见 theme.css）。 */
 :root {
-  --hm-fill-0: var(--launcher-if-light, rgba(37, 99, 235, 0.06)) var(--launcher-if-dark, rgba(91, 140, 255, 0.1));
-  --hm-fill-1: var(--launcher-if-light, rgba(22, 163, 74, 0.07)) var(--launcher-if-dark, rgba(74, 222, 128, 0.1));
-  --hm-fill-2: var(--launcher-if-light, rgba(217, 119, 6, 0.08)) var(--launcher-if-dark, rgba(251, 191, 36, 0.1));
-  --hm-fill-3: var(--launcher-if-light, rgba(124, 58, 237, 0.06)) var(--launcher-if-dark, rgba(196, 181, 253, 0.1));
-  --hm-fill-4: var(--launcher-if-light, rgba(219, 39, 119, 0.06)) var(--launcher-if-dark, rgba(244, 114, 182, 0.1));
-  --hm-fill-5: var(--launcher-if-light, rgba(13, 148, 136, 0.07)) var(--launcher-if-dark, rgba(45, 212, 191, 0.1));
-  --hm-edge-0: var(--launcher-if-light, #2563eb) var(--launcher-if-dark, #5b8cff);
-  --hm-edge-1: var(--launcher-if-light, #16a34a) var(--launcher-if-dark, #4ade80);
-  --hm-edge-2: var(--launcher-if-light, #d97706) var(--launcher-if-dark, #fbbf24);
-  --hm-edge-3: var(--launcher-if-light, #7c3aed) var(--launcher-if-dark, #c4b5fd);
-  --hm-edge-4: var(--launcher-if-light, #db2777) var(--launcher-if-dark, #f472b6);
-  --hm-edge-5: var(--launcher-if-light, #0d9488) var(--launcher-if-dark, #2dd4bf);
+  --hm-fill-0: var(--launcher-if-light, rgba(63, 99, 159, 0.07)) var(--launcher-if-dark, rgba(127, 156, 208, 0.1));
+  --hm-fill-1: var(--launcher-if-light, rgba(60, 125, 92, 0.07)) var(--launcher-if-dark, rgba(124, 184, 152, 0.1));
+  --hm-fill-2: var(--launcher-if-light, rgba(138, 101, 38, 0.08)) var(--launcher-if-dark, rgba(196, 160, 102, 0.1));
+  --hm-fill-3: var(--launcher-if-light, rgba(107, 86, 168, 0.07)) var(--launcher-if-dark, rgba(165, 150, 209, 0.1));
+  --hm-fill-4: var(--launcher-if-light, rgba(160, 75, 113, 0.07)) var(--launcher-if-dark, rgba(207, 143, 172, 0.1));
+  --hm-fill-5: var(--launcher-if-light, rgba(47, 114, 104, 0.07)) var(--launcher-if-dark, rgba(111, 179, 168, 0.1));
+  --hm-edge-0: var(--launcher-if-light, #3f639f) var(--launcher-if-dark, #7f9cd0);
+  --hm-edge-1: var(--launcher-if-light, #3c7d5c) var(--launcher-if-dark, #7cb898);
+  --hm-edge-2: var(--launcher-if-light, #8a6526) var(--launcher-if-dark, #c4a066);
+  --hm-edge-3: var(--launcher-if-light, #6b56a8) var(--launcher-if-dark, #a596d1);
+  --hm-edge-4: var(--launcher-if-light, #a04b71) var(--launcher-if-dark, #cf8fac);
+  --hm-edge-5: var(--launcher-if-light, #2f7268) var(--launcher-if-dark, #6fb3a8);
   /* 选中块时叠在行上的一层薄色（用 background-image 叠，保住块底色） */
   --hm-active-layer: var(--launcher-if-light, rgba(0, 0, 0, 0.05)) var(--launcher-if-dark, rgba(255, 255, 255, 0.07));
-}
-
-.launcher-mono {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
 }
 
 .launcher-row {

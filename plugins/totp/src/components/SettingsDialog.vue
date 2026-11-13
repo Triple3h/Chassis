@@ -61,7 +61,7 @@ function submitVault() {
   <UiDialog title="设置" subtitle="所有数据都保存在本机的插件数据目录下" size="md" @close="emit('close')">
     <div class="space-y-5">
       <section class="space-y-2">
-        <h3 class="text-[12px] font-semibold text-muted">显示</h3>
+        <h3 class="text-[12.5px] font-semibold text-muted">显示</h3>
         <label class="flex items-center gap-2 text-[13px]">
           <input type="checkbox" :checked="local.hideCodes" @change="patch({ hideCodes: !local.hideCodes })" />
           隐私模式：只显示选中行的验证码
@@ -73,7 +73,7 @@ function submitVault() {
         <label class="flex items-center gap-2 text-[13px]">
           <input type="checkbox" :checked="local.sortByName" @change="patch({ sortByName: !local.sortByName })" />
           按名称排序
-          <span class="text-[11.5px] text-faint">关掉后可拖动账户行自定义顺序</span>
+          <span class="text-[11.5px] text-muted">关掉后可拖动账户行自定义顺序</span>
         </label>
         <label class="flex items-center gap-3 text-[13px]">
           复制后自动清空剪贴板
@@ -87,7 +87,7 @@ function submitVault() {
       </section>
 
       <section class="space-y-2 rounded-lg border border-line p-3">
-        <h3 class="flex items-center gap-2 text-[12px] font-semibold text-muted">
+        <h3 class="flex items-center gap-2 text-[12.5px] font-semibold text-muted">
           <UiIcon :name="hasVault ? 'lock' : 'unlock'" :size="13" />
           口令保护（{{ mode }}）
         </h3>
@@ -111,7 +111,7 @@ function submitVault() {
           />
         </div>
         <div class="flex items-center gap-2">
-          <span class="text-[11.5px]" :class="password && strength ? 'text-warn' : 'text-faint'">{{ strength }}</span>
+          <span class="text-[11.5px]" :class="password && strength ? 'text-warn' : 'text-muted'">{{ strength }}</span>
           <button class="launcher-btn ml-auto" :disabled="!canSubmit" @click="submitVault">
             <UiIcon :name="hasVault ? 'unlock' : 'lock'" :size="13" />
             {{ hasVault ? '关闭口令保护' : '开启口令保护' }}
@@ -121,7 +121,7 @@ function submitVault() {
       </section>
 
       <section class="space-y-2">
-        <h3 class="text-[12px] font-semibold text-muted">数据</h3>
+        <h3 class="text-[12.5px] font-semibold text-muted">数据</h3>
         <div class="flex flex-wrap items-center gap-2">
           <button class="launcher-btn" @click="emit('export')">
             <UiIcon name="download" :size="13" />导出 {{ accounts.length }} 个账户
@@ -130,7 +130,7 @@ function submitVault() {
             <UiIcon name="trash" :size="13" />清空全部账户
           </button>
         </div>
-        <p class="text-[11.5px] text-faint">
+        <p class="text-[11.5px] text-muted">
           导出文件是明文 JSON，请自行妥善保管；如需跨设备迁移，推荐直接用 Google Authenticator 的迁移二维码。
         </p>
       </section>

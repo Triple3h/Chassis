@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import EmptyState from '@launcher/ui/EmptyState.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import UiSelect from '@launcher/ui/UiSelect.vue'
 import { useToast } from '@launcher/ui/toast'
@@ -339,15 +341,13 @@ const pomoProgress = computed(() => progress(pomodoro.value))
 
 <template>
   <AppShell>
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2">
-      <UiIcon name="check" :size="16" class="text-accent" />
+    <PageHeader>
+      <UiIcon name="check" :size="16" class="text-accentink" />
       <span class="text-[13px] font-semibold">ToDo 待办</span>
-      <span class="launcher-chip">待处理 {{ summary.open }}</span>
-      <span v-if="summary.today" class="launcher-chip text-accent">今天 {{ summary.today }}</span>
+      <!-- 计数只在下面那排标签里出现一次；页头只留「逾期」这条警告 -->
       <span v-if="summary.overdue" class="launcher-chip text-danger">逾期 {{ summary.overdue }}</span>
-      <span class="launcher-chip">已完成 {{ summary.done }}</span>
       <div class="ml-auto flex items-center gap-1.5">
-        <button class="launcher-btn ghost" :class="pomoOpen ? 'bg-active text-accent' : ''" @click="pomoOpen = !pomoOpen">
+        <button class="launcher-btn ghost" :class="pomoOpen ? 'bg-active text-accentink' : ''" @click="pomoOpen = !pomoOpen">
           <UiIcon name="timer" :size="13" />
           番茄钟
         </button>
@@ -356,7 +356,7 @@ const pomoProgress = computed(() => progress(pomodoro.value))
           清空已完成
         </button>
       </div>
-    </header>
+    </PageHeader>
 
     <!-- 新增待办 -->
     <div class="flex items-center gap-1.5 border-b border-line px-3 py-2">
@@ -376,18 +376,17 @@ const pomoProgress = computed(() => progress(pomodoro.value))
     </div>
 
     <!-- 视图切换 -->
-    <div class="flex items-center gap-1.5 border-b border-line px-3 py-1.5">
+    <div class="launcher-tabbar">
       <button
         v-for="tab in tabs"
         :key="tab.value"
-        class="launcher-btn ghost"
-        :class="filter === tab.value ? 'bg-active text-accent' : ''"
+        class="launcher-tab"
+        :class="{ 'is-active': filter === tab.value }"
         @click="filter = tab.value"
       >
-        {{ tab.label }}
-        <span class="text-[10.5px] text-faint">{{ tab.count() }}</span>
+        {{ tab.label }}<span class="launcher-tab-n">{{ tab.count() }}</span>
       </button>
-      <span class="ml-auto text-[11px] text-faint">↑↓ 选择 · 空格完成</span>
+      <span class="ml-auto text-[11px] text-muted">↑↓ 选择 · 空格完成</span>
     </div>
 
     <div class="flex min-h-0 flex-1">
@@ -416,10 +415,10 @@ const pomoProgress = computed(() => progress(pomodoro.value))
                 <div class="flex items-center gap-1.5">
                   <span class="truncate text-[12.5px]" :class="task.done ? 'task-done' : ''">{{ task.title }}</span>
                   <span v-if="task.priority === 2" class="launcher-chip shrink-0 text-danger">紧急</span>
-                  <span v-else-if="task.priority === 1" class="launcher-chip shrink-0 text-accent">重要</span>
+                  <span v-else-if="task.priority === 1" class="launcher-chip shrink-0 text-accentink">重要</span>
                 </div>
-                <div class="flex items-center gap-2 text-[10.5px] text-faint">
-                  <span v-if="dueLabel(task)" :class="dueLabel(task)?.tone === 'danger' ? 'text-danger' : dueLabel(task)?.tone === 'warn' ? 'text-accent' : ''">
+                <div class="flex items-center gap-2 text-[11px] text-muted">
+                  <span v-if="dueLabel(task)" :class="dueLabel(task)?.tone === 'danger' ? 'text-danger' : dueLabel(task)?.tone === 'warn' ? 'text-accentink' : ''">
                     <UiIcon name="calendar" :size="10" class="mr-0.5 inline align-[-1px]" />{{ dueLabel(task)?.text }}
                   </span>
                   <span v-if="task.pomodoros" class="inline-flex items-center gap-0.5">
@@ -439,13 +438,14 @@ const pomoProgress = computed(() => progress(pomodoro.value))
           </div>
         </div>
 
-        <div v-if="!visible.length" class="flex flex-col items-center gap-2 px-6 py-10 text-center text-faint">
-          <UiIcon name="check" :size="24" />
-          <p class="text-[12.5px]">
-            {{ !loaded ? '正在读取…' : filter === 'done' ? '还没有完成的待办' : filter === 'today' ? '今天没有到期的事' : '暂无待办，在上面的输入框里加一条' }}
-          </p>
-          <p v-if="loaded && filter === 'open'" class="text-[11px]">小技巧：把搜索框里的文字带进来，回车就是一条待办</p>
-        </div>
+        <EmptyState
+          v-if="!visible.length"
+          icon="check"
+          :title="
+            !loaded ? '正在读取…' : filter === 'done' ? '还没有完成的待办' : filter === 'today' ? '今天没有到期的事' : '暂无待办'
+          "
+          :hint="!loaded ? '' : filter === 'open' ? '在上面输入框加一条；把搜索框里的文字带进来，回车就是一条待办' : ''"
+        />
       </div>
 
       <!-- 番茄钟 -->
@@ -459,7 +459,7 @@ const pomoProgress = computed(() => progress(pomodoro.value))
           <div class="h-full rounded-full bg-accent" :style="{ width: `${Math.round(pomoProgress * 100)}%` }" />
         </div>
         <div class="truncate text-[11.5px]" :title="selectedTask?.title ?? ''">
-          <span class="text-faint">当前任务：</span>{{ selectedTask?.title ?? '未选择' }}
+          <span class="text-muted">当前任务：</span>{{ selectedTask?.title ?? '未选择' }}
         </div>
         <div class="flex items-center gap-1.5">
           <button class="launcher-btn primary flex-1" @click="togglePomo">
@@ -474,7 +474,7 @@ const pomoProgress = computed(() => progress(pomodoro.value))
           </button>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="text-[11px] text-faint">专注</span>
+          <span class="text-[11px] text-muted">专注</span>
           <UiSelect
             :model-value="Math.round(pomodoro.focusMs / 60_000)"
             :options="focusOptions"
@@ -482,26 +482,25 @@ const pomoProgress = computed(() => progress(pomodoro.value))
           />
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="text-[11px] text-faint">休息</span>
+          <span class="text-[11px] text-muted">休息</span>
           <UiSelect
             :model-value="Math.round(pomodoro.breakMs / 60_000)"
             :options="breakOptions"
             @update:model-value="(value) => changeDurations(Math.round(pomodoro.focusMs / 60_000), Number(value))"
           />
         </div>
-        <p class="mt-auto text-[10.5px] leading-4 text-faint">
+        <p class="mt-auto text-[11px] leading-4 text-muted">
           累计完成 {{ pomodoro.rounds }} 个番茄；当前任务记了 {{ selectedTask?.pomodoros ?? 0 }} 个。专注结束时会给系统通知。
         </p>
       </aside>
     </div>
-
-    <footer class="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <PageFooter>
       <span><span class="launcher-kbd">Enter</span> 添加</span>
       <span><span class="launcher-kbd">Space</span> 完成 / 取消</span>
       <span><span class="launcher-kbd">{{ modLabel }}P</span> 番茄钟</span>
       <span><span class="launcher-kbd">{{ modLabel }}E</span> 编辑</span>
       <span class="ml-auto">双击一行也能编辑</span>
-    </footer>
+    </PageFooter>
 
     <TaskDialog v-if="editing" :task="editing" @close="editing = null" @save="saveEdit" @remove="removeTask(editing!)" />
   </AppShell>

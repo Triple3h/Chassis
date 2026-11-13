@@ -100,13 +100,13 @@ function commitRename() {
       <template v-else>
         <span class="min-w-0 flex-1 truncate text-[12.5px] font-semibold" :title="block.name">{{ block.name }}</span>
         <span v-if="!block.enabled" class="launcher-chip text-warn">已关闭</span>
-        <span class="shrink-0 text-[11px] text-faint">{{ entries.length }} 条</span>
+        <span class="shrink-0 text-[11px] text-muted">{{ entries.length }} 条</span>
       </template>
 
       <UiIcon
         name="chevronDown"
         :size="13"
-        class="shrink-0 text-faint transition-transform"
+        class="shrink-0 text-muted transition-transform"
         :class="{ '-rotate-90': !expanded }"
       />
 
@@ -128,10 +128,10 @@ function commitRename() {
     </div>
 
     <div v-if="expanded" class="border-t border-line">
-      <div v-if="!entries.length" class="px-3 py-2.5 text-[12px] text-muted">
+      <div v-if="!entries.length" class="px-3 py-2.5 text-[12.5px] text-muted">
         这个块还是空的，下面加两条试试。
       </div>
-      <div v-else-if="!matched.length" class="px-3 py-2.5 text-[12px] text-muted">没有匹配的记录</div>
+      <div v-else-if="!matched.length" class="px-3 py-2.5 text-[12.5px] text-muted">没有匹配的记录</div>
 
       <div v-else :class="{ 'opacity-55': !block.enabled }">
         <EntryRow
@@ -144,7 +144,7 @@ function commitRename() {
           @edit="emit('edit', line)"
           @remove="emit('remove-entry', line)"
         />
-        <div v-if="hiddenCount" class="px-3 py-2 text-[11.5px] text-faint">
+        <div v-if="hiddenCount" class="px-3 py-2 text-[11.5px] text-muted">
           还有 {{ hiddenCount }} 条没显示 —— 在搜索框里筛一下
         </div>
       </div>

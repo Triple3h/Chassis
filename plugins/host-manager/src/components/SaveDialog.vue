@@ -108,7 +108,7 @@ async function copyCommand() {
         待生效文件：<span class="launcher-mono">{{ result?.pendingPath }}</span>
       </div>
 
-      <div class="rounded-lg border border-line bg-panel2 p-3 text-[12px] leading-relaxed text-muted">
+      <div class="rounded-lg border border-line bg-panel2 p-3 text-[12.5px] leading-relaxed text-muted">
         Windows 上请用「以管理员身份运行」打开 PowerShell 再执行；
         macOS / Linux 直接粘到终端即可。<br />
         也可以点下面的「复制完整内容」，自己打开 hosts 文件全选粘贴。
@@ -117,7 +117,7 @@ async function copyCommand() {
 
     <!-- 正常预览 -->
     <div v-else class="flex flex-col gap-3">
-      <div class="flex flex-wrap items-center gap-2 text-[12px]">
+      <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
         <span v-if="diff" class="launcher-chip text-addfg">+{{ diff.added }}</span>
         <span v-if="diff" class="launcher-chip text-delfg">−{{ diff.removed }}</span>
         <span class="text-muted">{{ rows.length }} 行</span>
@@ -137,7 +137,7 @@ async function copyCommand() {
               class="launcher-mono flex h-5 items-center gap-2 px-2 text-[11.5px] leading-5"
               :class="{ 'launcher-diff-add': row.kind === 'add', 'launcher-diff-del': row.kind === 'del' }"
             >
-              <span class="w-9 shrink-0 text-right text-faint">{{ row.no }}</span>
+              <span class="w-9 shrink-0 text-right text-muted">{{ row.no }}</span>
               <span class="w-2 shrink-0">{{ mark(row.kind) }}</span>
               <span class="truncate whitespace-pre">{{ row.text || ' ' }}</span>
             </div>
@@ -146,7 +146,7 @@ async function copyCommand() {
       </div>
 
       <div v-if="phase === 'writing'" class="flex items-center gap-2 rounded-lg border border-line bg-panel2 p-3 text-[12.5px]">
-        <span class="launcher-pulse"><UiIcon name="alert" :size="14" /></span>
+        <UiIcon name="alert" :size="14" class="text-warn" />
         <span>正在写入…… 如果系统弹出授权窗口，请先完成验证。</span>
       </div>
 

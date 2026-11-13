@@ -29,10 +29,17 @@
   --launcher-line-strong: var(--launcher-if-light, rgba(15, 23, 42, 0.16)) var(--launcher-if-dark, rgba(255, 255, 255, 0.16));
   --launcher-fg: var(--launcher-if-light, #171717) var(--launcher-if-dark, #ededed);
   --launcher-muted: var(--launcher-if-light, #6b7487) var(--launcher-if-dark, #a1a1a6);
-  --launcher-faint: var(--launcher-if-light, #98a1b2) var(--launcher-if-dark, #85858b);
+  /* faint = **装饰专用**：图标、分隔符、占位符。浅色 3.6:1（过 3:1 的图形线），
+     但仍低于正文要求 —— 真正要读的字（页脚、行内元信息）用 muted（4.5:1）。 */
+  --launcher-faint: var(--launcher-if-light, #7a8496) var(--launcher-if-dark, #85858b);
   --launcher-icon-fg: var(--launcher-if-light, #4b5565) var(--launcher-if-dark, #c7c7cc);
   --launcher-accent: var(--launcher-if-light, #2f6fe4) var(--launcher-if-dark, #74a8ff);
   --launcher-accent-fg: var(--launcher-if-light, #ffffff) var(--launcher-if-dark, #0b1220);
+  /* accent-ink = 强调色**当文字**时的版本。底色上的色块用 accent，字用这个：
+     主题色可由用户改（插件页从 URL 拿到什么就吃什么），浅色下 `#ffd400` 当字只有
+     1.4:1 —— 文字一律走 accentink，宿主运行期会按当前底色再校一遍（lib/theme.ts），
+     这里的值只是 JS 跑起来之前的兜底。 */
+  --launcher-accent-ink: var(--launcher-if-light, #2557b8) var(--launcher-if-dark, #93c0ff);
   --launcher-danger: var(--launcher-if-light, #d64545) var(--launcher-if-dark, #ff8c8c);
   --launcher-success: var(--launcher-if-light, #1f8f5f) var(--launcher-if-dark, #63d69c);
   --launcher-warn: var(--launcher-if-light, #b87315) var(--launcher-if-dark, #f0b55e);
@@ -84,8 +91,13 @@
   --launcher-text-hero: 19px;
   --launcher-text-title: 14px;
   --launcher-text-body: 13px;
+  /* 界面的主字号档：卡片标题、列表首行、表头之外的一切正文
+     （插件里 12 / 12.5 曾经并存，是实际用得最多的一档，收成一个令牌） */
+  --launcher-text-ui: 12.5px;
   --launcher-text-caption: 11.5px;
   --launcher-text-micro: 11px;
+  /* 允许出现的字号只有这五档：11 / 11.5 / 12.5 / 13 / 19。
+     10 / 10.5 / 12 / 13.5 一律并到最近的档，别再加新值。 */
   --launcher-leading-tight: 1.2;
   --launcher-leading-body: 1.45;
   --launcher-tracking-label: 0;
@@ -164,6 +176,7 @@
   --color-faint: var(--launcher-faint);
   --color-accent: var(--launcher-accent);
   --color-accentfg: var(--launcher-accent-fg);
+  --color-accentink: var(--launcher-accent-ink);
   --color-danger: var(--launcher-danger);
   --color-success: var(--launcher-success);
   --color-addbg: var(--launcher-add-bg);
@@ -210,6 +223,13 @@ body {
 /* ── Liquid Glass 共享面 ───────────────────────────────────────
    插件页看不到桌面，材质 = 底色上叠半透明层 + 镜面环。
    文字必须落在 glass-strong / panel-strong 这一档，保证 4.5:1 对比度。 */
+/* ── 组件类放进 components 层 ─────────────────────────────────
+   Tailwind v4 的 utilities 在 `utilities` 层，而**未分层**的 CSS 优先级高于任何 @layer。
+   这些类此前是不分层的，于是 `.launcher-input { width: 100%; padding: 8px 11px }`
+   会盖掉模板上写的 `w-[132px]` 和 `pl-7` —— 搜索框左侧内距没生效（放大镜压在文字上），
+   需要定宽的行内输入被拉成整行。放进 components 层后，utilities 正常覆盖，
+   而插件自己 app.css 里不分层的覆盖仍然赢过 utilities。 */
+@layer components {
 .launcher-shell {
   background-color: var(--launcher-bg);
   background-image: var(--launcher-base);
@@ -287,6 +307,12 @@ textarea,
 button {
   font: inherit;
   color: inherit;
+}
+
+/* 原生勾选控件跟着主题色走（此前是系统蓝，切主题色后会残留） */
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--launcher-accent);
 }
 
 input:focus,
@@ -468,6 +494,55 @@ button:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── 分栏标签（列表上方那一排「全部 / 待处理 / 已完成」）────────────
+   这套控件曾经有三种写法（launcher-btn ghost、自绘 rounded-md、固定 h-8 栏），
+   高度、圆角、选中态各不同。统一成一个类：行 .launcher-tabbar，项 .launcher-tab，
+   选中加 .is-active，计数用 .launcher-tab-n（中性等宽，不画成药丸）。 */
+.launcher-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--launcher-line);
+  flex: none;
+}
+.launcher-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--launcher-radius-sm);
+  background: transparent;
+  color: var(--launcher-muted);
+  font: inherit;
+  font-size: var(--launcher-text-ui);
+  cursor: pointer;
+  transition:
+    background var(--launcher-motion-instant) var(--launcher-ease-move),
+    color var(--launcher-motion-instant) var(--launcher-ease-move);
+}
+.launcher-tab:hover {
+  background: var(--launcher-hover);
+  color: var(--launcher-fg);
+}
+.launcher-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--launcher-accent) 60%, transparent);
+  outline-offset: 1px;
+}
+.launcher-tab.is-active {
+  background: var(--launcher-active);
+  color: var(--launcher-fg);
+  font-weight: 600;
+}
+.launcher-tab-n {
+  color: var(--launcher-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
 .launcher-kbd {
   display: inline-flex;
   align-items: center;
@@ -492,6 +567,24 @@ button:focus {
   height: 1px;
   background: var(--launcher-line);
   flex: none;
+}
+
+/* 等宽 + 等宽数字：端口号、PID、验证码、行号、金额列。
+   以前 host-manager 写了一份、process-manager 直接用了这个名字却没定义（类名是空的）。 */
+.launcher-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 竖分隔：工具栏里把「开关类」按钮和「动作类」按钮分开 */
+.launcher-vsep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--launcher-line);
+  flex: none;
+}
+
 }
 
 .launcher-fade-enter-active {

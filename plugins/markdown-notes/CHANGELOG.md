@@ -2,6 +2,12 @@
 
 本文件由 `pnpm ship` 维护，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.1.3] - 2026-11-13
+
+### Changed
+
+- 空文档的分栏/预览区给出说明，不再是整片空白；A-/A+ 与相邻图标同字号；状态栏换用可读的次要色。
+
 ## [0.1.2] - 2026-11-03
 
 ### Changed

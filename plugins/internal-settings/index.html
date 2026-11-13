@@ -5,31 +5,36 @@
     <title>设置</title>
     <style>
       :root {
-        --bg: #eef1f6;
-        --panel: rgba(255, 255, 255, 0.74);
-        --panel-strong: rgba(255, 255, 255, 0.9);
-        --panel-2: rgba(15, 23, 42, 0.045);
-        --fg: #151a24;
-        --muted: #667085;
-        --border: rgba(15, 23, 42, 0.1);
-        --hover: rgba(15, 23, 42, 0.055);
+        /* 与 @launcher/ui 的 theme.css 同值：设置页是插件页里最常开的一页，
+           它曾经还留着上一版 Liquid Glass 的蓝底 + 径向光斑，和别的插件页并排
+           一眼能看出两套底色。改色请两边一起改。 */
+        --bg: #fafafa;
+        --panel: rgba(255, 255, 255, 0.98);
+        --panel-strong: #ffffff;
+        --panel-2: rgba(15, 23, 42, 0.04);
+        --fg: #171717;
+        --muted: #6b7487;
+        --border: rgba(15, 23, 42, 0.08);
+        --hover: rgba(15, 23, 42, 0.05);
         --accent: #2f6fe4;
+        /* 强调色当文字用的版本（浅色底上 #2f6fe4 只有 4.46:1，压深一档到 6.4） */
+        --accent-ink: #2557b8;
         --success: #1f8f5f;
         --warn: #b87315;
         --danger: #d64545;
         --glass-hi: rgba(255, 255, 255, 0.9);
         --glass-lo: rgba(15, 23, 42, 0.12);
         --glass-rim: rgba(255, 255, 255, 0.56);
-        --glass-edge: rgba(15, 23, 42, 0.1);
-        --tile-from: rgba(255, 255, 255, 0.9);
-        --tile-to: rgba(222, 228, 238, 0.86);
+        --glass-edge: rgba(15, 23, 42, 0.08);
+        --tile-from: #f4f4f5;
+        --tile-to: #f4f4f5;
         --tile-sheen: rgba(255, 255, 255, 0.95);
-        --radius-sm: 9px;
+        --radius-sm: 8px;
         --radius-md: 12px;
         --radius-lg: 16px;
         --radius-pill: 999px;
-        --base: radial-gradient(120% 90% at 12% -10%, #ffffff 0%, rgba(255, 255, 255, 0) 58%),
-          linear-gradient(180deg, #f7f9fc, #e9edf4);
+        /* 中性底色：不再有径向光斑与纵向渐变（与 theme.css 的 --launcher-base 一致） */
+        --base: none;
         /* UA 自绘控件的明暗（原生焦点环、取色器、滚动条…）由它决定 */
         color-scheme: light;
         /* 滚动条滑块：只由前景色调出来，深浅主题各自动取值 */
@@ -38,27 +43,27 @@
         --scroll-thumb-active: color-mix(in srgb, var(--fg) 50%, transparent);
       }
       [data-theme='dark'] {
-        --bg: #12161e;
-        --panel: rgba(34, 41, 52, 0.72);
-        --panel-strong: rgba(38, 45, 57, 0.9);
-        --panel-2: rgba(0, 0, 0, 0.22);
-        --fg: #eceef2;
-        --muted: #9aa3b5;
-        --border: rgba(255, 255, 255, 0.1);
-        --hover: rgba(255, 255, 255, 0.065);
+        --bg: #141415;
+        --panel: rgba(25, 25, 27, 0.98);
+        --panel-strong: #1c1c1e;
+        --panel-2: rgba(255, 255, 255, 0.05);
+        --fg: #ededed;
+        --muted: #a1a1a6;
+        --border: rgba(255, 255, 255, 0.08);
+        --hover: rgba(255, 255, 255, 0.05);
         --accent: #74a8ff;
+        --accent-ink: #93c0ff;
         --success: #63d69c;
         --warn: #f0b55e;
         --danger: #ff8c8c;
         --glass-hi: rgba(255, 255, 255, 0.16);
         --glass-lo: rgba(0, 0, 0, 0.5);
         --glass-rim: rgba(255, 255, 255, 0.14);
-        --glass-edge: rgba(255, 255, 255, 0.1);
-        --tile-from: rgba(78, 88, 106, 0.78);
-        --tile-to: rgba(38, 44, 56, 0.9);
+        --glass-edge: rgba(255, 255, 255, 0.08);
+        --tile-from: #232325;
+        --tile-to: #232325;
         --tile-sheen: rgba(255, 255, 255, 0.18);
-        --base: radial-gradient(120% 90% at 12% -10%, rgba(110, 160, 230, 0.12), transparent 58%),
-          linear-gradient(180deg, #171c26, #0f131a);
+        --base: none;
         color-scheme: dark;
       }
       * { box-sizing: border-box; }
@@ -104,11 +109,11 @@
       .tab:hover { background: var(--hover); }
       .tab.active {
         background: color-mix(in srgb, var(--accent) 16%, transparent);
-        color: var(--accent); font-weight: 600;
+        color: var(--accent-ink); font-weight: 600;
         box-shadow: inset 0 1px 0 var(--glass-hi);
       }
       .panel { flex: 1; overflow: auto; padding: 16px 20px 32px; }
-      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; }
+      h2 { font-size: 13px; color: var(--fg); font-weight: 600; margin: 0 0 10px; }
       .row {
         display: flex; align-items: center; gap: 12px;
         padding: 9px 0; border-bottom: 1px solid var(--border);
@@ -185,7 +190,7 @@
       .lselect-option:hover, .lselect-option:focus { background: var(--hover); outline: none; }
       .lselect-option.is-on {
         background: color-mix(in srgb, var(--accent) 16%, transparent);
-        color: var(--accent); font-weight: 600;
+        color: var(--accent-ink); font-weight: 600;
       }
       .lselect-check { margin-left: auto; font-size: 11px; opacity: 0; }
       .lselect-option.is-on .lselect-check { opacity: 1; }
@@ -230,7 +235,7 @@
       /* 更新说明（notes）：分类 + 圆点条目；与 @launcher/ui 的 ChangelogNotes 同款 */
       .cl-notes { margin-top: 6px; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
       .cl-notes .cl-group + .cl-group { margin-top: 6px; }
-      .cl-notes .cl-cat { font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em; margin-bottom: 2px; }
+      .cl-notes .cl-cat { font-size: 11px; font-weight: 600; margin-bottom: 2px; }
       .cl-notes ul { margin: 0; padding: 0; list-style: none; }
       .cl-notes li { position: relative; padding-left: 10px; }
       .cl-notes li + li { margin-top: 2px; }
@@ -254,12 +259,12 @@
       .badge.ok { color: var(--success); }
       .badge.err { color: var(--danger); }
       .badge.warn { color: var(--warn); }
-      .badge.accent { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+      .badge.accent { color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 
       /* ── 最近审计：主行 = 插件 → 内核方法（域高亮）+ 所需能力 + 结果 ── */
       .audit-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .badge.plugin {
-        color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 16%, transparent);
         font-weight: 600;
       }
       .audit-arrow { color: var(--muted); }
@@ -268,7 +273,7 @@
         font-size: 12px; font-weight: 600;
       }
       .audit-method .am-prefix { color: var(--muted); font-weight: 400; }
-      .audit-method .am-domain { color: var(--accent); }
+      .audit-method .am-domain { color: var(--accent-ink); }
       .audit-method.plain { color: var(--muted); font-weight: 400; }
       .badge.cap {
         font-family: ui-monospace, 'SF Mono', Menlo, monospace;
@@ -303,7 +308,7 @@
         padding: 2px 8px; font: inherit; font-size: 11.5px; cursor: pointer;
       }
       .filter:hover { background: var(--hover); }
-      .filter.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
+      .filter.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-ink); font-weight: 600; }
       .mitems { flex: 1; min-height: 0; overflow: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
       .mitem {
         display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 8px;
@@ -335,7 +340,7 @@
       .mdot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; }
       .tag {
         font-size: 10px; line-height: 15px; padding: 0 5px; border-radius: 4px; flex: none;
-        background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-ink);
       }
       /* 启用/禁用开关：已禁用常显（灰、滑块靠左），启用中 hover/选中才浮出来 */
       .mtoggle {
@@ -377,7 +382,7 @@
         padding: 5px 9px 7px; cursor: pointer; border-radius: 7px 7px 0 0;
       }
       .dtab:hover { color: var(--fg); background: var(--hover); }
-      .dtab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+      .dtab.active { color: var(--accent-ink); border-bottom-color: var(--accent); font-weight: 600; }
       .dtab i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
       .dbody .dsec:first-child { padding-top: 6px; }
       /* 插件信息：两列定义列表 */
@@ -386,10 +391,10 @@
       .kv .v { min-width: 0; word-break: break-all; font-size: 12.5px; }
       .dsec { padding: 14px 0; border-bottom: 1px solid var(--border); }
       .dsec h3 {
-        font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+        font-size: 12.5px; color: var(--fg); font-weight: 600;
         margin: 0 0 8px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
       }
-      .dsec h3 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+      .dsec h3 .hint { font-weight: 400; color: var(--muted); }
       /* 插件设置：一行一项（左标题 + 右控件），与 .row 同款但用在详情区 */
       .srow { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
       .srow:first-of-type { border-top: 0; padding-top: 2px; }
@@ -401,7 +406,7 @@
         border: 1px solid var(--border); background: var(--hover); color: var(--fg);
         border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 11.5px; cursor: pointer;
       }
-      .cap:hover { border-color: var(--accent); color: var(--accent); }
+      .cap:hover { border-color: var(--accent); color: var(--accent-ink); }
       .cap.denied { color: var(--danger); text-decoration: line-through; }
       .cmd { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 12px; margin-bottom: 8px; background: color-mix(in srgb, var(--panel) 45%, transparent); }
       .cmd-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -410,7 +415,7 @@
       .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
       .chip {
         display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px;
-        background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-ink);
         border-radius: 999px; font-size: 11.5px;
       }
       .chip-x {

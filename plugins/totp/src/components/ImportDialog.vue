@@ -392,14 +392,14 @@ onUnmounted(() => {
         <button class="launcher-btn" :class="{ primary: cameraOn }" @click="toggleCamera">
           <UiIcon name="qr" :size="13" />{{ cameraOn ? '停止摄像头' : '摄像头' }}
         </button>
-        <span class="ml-auto text-[11.5px] text-faint">
+        <span class="ml-auto text-[11.5px] text-muted">
           也可以直接把截图拖进这个窗口，或按 ⌘V 粘贴
         </span>
       </div>
 
       <!-- 本地文件路径读取：走 script 命令在 Node 侧读盘 -->
       <div v-if="showLocal" class="rounded-lg border border-line">
-        <div class="flex items-center gap-2 border-b border-line px-3 py-2 text-[12px]">
+        <div class="flex items-center gap-2 border-b border-line px-3 py-2 text-[12.5px]">
           <UiIcon name="file" :size="13" class="text-muted" />
           <span class="font-medium">本地已保存的截图</span>
           <button class="launcher-btn ghost ml-auto !text-[11.5px]" :disabled="localBusy" @click="listLocalImages">
@@ -415,13 +415,13 @@ onUnmounted(() => {
           <button
             v-for="f in localFiles"
             :key="f.path"
-            class="flex w-full items-center gap-2 border-b border-line px-3 py-1.5 text-left text-[12px] last:border-0 hover:bg-hover disabled:opacity-50"
+            class="flex w-full items-center gap-2 border-b border-line px-3 py-1.5 text-left text-[12.5px] last:border-0 hover:bg-hover disabled:opacity-50"
             :disabled="localBusy"
             @click="readLocalPath(f.path)"
           >
             <UiIcon name="file" :size="12" class="text-faint" />
             <span class="min-w-0 flex-1 truncate">{{ f.name }}</span>
-            <span class="text-faint">{{ fmtTime(f.mtime) }}</span>
+            <span class="text-muted">{{ fmtTime(f.mtime) }}</span>
             <span class="launcher-chip">{{ fmtSize(f.size) }}</span>
           </button>
         </div>
@@ -440,9 +440,9 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <p v-if="hint" class="text-[12px]" :class="stage === 'error' ? 'text-danger' : 'text-muted'">
+      <p v-if="hint" class="text-[12.5px]" :class="stage === 'error' ? 'text-danger' : 'text-muted'">
         {{ hint }}
-        <span v-if="elapsed && stage === 'done'" class="text-faint">· 识别耗时 {{ elapsed }}ms</span>
+        <span v-if="elapsed && stage === 'done'" class="text-muted">· 识别耗时 {{ elapsed }}ms</span>
       </p>
 
       <video
@@ -455,13 +455,13 @@ onUnmounted(() => {
       <div v-else-if="previewUrl" class="launcher-scan-box flex max-h-44 items-center justify-center overflow-hidden">
         <img :src="previewUrl" alt="待识别图片" class="max-h-44 object-contain" />
       </div>
-      <div v-else class="launcher-scan-box launcher-pulse grid h-24 place-items-center text-[12px] text-faint">
+      <div v-else class="launcher-scan-box launcher-pulse grid h-24 place-items-center text-[12.5px] text-muted">
         截图 / 图片会显示在这里
       </div>
 
       <!-- 解析结果 -->
       <div v-if="drafts.length" class="rounded-lg border border-line">
-        <div class="flex items-center gap-2 border-b border-line px-3 py-2 text-[12px]">
+        <div class="flex items-center gap-2 border-b border-line px-3 py-2 text-[12.5px]">
           <span class="font-medium">待导入 {{ drafts.length }} 个账户</span>
           <span v-if="batches > 1" class="launcher-chip">迁移二维码共 {{ batches }} 张</span>
           <button class="launcher-btn ghost ml-auto !text-[11.5px]" @click="toggleAll">
@@ -481,11 +481,11 @@ onUnmounted(() => {
             />
             <span class="min-w-0 flex-1 truncate">
               <span class="text-[13px] font-medium">{{ d.issuer || '未命名服务' }}</span>
-              <span v-if="d.name" class="ml-2 text-[12px] text-muted">{{ d.name }}</span>
+              <span v-if="d.name" class="ml-2 text-[12.5px] text-muted">{{ d.name }}</span>
             </span>
             <span class="launcher-chip">{{ d.type === 'hotp' ? 'HOTP' : 'TOTP' }}</span>
             <span class="launcher-chip">{{ d.digits !== 8 ? 6 : 8 }} 位</span>
-            <span class="launcher-code text-[11.5px] text-faint">{{ mask(d.secret) }}</span>
+            <span class="launcher-code text-[11.5px] text-muted">{{ mask(d.secret) }}</span>
             <span v-if="isDuplicate(d)" class="launcher-chip !text-warn">已存在</span>
           </label>
         </div>
@@ -493,7 +493,7 @@ onUnmounted(() => {
 
       <!-- 兜底：手动粘贴 -->
       <details class="rounded-lg border border-line px-3 py-2">
-        <summary class="cursor-pointer text-[12px] text-muted">识别不到？粘贴链接或密钥</summary>
+        <summary class="cursor-pointer text-[12.5px] text-muted">识别不到？粘贴链接或密钥</summary>
         <textarea
           v-model="manual"
           class="launcher-input launcher-scroll mt-2 h-20 resize-none font-mono"
@@ -501,12 +501,12 @@ onUnmounted(() => {
           placeholder="otpauth://totp/... 或 otpauth-migration://offline?data=... 或 JBSWY3DPEHPK3PXP（可多行）"
         />
         <button class="launcher-btn mt-2" @click="ingestManual">解析</button>
-        <span v-if="rawText" class="mt-2 block truncate font-mono text-[11px] text-faint">上一次识别到：{{ rawText }}</span>
+        <span v-if="rawText" class="mt-2 block truncate font-mono text-[11px] text-muted">上一次识别到：{{ rawText }}</span>
       </details>
     </div>
 
     <template #footer>
-      <span class="text-[11.5px] text-faint">
+      <span class="text-[11.5px] text-muted">
         密钥仅保存在本机插件数据目录（<code class="font-mono">storage.json</code>）
       </span>
       <div class="ml-auto flex items-center gap-2">

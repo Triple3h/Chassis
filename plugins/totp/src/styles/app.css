@@ -157,51 +157,12 @@
   color: var(--launcher-muted);
 }
 
-/* 竖线：把「开关类」按钮与「动作类」按钮分开 */
-.launcher-vsep {
-  width: 1px;
-  height: 16px;
-  margin: 0 2px;
-  background: var(--launcher-line);
-}
 .launcher-btn.ghost.is-on {
-  color: var(--launcher-accent);
+  color: var(--launcher-accent-ink);
   background: var(--totp-soft-bg);
 }
 
 /* 分组标签 */
-.launcher-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--launcher-panel-2);
-  color: var(--launcher-muted);
-  font-size: 11.5px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background var(--launcher-motion-fast) var(--launcher-ease-move),
-    color var(--launcher-motion-fast) var(--launcher-ease-move),
-    border-color var(--launcher-motion-fast) var(--launcher-ease-move);
-}
-.launcher-filter:hover {
-  background: var(--launcher-active);
-  color: var(--launcher-fg);
-}
-.launcher-filter.is-active {
-  background: var(--totp-soft-bg);
-  border-color: var(--totp-soft-line);
-  color: var(--launcher-accent);
-  font-weight: 600;
-}
-.launcher-n {
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.65;
-}
 .launcher-noscroll {
   scrollbar-width: none;
 }
@@ -359,21 +320,6 @@
 }
 
 /* 空状态 / 解锁页的图标底座 */
-.launcher-empty-icon {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  margin: 0 auto;
-  border-radius: var(--launcher-radius-lg);
-  color: var(--launcher-accent);
-  background:
-    linear-gradient(180deg, var(--launcher-glass-sheen), transparent 50%),
-    var(--totp-soft-bg);
-  border: 1px solid var(--totp-soft-line);
-  box-shadow: inset 0 1px 0 var(--launcher-glass-hi);
-}
-
 .launcher-hint {
   display: inline-flex;
   align-items: center;

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useToast } from '@launcher/ui/toast'
 import { exec, host, hostUi, storage } from '@launcher/api'
@@ -240,14 +242,14 @@ const tabCount = computed(() => (tab.value === 'ports' ? visiblePorts.value.leng
 <template>
   <AppShell>
     <!-- 顶栏：标题 + 过滤 + 刷新 -->
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2.5">
-      <span class="text-accent"><UiIcon name="list" :size="15" /></span>
-      <span class="text-[13.5px] font-semibold">进程与端口</span>
+    <PageHeader>
+      <span class="text-accentink"><UiIcon name="list" :size="15" /></span>
+      <span class="text-[13px] font-semibold">进程与端口</span>
       <div class="ml-2 min-w-0 flex-1">
         <input
           ref="searchRef"
           v-model="query"
-          class="w-full rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-[12.5px] outline-none placeholder:text-faint focus:border-linestrong"
+          class="launcher-input"
           :placeholder="tab === 'ports' ? '过滤：端口号 / 进程名 / PID / 用户' : '过滤：进程名 / PID / 用户'"
         />
       </div>
@@ -258,41 +260,34 @@ const tabCount = computed(() => (tab.value === 'ports' ? visiblePorts.value.leng
         <input v-model="autoRefresh" type="checkbox" :disabled="demoMode" />
         自动
       </label>
-    </header>
+    </PageHeader>
 
     <div v-if="demoMode" class="border-b border-line bg-panel2 px-3 py-1.5 text-[11.5px] text-warn">
       演示模式：未检测到启动台宿主，下面是示例数据，「终止」不会真的执行。
     </div>
 
     <!-- 标签 + 排序 / 范围 -->
-    <div class="flex items-center gap-1.5 border-b border-line px-3 py-1.5 text-[12px]">
-      <button
-        class="rounded-md px-2 py-1"
-        :class="tab === 'ports' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-        @click="tab = 'ports'"
-      >
-        端口 <span class="text-muted">{{ visiblePorts.length }}</span>
+    <div class="launcher-tabbar">
+      <button class="launcher-tab" :class="{ 'is-active': tab === 'ports' }" @click="tab = 'ports'">
+        端口<span class="launcher-tab-n">{{ visiblePorts.length }}</span>
       </button>
-      <button
-        class="rounded-md px-2 py-1"
-        :class="tab === 'procs' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-        @click="tab = 'procs'"
-      >
-        进程 <span class="text-muted">{{ visibleProcs.length }}</span>
+      <button class="launcher-tab" :class="{ 'is-active': tab === 'procs' }" @click="tab = 'procs'">
+        进程<span class="launcher-tab-n">{{ visibleProcs.length }}</span>
       </button>
       <div class="flex-1" />
+      <!-- 范围是二级筛选：小一号的药丸，和上面两个主标签区分开 -->
       <template v-if="tab === 'ports'">
         <button
-          class="rounded-md border border-line px-2 py-0.5 text-[11.5px]"
-          :class="scope === 'listen' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
+          class="launcher-btn ghost text-[11.5px]"
+          :class="{ 'bg-active text-fg': scope === 'listen' }"
           title="只看监听中的端口（TCP LISTEN + UDP）"
           @click="scope = 'listen'"
         >
           监听
         </button>
         <button
-          class="rounded-md border border-line px-2 py-0.5 text-[11.5px]"
-          :class="scope === 'all' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
+          class="launcher-btn ghost text-[11.5px]"
+          :class="{ 'bg-active text-fg': scope === 'all' }"
           title="包含所有连接（established 等）"
           @click="scope = 'all'"
         >
@@ -325,16 +320,18 @@ const tabCount = computed(() => (tab.value === 'ports' ? visiblePorts.value.leng
           </button>
           <span />
         </div>
-        <div v-if="visiblePorts.length === 0" class="px-3 py-8 text-center text-[12px] text-muted">
-          {{ ports.length === 0 ? '没有扫描到端口占用。' : '没有匹配的端口。' }}
+        <div v-if="visiblePorts.length === 0" class="px-3 py-8 text-center text-[12.5px] text-muted">
+          {{ ports.length === 0 ? '没有扫描到端口占用' : '没有匹配的端口' }}
         </div>
         <div
           v-for="entry in visiblePorts"
           :key="`${entry.protocol}-${entry.port}-${entry.pid}`"
-          class="grid cursor-pointer grid-cols-[70px_78px_minmax(0,1fr)_70px_84px_80px_56px] items-center gap-2 border-b border-line/60 px-3 py-1.5 text-[12px] hover:bg-hover"
+          class="grid cursor-pointer grid-cols-[70px_78px_minmax(0,1fr)_70px_84px_80px_56px] items-center gap-2 border-b border-line/60 px-3 py-1.5 text-[12.5px] hover:bg-hover"
           @click="openDetail(entry.pid)"
         >
-          <span class="launcher-mono font-semibold text-accent">:{{ entry.port }}</span>
+          <!-- 端口是这页的「主键」，用正文色 + 等宽数字让它对齐；
+               不用强调色 —— 一整列都染蓝等于没有强调 -->
+          <span class="launcher-mono font-medium text-fg">{{ entry.port }}</span>
           <span class="truncate text-muted">{{ entry.protocol.toUpperCase() }} · {{ stateLabel(entry.state) }}</span>
           <span class="flex min-w-0 items-center gap-1.5">
             <UiIcon v-if="entry.risk === 'blocked'" name="shield" :size="11" class="shrink-0 text-danger" />
@@ -375,13 +372,13 @@ const tabCount = computed(() => (tab.value === 'ports' ? visiblePorts.value.leng
           <span>用户</span>
           <span />
         </div>
-        <div v-if="visibleProcs.length === 0" class="px-3 py-8 text-center text-[12px] text-muted">
-          {{ procs.length === 0 ? '没有扫描到进程。' : '没有匹配的进程。' }}
+        <div v-if="visibleProcs.length === 0" class="px-3 py-8 text-center text-[12.5px] text-muted">
+          {{ procs.length === 0 ? '没有扫描到进程' : '没有匹配的进程' }}
         </div>
         <div
           v-for="entry in visibleProcs"
           :key="entry.pid"
-          class="grid cursor-pointer grid-cols-[minmax(0,1fr)_70px_62px_80px_84px_56px] items-center gap-2 border-b border-line/60 px-3 py-1.5 text-[12px] hover:bg-hover"
+          class="grid cursor-pointer grid-cols-[minmax(0,1fr)_70px_62px_80px_84px_56px] items-center gap-2 border-b border-line/60 px-3 py-1.5 text-[12.5px] hover:bg-hover"
           :class="{ 'opacity-60': currentPid === entry.pid && killTarget != null }"
           @click="openDetail(entry.pid)"
         >
@@ -389,7 +386,7 @@ const tabCount = computed(() => (tab.value === 'ports' ? visiblePorts.value.leng
             <UiIcon v-if="entry.risk === 'blocked'" name="shield" :size="11" class="shrink-0 text-danger" />
             <UiIcon v-else-if="entry.risk === 'caution'" name="alert" :size="11" class="shrink-0 text-warn" />
             <span class="truncate" :title="entry.name">{{ entry.name || '未知进程' }}</span>
-            <span v-if="entry.selfRelated" class="shrink-0 rounded border border-line px-1 text-[10px] text-danger">自身</span>
+            <span v-if="entry.selfRelated" class="shrink-0 rounded border border-line px-1 text-[11px] text-danger">自身</span>
           </span>
           <span class="launcher-mono text-muted">{{ entry.pid }}</span>
           <span class="launcher-mono" :class="entry.cpu >= 20 ? 'text-warn' : 'text-muted'">{{ formatPercent(entry.cpu) }}</span>
@@ -410,14 +407,14 @@ const tabCount = computed(() => (tab.value === 'ports' ? visiblePorts.value.leng
     </div>
 
     <!-- 状态条 -->
-    <footer class="flex items-center gap-2 border-t border-line px-3 py-1.5 text-[11px] text-muted">
+    <PageFooter>
       <span>{{ tabCount }} / {{ tab === 'ports' ? ports.length : procs.length }} 条</span>
       <span v-if="scannedAt">· 扫描于 {{ formatClock(scannedAt) }}</span>
       <span v-if="cores > 1 && tab === 'procs'">· {{ cores }} 核</span>
       <div class="flex-1" />
       <span v-if="tab === 'procs' && totalMemory > 0">总内存 {{ formatBytes(totalMemory) }}</span>
       <span>{{ platform === 'win32' ? 'Windows' : platform === 'darwin' ? 'macOS' : '' }}</span>
-    </footer>
+    </PageFooter>
 
     <KillDialog
       v-if="killTarget"

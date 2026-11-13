@@ -3,7 +3,7 @@
   "title": "备忘快贴",
   "author": "triple3h",
   "description": "收藏常用「文本」「代码」「图片」，一键复制并粘贴回前台应用",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "apiVersion": "2",

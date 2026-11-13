@@ -120,7 +120,7 @@ function submit() {
         spellcheck="false"
       />
 
-      <div class="flex flex-wrap items-center gap-2 text-[12px]">
+      <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
         <button class="launcher-btn" @click="reset">
           <UiIcon name="refresh" :size="12" /> 还原为当前内容
         </button>
@@ -131,16 +131,16 @@ function submit() {
         <span class="launcher-chip" :class="{ 'text-warn': parsing }">
           {{ parsing ? '解析中…' : `${stats.blocks} 个块 · ${stats.entries} 条` }}
         </span>
-        <span v-if="stats.off" class="launcher-chip text-faint">{{ stats.off }} 个块已关闭</span>
+        <span v-if="stats.off" class="launcher-chip text-muted">{{ stats.off }} 个块已关闭</span>
       </div>
 
       <div v-if="preview.length" class="launcher-scroll max-h-32 rounded-lg border border-line bg-panel2 p-2">
         <div v-for="block in preview" :key="block.id" class="flex items-center gap-2 py-0.5 text-[11.5px]">
-          <UiIcon :name="block.enabled ? 'check' : 'minus'" :size="11" :class="block.enabled ? 'text-accent' : 'text-faint'" />
-          <span class="min-w-0 flex-1 truncate" :class="block.enabled ? '' : 'text-faint'">{{ block.name }}</span>
-          <span class="shrink-0 text-faint">{{ entryCount(block) }} 条</span>
+          <UiIcon :name="block.enabled ? 'check' : 'minus'" :size="11" :class="block.enabled ? 'text-accentink' : 'text-faint'" />
+          <span class="min-w-0 flex-1 truncate" :class="block.enabled ? '' : 'text-muted'">{{ block.name }}</span>
+          <span class="shrink-0 text-muted">{{ entryCount(block) }} 条</span>
         </div>
-        <div v-if="blocks.length > preview.length" class="pt-1 text-[11.5px] text-faint">
+        <div v-if="blocks.length > preview.length" class="pt-1 text-[11.5px] text-muted">
           …还有 {{ blocks.length - preview.length }} 个块
         </div>
       </div>

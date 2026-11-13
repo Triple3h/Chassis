@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import EmptyState from '@launcher/ui/EmptyState.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import UiDialog from '@launcher/ui/UiDialog.vue'
 import { useToast } from '@launcher/ui/toast'
@@ -338,8 +341,8 @@ onUnmounted(() => {
 
 <template>
   <AppShell>
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2">
-      <UiIcon name="calculator" :size="16" class="text-accent" />
+    <PageHeader>
+      <UiIcon name="calculator" :size="16" class="text-accentink" />
       <span class="text-[13px] font-semibold">计算稿纸</span>
       <span class="launcher-chip">{{ pads.length }} 张 · {{ rows.length }} 行</span>
       <div class="ml-auto flex items-center gap-1.5">
@@ -352,7 +355,7 @@ onUnmounted(() => {
           新建稿纸
         </button>
       </div>
-    </header>
+    </PageHeader>
 
     <div class="flex min-h-0 flex-1">
       <!-- 稿纸列表 -->
@@ -364,10 +367,10 @@ onUnmounted(() => {
           :class="current?.id === pad.id ? 'bg-active' : 'hover:bg-hover'"
           @click="selectPad(pad.id)"
         >
-          <span class="truncate text-[12px] font-medium" :class="current?.id === pad.id ? 'text-accent' : ''">{{ pad.title }}</span>
-          <span class="truncate text-[10.5px] text-faint">{{ pad.rows.length }} 行 · {{ padSummary(pad) }}</span>
+          <span class="truncate text-[12.5px] font-medium" :class="current?.id === pad.id ? 'text-accentink' : ''">{{ pad.title }}</span>
+          <span class="truncate text-[11px] text-muted">{{ pad.rows.length }} 行 · {{ padSummary(pad) }}</span>
         </button>
-        <div v-if="!pads.length && !loaded" class="px-3 py-4 text-[11.5px] text-faint">正在读取…</div>
+        <div v-if="!pads.length && !loaded" class="px-3 py-4 text-[11.5px] text-muted">正在读取…</div>
       </aside>
 
       <!-- 稿纸正文 -->
@@ -380,7 +383,7 @@ onUnmounted(() => {
             @change="commitTitle"
             @blur="commitTitle"
           />
-          <span class="shrink-0 text-[11px] text-faint">改完自动保存</span>
+          <span class="shrink-0 text-[11px] text-muted">改完自动保存</span>
         </div>
 
         <div ref="rowsEl" class="launcher-scroll min-h-0 flex-1 px-3 py-2">
@@ -392,11 +395,12 @@ onUnmounted(() => {
             @click="selectRow(index)"
           >
             <span class="pad-mono min-w-0 flex-1 truncate text-fg" :title="row.expr">{{ row.expr }}</span>
-            <span v-if="row.note" class="pad-mono shrink-0 truncate text-[11px] text-faint" :title="row.note">// {{ row.note }}</span>
-            <span class="pad-mono shrink-0 text-faint">=</span>
+            <span v-if="row.note" class="pad-mono shrink-0 truncate text-[11px] text-muted" :title="row.note">// {{ row.note }}</span>
+            <span class="pad-mono shrink-0 text-muted">=</span>
+            <!-- 结果用正文色 + 等宽：一屏几十个结果，整列染成强调色就没有「强调」了 -->
             <span
-              class="pad-result shrink-0"
-              :class="row.error ? 'max-w-[45%] truncate text-danger' : 'text-accent'"
+              class="pad-result shrink-0 text-fg"
+              :class="row.error ? 'max-w-[45%] truncate text-danger' : ''"
               :title="row.error ?? row.text"
             >
               {{ row.error ?? row.text }}
@@ -413,11 +417,8 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <div v-if="!rows.length" class="flex flex-col items-center gap-2 px-6 py-10 text-center text-faint">
-            <UiIcon name="calculator" :size="24" />
-            <p class="text-[12.5px]">在下面输入算式，回车就记到稿纸上</p>
-            <p class="text-[11px]">{{ SYNTAX_HINT }}</p>
-          </div>
+          <!-- 语法提示只出现在输入框下面那一处（空态再抄一遍就是同一句话出现两次） -->
+          <EmptyState v-if="!rows.length" icon="calculator" title="在下面输入算式，回车就记到稿纸上" />
         </div>
 
         <div class="border-t border-line px-3 py-2">
@@ -430,23 +431,22 @@ onUnmounted(() => {
               @keydown.enter.prevent="commit"
               @input="carried = false"
             />
-            <span v-if="preview.text" class="pad-result shrink-0 text-accent">= {{ preview.text }}</span>
+            <span v-if="preview.text" class="pad-result shrink-0 text-accentink">= {{ preview.text }}</span>
             <span v-else-if="preview.error" class="shrink-0 text-[11.5px] text-danger">{{ preview.error }}</span>
           </div>
-          <div class="mt-1 flex items-center gap-3 text-[11px] text-faint">
+          <div class="mt-1 flex items-center gap-3 text-[11px] text-muted">
             <span>{{ SYNTAX_HINT }}</span>
           </div>
         </div>
       </section>
     </div>
-
-    <footer class="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <PageFooter>
       <span><span class="launcher-kbd">Enter</span> 记到稿纸</span>
       <span><span class="launcher-kbd">↑↓</span> 切换行</span>
       <span><span class="launcher-kbd">{{ modLabel }}C</span> 复制结果</span>
       <span><span class="launcher-kbd">{{ modLabel }}B</span> 备注</span>
       <span class="ml-auto">自动保存</span>
-    </footer>
+    </PageFooter>
 
     <UiDialog v-if="noteEdit" title="给这一行加个备注" subtitle="备注只作说明，不参与计算" size="sm" @close="noteEdit = null">
       <input v-model="noteEdit.value" class="launcher-input" placeholder="例如：房租分摊" @keydown.enter.prevent="submitNote" />

@@ -37,8 +37,8 @@ function fmtTime(at: number): string {
         class="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-[var(--launcher-active)]"
       >
         <button type="button" class="min-w-0 flex-1 text-left" title="载入这份 JSON" @click="emit('pick', entry)">
-          <div class="truncate font-mono text-[12px]">{{ previewOf(entry.text) }}</div>
-          <div class="text-[11px] text-faint">
+          <div class="truncate font-mono text-[12.5px]">{{ previewOf(entry.text) }}</div>
+          <div class="text-[11px] text-muted">
             {{ entry.text.length.toLocaleString() }} 字符<template v-if="fmtTime(entry.at)"> · {{ fmtTime(entry.at) }}</template>
           </div>
         </button>
@@ -49,7 +49,7 @@ function fmtTime(at: number): string {
     </div>
 
     <template #footer>
-      <span class="text-[11.5px] text-faint">共 {{ entries.length }} / 20 条</span>
+      <span class="text-[11.5px] text-muted">共 {{ entries.length }} / 20 条</span>
       <button class="launcher-btn ghost ml-auto" :disabled="entries.length === 0" @click="emit('clear')">
         <UiIcon name="trash" :size="12" />清空全部
       </button>

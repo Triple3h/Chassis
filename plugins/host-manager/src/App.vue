@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { copyText } from '@launcher/ui/clipboard'
 import { isMod, isTypingTarget, modLabel } from '@launcher/ui/keys'
@@ -814,8 +815,8 @@ async function copyFinal() {
 <template>
   <AppShell>
     <!-- 顶栏 -->
-    <header class="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
-      <span class="text-accent"><UiIcon name="server" :size="15" /></span>
+    <PageHeader>
+      <span class="text-accentink"><UiIcon name="server" :size="15" /></span>
       <span class="shrink-0 text-[13px] font-semibold">Hosts 管家</span>
 
       <button class="launcher-chip max-w-[170px] truncate" :title="path" @click="copyPath">
@@ -842,17 +843,19 @@ async function copyFinal() {
       </button>
 
       <div class="relative min-w-0 flex-1">
-        <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint">
+        <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted">
           <UiIcon name="search" :size="13" />
         </span>
         <input ref="searchRef" v-model="query" class="launcher-input pl-7" :placeholder="placeholder" />
       </div>
 
+      <!-- 顶栏在 720px 下就这么多位置：四个动作里只留「新建块」带字，
+           其余收成图标（都有 title），宽度让给搜索框 -->
       <button class="launcher-btn" title="新建块（⇧⌘N）" @click="onCreateBlock">
         <UiIcon name="plus" :size="12" /> 新建块
       </button>
       <button class="launcher-btn" title="批量编辑托管区（文本，支持整段粘贴）" @click="openRegionEditor">
-        <UiIcon name="pencil" :size="12" /> 批量编辑
+        <UiIcon name="pencil" :size="13" />
       </button>
       <button class="launcher-btn" title="存档与回滚" @click="showSnapshots = true">
         <UiIcon name="history" :size="13" />
@@ -860,16 +863,16 @@ async function copyFinal() {
       <button class="launcher-btn" title="重新读取系统文件" @click="reload(true)">
         <UiIcon name="refresh" :size="13" />
       </button>
-    </header>
+    </PageHeader>
 
     <!-- 左右分屏：左 = 块，右 = 最终 hosts -->
     <div class="flex min-h-0 flex-1">
       <aside class="flex w-[300px] shrink-0 flex-col border-r border-line">
-        <div class="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3 text-[11.5px] text-muted">
+        <div class="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3 text-[11.5px] text-muted">
           <span>托管块</span>
-          <span class="text-faint">{{ stats.blocks }}</span>
+          <span class="text-muted tabular-nums">{{ stats.blocks }}</span>
           <div class="flex-1" />
-          <span v-if="query.trim()" class="text-faint">正在过滤</span>
+          <span v-if="query.trim()" class="text-muted">正在过滤</span>
         </div>
 
         <div class="launcher-scroll min-h-0 flex-1">
@@ -938,17 +941,18 @@ async function copyFinal() {
       </aside>
 
       <section class="flex min-w-0 flex-1 flex-col">
-        <div class="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3 text-[11.5px] text-muted">
+        <!-- 两张表的栏头都不做药丸：数字是等宽中性文本，只有「未保存」这种状态才上色 -->
+        <div class="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3 text-[11.5px] text-muted">
           <span>最终 hosts 文件</span>
-          <span class="launcher-chip">{{ lines.length }} 行</span>
-          <span v-if="diffCount.added" class="launcher-chip text-addfg" title="相对磁盘上那份新增的行">
+          <span class="text-muted tabular-nums">{{ lines.length }} 行</span>
+          <span v-if="diffCount.added" class="text-addfg tabular-nums" title="相对磁盘上那份新增的行">
             +{{ diffCount.added }}
           </span>
-          <span v-if="diffCount.removed" class="launcher-chip text-delfg" title="相对磁盘上那份删掉的行">
+          <span v-if="diffCount.removed" class="text-delfg tabular-nums" title="相对磁盘上那份删掉的行">
             −{{ diffCount.removed }}
           </span>
-          <span v-if="dirty" class="launcher-chip text-warn">未保存</span>
-          <span v-else-if="!loading" class="launcher-chip">与磁盘一致</span>
+          <span v-if="dirty" class="font-medium text-warn">未保存</span>
+          <span v-else-if="!loading" class="text-muted">与磁盘一致</span>
           <div class="flex-1" />
           <button class="launcher-btn ghost" title="复制完整内容" @click="copyFinal">
             <UiIcon name="copy" :size="12" />
@@ -980,7 +984,7 @@ async function copyFinal() {
       <button v-if="undoStack.length" class="launcher-btn" @click="undo">
         <UiIcon name="history" :size="12" /> 撤销 ({{ undoStack.length }})
       </button>
-      <span class="text-faint">{{ modLabel }}N 新增 · {{ modLabel }}S 保存 · {{ modLabel }}F 搜索</span>
+      <span class="text-muted">{{ modLabel }}N 新增 · {{ modLabel }}S 保存 · {{ modLabel }}F 搜索</span>
       <button class="launcher-btn primary" :disabled="!dirty" @click="openSave">
         <UiIcon name="save" :size="12" /> 保存
       </button>

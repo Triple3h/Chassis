@@ -169,10 +169,10 @@ defineExpose({ scrollToIndex })
           <span class="launcher-diff-no sticky left-0 bg-panel">{{ item.row.leftNo || item.row.rightNo || '' }}</span>
           <span class="launcher-diff-line flex-1" :class="unifiedBg(item)">
             <template v-if="item.row.kind === 'skip'">
-              <span class="text-faint">⋯ 折叠 {{ item.row.skipped }} 行相同内容 ⋯</span>
+              <span class="text-muted">⋯ 折叠 {{ item.row.skipped }} 行相同内容 ⋯</span>
             </template>
             <template v-else>
-              <span class="text-faint">{{ item.row.sign }} </span>
+              <span class="text-muted">{{ item.row.sign }} </span>
               <span v-if="item.row.useRight" v-html="rightHtml(item.row)" />
               <span v-else v-html="leftHtml(item.row)" />
             </template>

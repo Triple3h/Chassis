@@ -20,7 +20,9 @@ export function formatBytes(bytes: number | null | undefined): string {
     value /= KIB
     unit += 1
   }
-  const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2
+  // 一列数字只用两种形态：过百不带小数，其余一位小数。
+  // 原来是「<10 两位、<100 一位」，同一列里 9.00 / 154 / 43.0 三种写法混排。
+  const digits = value >= 100 ? 0 : 1
   return `${value.toFixed(digits)} ${units[unit]}`
 }
 

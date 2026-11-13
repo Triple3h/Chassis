@@ -38,16 +38,80 @@ export function applyTheme(mode: ThemeMode): void {
   document.documentElement.style.colorScheme = mode
 }
 
-/** 用户自定义主题色：宿主随会话下发，合法才覆盖内置值（深浅两态同色，与宿主一致） */
-function applyAccent(): void {
-  let raw = ''
-  try {
-    raw = new URLSearchParams(location.search).get('accent') ?? ''
-  } catch {
-    return
+/* ── 强调色 ─────────────────────────────────────────────────────
+   主题色由用户定，插件页从 URL 拿到什么就吃什么（深浅两态同色，与宿主一致）。
+   于是「当文字用的强调色」不能直接用：浅色底上一支明黄只有 1.4:1。
+   这里按当前底色算一个够 4.5:1 的深/浅版本写进 `--launcher-accent-ink`，
+   色块（按钮底、选中底）仍用原色。 */
+
+/** 与 theme.css 的 --launcher-bg 同值；底色改了这里也要改 */
+const BG: Record<ThemeMode, string> = { light: '#fafafa', dark: '#141415' }
+
+function rgb(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+function hex(channels: [number, number, number]): string {
+  return `#${channels.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** WCAG 相对亮度 */
+function luminance(channels: [number, number, number]): number {
+  const [r, g, b] = channels.map((c) => {
+    const v = c / 255
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+function contrast(a: string, b: string): number {
+  const ca = rgb(a)
+  const cb = rgb(b)
+  if (!ca || !cb) return 21
+  const la = luminance(ca)
+  const lb = luminance(cb)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+
+/**
+ * 把颜色朝黑（浅色主题）或白（深色主题）推，直到对底色达到 `target`。
+ * 二分 8 次，够精确且不会在极端色上死循环。
+ */
+function inkFor(accent: string, mode: ThemeMode, target = 4.5): string {
+  const base = rgb(accent)
+  if (!base || contrast(accent, BG[mode]) >= target) return accent
+  const to = mode === 'light' ? 0 : 255
+  let low = 0
+  let high = 1
+  for (let i = 0; i < 8; i += 1) {
+    const t = (low + high) / 2
+    const mixed = hex(base.map((c) => c + (to - c) * t) as [number, number, number])
+    if (contrast(mixed, BG[mode]) >= target) high = t
+    else low = t
   }
-  const accent = parseAccent(raw)
-  if (accent) document.documentElement.style.setProperty('--launcher-accent', accent)
+  return hex(base.map((c) => c + (to - c) * high) as [number, number, number])
+}
+
+let accent = ''
+/** 用户自定义主题色：宿主随会话下发，合法才覆盖内置值 */
+function readAccent(): string {
+  try {
+    return parseAccent(new URLSearchParams(location.search).get('accent') ?? '')
+  } catch {
+    return ''
+  }
+}
+
+/** 深/浅切换后要把 ink 重算一遍 —— 同一支色在两种底色上需要的深度不同 */
+function applyAccent(mode: ThemeMode): void {
+  if (!accent) accent = readAccent()
+  if (!accent) return
+  const root = document.documentElement.style
+  root.setProperty('--launcher-accent', accent)
+  root.setProperty('--launcher-accent-ink', inkFor(accent, mode))
 }
 
 let singleton: Ref<ThemeMode> | null = null
@@ -61,6 +125,7 @@ export function useTheme() {
     source = decision.source
     theme.value = decision.mode
     applyTheme(decision.mode)
+    applyAccent(decision.mode)
   }
 
   function detect(): ThemeDecision {
@@ -80,7 +145,6 @@ export function useTheme() {
 
   onMounted(() => {
     show(detect())
-    applyAccent()
     try {
       mq = window.matchMedia('(prefers-color-scheme: dark)')
       mq.addEventListener('change', onMq)

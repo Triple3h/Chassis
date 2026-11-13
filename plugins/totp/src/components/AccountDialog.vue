@@ -84,7 +84,7 @@ function save() {
           <button class="launcher-btn ghost !px-1.5 !py-0" @click="showSecret = !showSecret">
             <UiIcon :name="showSecret ? 'eyeOff' : 'eye'" :size="12" />
           </button>
-          <span v-if="draft.secret && showSecret" class="launcher-code text-faint">{{ formatSecret(draft.secret) }}</span>
+          <span v-if="draft.secret && showSecret" class="launcher-code text-muted">{{ formatSecret(draft.secret) }}</span>
         </span>
         <input
           :value="draft.secret"

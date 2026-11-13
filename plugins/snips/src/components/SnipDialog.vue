@@ -133,7 +133,7 @@ function submit(): void {
           v-for="tab in kindTabs"
           :key="tab.value"
           class="launcher-btn ghost"
-          :class="kind === tab.value ? 'bg-active text-accent' : ''"
+          :class="kind === tab.value ? 'bg-active text-accentink' : ''"
           @click="setKind(tab.value)"
         >
           <UiIcon :name="tab.icon" :size="13" />
@@ -170,7 +170,7 @@ function submit(): void {
           <div class="w-[150px]">
             <UiSelect :model-value="lang" :options="langOptions" @update:model-value="(value) => (lang = String(value))" />
           </div>
-          <span class="text-[11px] text-faint">仅用于展示与检索</span>
+          <span class="text-[11px] text-muted">仅用于展示与检索</span>
         </div>
       </div>
 
@@ -184,9 +184,9 @@ function submit(): void {
         <img v-if="preview" :src="preview" class="max-h-[140px] max-w-full rounded" alt="" />
         <template v-else>
           <UiIcon name="image" :size="26" class="text-faint" />
-          <p class="text-[12px] text-faint">拖入图片 / 选择文件 / 剪贴板读图</p>
+          <p class="text-[12.5px] text-muted">拖入图片 / 选择文件 / 剪贴板读图</p>
         </template>
-        <p v-if="preview" class="text-[11px] text-faint">已就绪，约 {{ Math.round(preview.length / 1024) }} KB</p>
+        <p v-if="preview" class="text-[11px] text-muted">已就绪，约 {{ Math.round(preview.length / 1024) }} KB</p>
       </div>
     </div>
 

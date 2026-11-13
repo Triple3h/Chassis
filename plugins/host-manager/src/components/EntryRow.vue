@@ -46,7 +46,7 @@ const namesTitle = computed(() => props.line.names.join(' '))
     />
 
     <span
-      class="launcher-mono w-[86px] shrink-0 truncate text-[12px]"
+      class="launcher-mono w-[86px] shrink-0 truncate text-[12.5px]"
       :class="ipBad ? 'text-danger' : 'text-fg'"
       :title="line.ip"
     >
@@ -54,11 +54,11 @@ const namesTitle = computed(() => props.line.names.join(' '))
     </span>
 
     <div class="min-w-0 flex-1 truncate text-[12.5px]" :title="namesTitle">
-      <span class="text-accent">{{ line.names.join('  ') }}</span>
+      <span class="text-accentink">{{ line.names.join('  ') }}</span>
       <span v-if="line.comment" class="ml-2 text-[11.5px] text-muted"># {{ line.comment }}</span>
     </div>
 
-    <span v-if="locked" class="shrink-0 text-faint" title="系统关键条目，删掉可能影响本机解析">
+    <span v-if="locked" class="shrink-0 text-muted" title="系统关键条目，删掉可能影响本机解析">
       <UiIcon name="lock" :size="12" />
     </span>
     <span v-if="conflict" class="shrink-0 text-warn" title="这个域名在别处指向了另一个 IP，hosts 只会以先出现的为准">

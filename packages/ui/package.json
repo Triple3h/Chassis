@@ -7,6 +7,9 @@
   "exports": {
     "./AppShell.vue": "./ui/AppShell.vue",
     "./ChangelogNotes.vue": "./ui/ChangelogNotes.vue",
+    "./EmptyState.vue": "./ui/EmptyState.vue",
+    "./PageFooter.vue": "./ui/PageFooter.vue",
+    "./PageHeader.vue": "./ui/PageHeader.vue",
     "./UiDialog.vue": "./ui/UiDialog.vue",
     "./UiIcon.vue": "./ui/UiIcon.vue",
     "./UiSelect.vue": "./ui/UiSelect.vue",

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import UiDialog from '@launcher/ui/UiDialog.vue'
 import { useToast } from '@launcher/ui/toast'
@@ -291,11 +293,11 @@ onUnmounted(() => {
 
 <template>
   <AppShell>
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2">
-      <UiIcon name="clipboard" :size="16" class="text-accent" />
+    <PageHeader>
+      <UiIcon name="clipboard" :size="16" class="text-accentink" />
       <span class="text-[13px] font-semibold">剪贴板历史</span>
       <span class="launcher-chip">{{ entries.length }} / {{ total }}</span>
-      <span v-if="pausedText" class="launcher-chip text-accent">{{ pausedText }}</span>
+      <span v-if="pausedText" class="launcher-chip text-accentink">{{ pausedText }}</span>
       <div class="ml-auto flex items-center gap-1.5">
         <button class="launcher-btn ghost" :title="pausedText ? '恢复记录' : '暂停记录 30 分钟'" @click="setPause(pausedUntil ? 0 : 30)">
           <UiIcon :name="pausedUntil ? 'play' : 'stop'" :size="13" />
@@ -306,7 +308,7 @@ onUnmounted(() => {
           清空
         </button>
       </div>
-    </header>
+    </PageHeader>
 
     <!-- 搜索与筛选 -->
     <div class="flex items-center gap-1.5 border-b border-line px-3 py-2">
@@ -323,14 +325,14 @@ onUnmounted(() => {
         v-for="tab in KIND_TABS"
         :key="tab.value"
         class="launcher-btn ghost shrink-0"
-        :class="kind === tab.value ? 'bg-active text-accent' : ''"
+        :class="kind === tab.value ? 'bg-active text-accentink' : ''"
         @click="kind = tab.value"
       >
         {{ tab.label }}
       </button>
     </div>
 
-    <p v-if="!inHost" class="border-b border-line px-3 py-2 text-[11.5px] text-accent">
+    <p v-if="!inHost" class="border-b border-line px-3 py-2 text-[11.5px] text-accentink">
       这个插件要在启动台里运行：剪贴板的读取与写回由 Windows 上的逻辑层命令完成，浏览器里只能看界面。
     </p>
     <p v-else-if="error" class="border-b border-line px-3 py-2 text-[11.5px] text-danger">{{ error }}</p>
@@ -353,10 +355,10 @@ onUnmounted(() => {
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
                 <span class="truncate text-[12.5px]">{{ entry.title }}</span>
-                <span v-if="entry.pinned" class="launcher-chip shrink-0 text-accent">固定</span>
+                <span v-if="entry.pinned" class="launcher-chip shrink-0 text-accentink">固定</span>
                 <span v-if="entry.uses > 1" class="launcher-chip shrink-0">用过 {{ entry.uses }} 次</span>
               </div>
-              <div class="truncate text-[10.5px] text-faint">
+              <div class="truncate text-[11px] text-muted">
                 <span class="text-muted">{{ detailOf(entry) || entry.subtitle }}</span>
                 <span class="ml-1.5">{{ formatDateTime(entry.createdAt) }}</span>
               </div>
@@ -375,7 +377,7 @@ onUnmounted(() => {
             </button>
             <button
               class="launcher-btn ghost shrink-0 opacity-0 group-hover:opacity-100"
-              :class="entry.pinned ? 'text-accent' : ''"
+              :class="entry.pinned ? 'text-accentink' : ''"
               :title="entry.pinned ? '取消固定' : '固定'"
               @click.stop="togglePin(entry)"
             >
@@ -388,7 +390,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="!entries.length" class="flex flex-col items-center gap-2 px-6 py-10 text-center text-faint">
+      <div v-if="!entries.length" class="flex flex-col items-center gap-2 px-6 py-10 text-center text-muted">
         <UiIcon name="clipboard" :size="24" />
         <p class="text-[12.5px]">
           {{
@@ -404,14 +406,13 @@ onUnmounted(() => {
         <p v-if="loaded && inHost && !query" class="text-[11px]">记录由启动台在后台完成，不需要你手动保存</p>
       </div>
     </div>
-
-    <footer class="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <PageFooter>
       <span><span class="launcher-kbd">Enter</span> 贴回</span>
       <span><span class="launcher-kbd">↑↓</span> 选择</span>
       <span><span class="launcher-kbd">{{ modLabel }}P</span> 固定</span>
       <span><span class="launcher-kbd">Del</span> 删除</span>
       <span class="ml-auto">双击一行也能贴回</span>
-    </footer>
+    </PageFooter>
 
     <UiDialog
       v-if="preview"
@@ -426,7 +427,7 @@ onUnmounted(() => {
           :alt="preview.entry.title"
           class="max-h-[52vh] max-w-full rounded-lg border border-line object-contain"
         />
-        <p class="text-[11px] text-faint">历史里存的是缩略图（长边 1024），原图不落盘</p>
+        <p class="text-[11px] text-muted">历史里存的是缩略图（长边 1024），原图不落盘</p>
       </div>
       <template #footer>
         <button class="launcher-btn primary" @click="paste(preview?.entry)">

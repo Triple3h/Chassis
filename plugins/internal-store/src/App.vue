@@ -10,6 +10,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import ChangelogNotes from '@launcher/ui/ChangelogNotes.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { exec, host, hostUi, settings } from '@launcher/api'
@@ -369,31 +370,31 @@ onMounted(async () => {
 <template>
   <AppShell>
     <div class="flex h-full flex-col">
-      <header class="flex items-center justify-between border-b border-line px-4 py-2.5">
-        <div class="flex items-center gap-2">
-          <UiIcon name="refresh" :size="15" class="text-muted" />
-          <h1 class="text-[13.5px] font-medium">更新</h1>
-          <span v-if="updateCount" class="launcher-chip text-accent">{{ updateCount }} 项可更新</span>
-        </div>
-        <div class="text-[11.5px] text-faint">
-          <span v-if="shellInfo">应用 v{{ shellInfo.version }}</span>
-          <span v-if="shellInfo && kernelVersion" class="mx-1">·</span>
-          <span v-if="kernelVersion">内核 v{{ kernelVersion }}</span>
-          <span v-if="shellInfo || kernelVersion" class="mx-1">·</span>
-          {{ stage === 'checking' ? '检查中…' : checkedAt ? `检查于 ${formatTime(checkedAt)}` : '' }}
-        </div>
-      </header>
+    <PageHeader>
+      <div class="flex items-center gap-2">
+        <UiIcon name="refresh" :size="15" class="text-muted" />
+        <h1 class="text-[13px] font-semibold">更新</h1>
+        <span v-if="updateCount" class="launcher-chip text-accentink">{{ updateCount }} 项可更新</span>
+      </div>
+      <div class="ml-auto text-[11.5px] text-muted">
+        <span v-if="shellInfo">应用 v{{ shellInfo.version }}</span>
+        <span v-if="shellInfo && kernelVersion" class="mx-1">·</span>
+        <span v-if="kernelVersion">内核 v{{ kernelVersion }}</span>
+        <span v-if="shellInfo || kernelVersion" class="mx-1">·</span>
+        {{ stage === 'checking' ? '检查中…' : checkedAt ? `检查于 ${formatTime(checkedAt)}` : '' }}
+      </div>
+    </PageHeader>
 
       <div class="flex-1 overflow-y-auto px-4 py-3">
-        <p v-if="!inHost" class="text-[12px] text-muted">请在启动台中打开此页。</p>
+        <p v-if="!inHost" class="text-[12.5px] text-muted">请在启动台中打开此页。</p>
 
         <template v-else>
-          <p v-if="stage === 'checking'" class="text-[12px] text-muted">正在检查更新…</p>
+          <p v-if="stage === 'checking'" class="text-[12.5px] text-muted">正在检查更新…</p>
 
           <div v-else-if="stage === 'error'" class="space-y-2">
-            <p class="text-[12px] text-danger">{{ error || '无法检查更新' }}</p>
+            <p class="text-[12.5px] text-danger">{{ error || '无法检查更新' }}</p>
             <button
-              class="rounded-md border border-line px-2.5 py-1 text-[12px] hover:bg-hover"
+              class="rounded-md border border-line px-2.5 py-1 text-[12.5px] hover:bg-hover"
               @click="check"
             >
               重试
@@ -412,35 +413,35 @@ onMounted(async () => {
                   <div class="flex items-center gap-1.5">
                     <UiIcon name="refresh" :size="14" class="text-muted" />
                     <span class="text-[13px]">应用</span>
-                    <span v-if="appUpdate" class="launcher-chip text-accent">有新版本</span>
+                    <span v-if="appUpdate" class="launcher-chip text-accentink">有新版本</span>
                   </div>
                   <div class="mt-0.5 text-[11.5px] text-muted">
                     <span>v{{ shellInfo.version }}</span>
                     <template v-if="appUpdate">
                       <span class="mx-1">→</span>
-                      <span class="font-medium text-accent">v{{ appUpdate.latest }}</span>
+                      <span class="font-medium text-accentink">v{{ appUpdate.latest }}</span>
                     </template>
                   </div>
                   <ChangelogNotes v-if="appUpdate?.notes" :notes="appUpdate.notes" />
-                  <p v-if="!shellInfo.canSelfUpdate" class="mt-1 text-[11px] text-faint">
+                  <p v-if="!shellInfo.canSelfUpdate" class="mt-1 text-[11px] text-muted">
                     开发态或安装位置不可写：自更新只在打包安装的应用里生效
                   </p>
                   <p v-else-if="appUpdate && !appUpdate.hotOk" class="mt-1 text-[11.5px] text-danger">
                     当前壳的自更新机制版本过低（需要 {{ appUpdate.minShellHotVersion ?? '—' }}），请手动换包
                   </p>
-                  <p v-else-if="appUpdate" class="mt-1 text-[11px] text-faint">
+                  <p v-else-if="appUpdate" class="mt-1 text-[11px] text-muted">
                     更新会重启整个应用（含内核）；由你决定何时更新（托盘菜单与「关于」页也会提示）。
                   </p>
-                  <p v-else-if="appChecked === null" class="mt-1 text-[11px] text-faint">检查中…</p>
-                  <p v-else-if="!appChecked" class="mt-1 text-[11px] text-faint">
+                  <p v-else-if="appChecked === null" class="mt-1 text-[11px] text-muted">检查中…</p>
+                  <p v-else-if="!appChecked" class="mt-1 text-[11px] text-muted">
                     没查到最新版本（网络不通？可点「检查更新」重试）
                   </p>
-                  <p v-else class="mt-1 text-[11px] text-faint">已是最新（发现新版本会在托盘与「关于」页提示）。</p>
+                  <p v-else class="mt-1 text-[11px] text-muted">已是最新（发现新版本会在托盘与「关于」页提示）。</p>
                 </div>
                 <button
                   v-if="appUpdate"
-                  class="shrink-0 rounded-md border px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
-                  :class="appUpdate.hotOk ? 'border-accent text-accent' : 'border-line'"
+                  class="shrink-0 rounded-md border px-2.5 py-1 text-[12.5px] hover:bg-hover disabled:opacity-45"
+                  :class="appUpdate.hotOk ? 'border-accent text-accentink' : 'border-line'"
                   :disabled="!appUpdate.hotOk || !shellInfo.canSelfUpdate || !!busy"
                   @click="updateApp"
                 >
@@ -459,32 +460,32 @@ onMounted(async () => {
                   <div class="flex items-center gap-1.5">
                     <UiIcon name="cpu" :size="14" class="text-muted" />
                     <span class="text-[13px]">内核</span>
-                    <span v-if="kernelUpdate" class="launcher-chip text-accent">有新版本</span>
+                    <span v-if="kernelUpdate" class="launcher-chip text-accentink">有新版本</span>
                   </div>
                   <div class="mt-0.5 text-[11.5px] text-muted">
                     <span>v{{ kernelVersion }}</span>
                     <template v-if="kernelUpdate">
                       <span class="mx-1">→</span>
-                      <span class="font-medium text-accent">v{{ kernelUpdate.latest }}</span>
+                      <span class="font-medium text-accentink">v{{ kernelUpdate.latest }}</span>
                     </template>
                   </div>
                   <ChangelogNotes v-if="kernelUpdate?.notes" :notes="kernelUpdate.notes" />
                   <p v-if="kernelUpdate && !kernelUpdate.hotOk" class="mt-1 text-[11.5px] text-danger">
                     当前热更新机制版本过低（需要 {{ kernelUpdate.minHotVersion ?? '—' }}），请先升级应用
                   </p>
-                  <p v-else-if="kernelUpdate" class="mt-1 text-[11px] text-faint">
+                  <p v-else-if="kernelUpdate" class="mt-1 text-[11px] text-muted">
                     替换内核与 UI 并优雅重启内核（不重启 App）；连续两次启动失败会自动回滚。
                   </p>
-                  <p v-else-if="kernelChecked === null" class="mt-1 text-[11px] text-faint">检查中…</p>
-                  <p v-else-if="!kernelChecked" class="mt-1 text-[11px] text-faint">
+                  <p v-else-if="kernelChecked === null" class="mt-1 text-[11px] text-muted">检查中…</p>
+                  <p v-else-if="!kernelChecked" class="mt-1 text-[11px] text-muted">
                     没查到最新版本（网络不通？可点「检查更新」重试）
                   </p>
-                  <p v-else class="mt-1 text-[11px] text-faint">已是最新。</p>
+                  <p v-else class="mt-1 text-[11px] text-muted">已是最新。</p>
                 </div>
                 <button
                   v-if="kernelUpdate"
-                  class="shrink-0 rounded-md border px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
-                  :class="kernelUpdate.hotOk ? 'border-accent text-accent' : 'border-line'"
+                  class="shrink-0 rounded-md border px-2.5 py-1 text-[12.5px] hover:bg-hover disabled:opacity-45"
+                  :class="kernelUpdate.hotOk ? 'border-accent text-accentink' : 'border-line'"
                   :disabled="!kernelUpdate.hotOk || !!busy"
                   @click="updateKernel"
                 >
@@ -493,7 +494,7 @@ onMounted(async () => {
               </div>
             </section>
 
-            <div v-if="pluginRows.length" class="mb-1.5 text-[11.5px] text-faint">
+            <div v-if="pluginRows.length" class="mb-1.5 text-[11.5px] text-muted">
               插件 · 共 {{ pluginRows.length }} 个
             </div>
             <ul v-if="pluginRows.length" class="space-y-2">
@@ -507,13 +508,13 @@ onMounted(async () => {
                   <div class="min-w-0">
                     <div class="flex items-center gap-1.5">
                       <span class="truncate text-[13px]">{{ item.title }}</span>
-                      <span v-if="item.hasUpdate" class="launcher-chip shrink-0 text-accent">有新版本</span>
+                      <span v-if="item.hasUpdate" class="launcher-chip shrink-0 text-accentink">有新版本</span>
                     </div>
                     <div class="mt-0.5 text-[11.5px] text-muted">
                       <span>v{{ item.current }}</span>
                       <template v-if="item.hasUpdate">
                         <span class="mx-1">→</span>
-                        <span class="font-medium text-accent">v{{ item.latest }}</span>
+                        <span class="font-medium text-accentink">v{{ item.latest }}</span>
                       </template>
                     </div>
                     <ChangelogNotes v-if="item.hasUpdate && item.notes" :notes="item.notes" />
@@ -524,8 +525,8 @@ onMounted(async () => {
                   <div class="flex shrink-0 items-center gap-1.5">
                     <button
                       v-if="item.hasUpdate"
-                      class="rounded-md border px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-45"
-                      :class="item.minKernelOk ? 'border-accent text-accent' : 'border-line'"
+                      class="rounded-md border px-2.5 py-1 text-[12.5px] hover:bg-hover disabled:opacity-45"
+                      :class="item.minKernelOk ? 'border-accent text-accentink' : 'border-line'"
                       :disabled="!item.minKernelOk || !!busy"
                       @click="updateOne(item)"
                     >
@@ -533,7 +534,7 @@ onMounted(async () => {
                     </button>
                     <button
                       v-if="item.overridden"
-                      class="rounded-md border border-line px-2.5 py-1 text-[12px] text-muted hover:bg-hover disabled:opacity-45"
+                      class="rounded-md border border-line px-2.5 py-1 text-[12.5px] text-muted hover:bg-hover disabled:opacity-45"
                       :disabled="!!busy"
                       @click="revert(item)"
                     >
@@ -543,18 +544,17 @@ onMounted(async () => {
                 </div>
               </li>
             </ul>
-            <p v-else class="text-[12px] text-muted">没有可展示的出厂插件。</p>
+            <p v-else class="text-[12.5px] text-muted">没有可展示的出厂插件。</p>
           </template>
         </template>
       </div>
-
-      <footer
-        v-if="error || notice"
-        class="border-t border-line px-4 py-2 text-[11.5px]"
-        :class="error ? 'text-danger' : 'text-muted'"
-      >
-        {{ error || notice }}
-      </footer>
+    <footer
+      v-if="error || notice"
+      class="border-t border-line px-3 py-1.5 text-[11.5px]"
+      :class="error ? 'text-danger' : 'text-muted'"
+    >
+      {{ error || notice }}
+    </footer>
     </div>
   </AppShell>
 </template>

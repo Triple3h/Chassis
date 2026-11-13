@@ -82,7 +82,7 @@ function submit() {
   <UiDialog :title="title" subtitle="改完点保存，才会真正写进系统文件" @close="emit('close')">
     <div class="flex flex-col gap-3.5">
       <label class="flex flex-col gap-1.5">
-        <span class="text-[12px] text-muted">IP 地址</span>
+        <span class="text-[12.5px] text-muted">IP 地址</span>
         <input
           v-model="ip"
           class="launcher-input launcher-mono"
@@ -94,7 +94,7 @@ function submit() {
       </label>
 
       <label class="flex flex-col gap-1.5">
-        <span class="text-[12px] text-muted">域名（多个用空格或逗号分隔）</span>
+        <span class="text-[12.5px] text-muted">域名（多个用空格或逗号分隔）</span>
         <input
           v-model="namesText"
           class="launcher-input launcher-mono"
@@ -105,12 +105,12 @@ function submit() {
       </label>
 
       <label class="flex flex-col gap-1.5">
-        <span class="text-[12px] text-muted">备注（可选）</span>
+        <span class="text-[12.5px] text-muted">备注（可选）</span>
         <input v-model="comment" class="launcher-input" placeholder="写给自己看的说明" @keydown.enter="submit" />
       </label>
 
       <div class="flex flex-col gap-1.5">
-        <span class="text-[12px] text-muted">所属块</span>
+        <span class="text-[12.5px] text-muted">所属块</span>
         <UiSelect v-model="target" :options="options" />
         <input
           v-if="target === NEW_BLOCK"

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import EmptyState from '@launcher/ui/EmptyState.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useToast } from '@launcher/ui/toast'
 import { isTypingTarget, matchKey, modLabel } from '@launcher/ui/keys'
@@ -310,8 +313,8 @@ const tick = computed(() => now.value)
 
 <template>
   <AppShell>
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2">
-      <UiIcon name="clipboard" :size="16" class="text-accent" />
+    <PageHeader>
+      <UiIcon name="clipboard" :size="16" class="text-accentink" />
       <span class="text-[13px] font-semibold">备忘快贴</span>
       <span class="launcher-chip">{{ items.length }} 条 · 用过 {{ totalUses }} 次</span>
       <div class="ml-auto flex items-center gap-1.5">
@@ -324,20 +327,20 @@ const tick = computed(() => now.value)
           新建
         </button>
       </div>
-    </header>
+    </PageHeader>
 
-    <div class="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-1.5">
+    <div class="launcher-tabbar">
       <button
         v-for="tab in kindTabs"
         :key="tab.value"
-        class="launcher-btn ghost"
-        :class="kind === tab.value ? 'bg-active text-accent' : ''"
+        class="launcher-tab"
+        :class="{ 'is-active': kind === tab.value }"
         @click="kind = tab.value"
       >
         {{ tab.label }}
       </button>
-      <span class="text-[11.5px] text-faint">{{ filtered.length }} 条匹配</span>
-      <button v-if="searchSeed" class="launcher-btn ghost ml-auto text-accent" @click="openCreate(searchSeed)">
+      <span class="text-[11.5px] text-muted">{{ filtered.length }} 条匹配</span>
+      <button v-if="searchSeed" class="launcher-btn ghost ml-auto text-accentink" @click="openCreate(searchSeed)">
         <UiIcon name="save" :size="13" />
         存搜索框内容
       </button>
@@ -361,37 +364,34 @@ const tick = computed(() => now.value)
                 :name="KIND_ICON[row.item.kind]"
                 :size="14"
                 class="shrink-0"
-                :class="row.item.pinned ? 'text-accent' : 'text-faint'"
+                :class="row.item.pinned ? 'text-accentink' : 'text-muted'"
               />
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1">
                   <span class="truncate text-[12.5px] font-medium">{{ row.item.title }}</span>
-                  <UiIcon v-if="row.item.pinned" name="pin" :size="11" class="shrink-0 text-accent" />
+                  <UiIcon v-if="row.item.pinned" name="pin" :size="11" class="shrink-0 text-accentink" />
                 </div>
-                <div class="truncate text-[11px] text-faint">
+                <div class="truncate text-[11px] text-muted">
                   {{ row.item.kind === 'image' ? '图片快贴' : summarize(row.item.content, 42) }}
                 </div>
               </div>
-              <span class="shrink-0 text-[10.5px] text-faint">{{ relativeTime(row.item.updatedAt, tick) }}</span>
+              <span class="shrink-0 text-[11px] text-muted">{{ relativeTime(row.item.updatedAt, tick) }}</span>
             </button>
           </div>
         </div>
-        <div v-if="!filtered.length" class="flex flex-col items-center gap-2 px-4 py-10 text-center text-faint">
-          <UiIcon name="clipboard" :size="22" />
-          <p class="text-[12px]">
-            {{ !loaded ? '正在读取…' : items.length ? '没有匹配的快贴' : '还没有快贴，按 ⌘N 存一条' }}
-          </p>
-        </div>
+        <!-- 空态只在「有快贴但被筛掉」时出现在列表里；
+             一条都没有的情况由右栏统一说明 + 给动作，避免两边各喊一次 -->
+        <EmptyState v-if="items.length && !filtered.length" title="没有匹配的快贴" hint="换个关键词，或切回「全部」" />
       </div>
 
       <!-- 详情 -->
       <section class="flex min-w-0 flex-1 flex-col">
         <template v-if="selected">
           <div class="flex items-center gap-2 border-b border-line px-3 py-2">
-            <UiIcon :name="KIND_ICON[selected.kind]" :size="15" class="text-accent" />
+            <UiIcon :name="KIND_ICON[selected.kind]" :size="15" class="text-accentink" />
             <div class="min-w-0 flex-1">
               <div class="truncate text-[13px] font-semibold">{{ selected.title }}</div>
-              <div class="text-[11px] text-faint">
+              <div class="text-[11px] text-muted">
                 {{ KIND_LABEL[selected.kind] }}
                 <template v-if="selected.lang"> · {{ selected.lang }}</template>
                 · 更新于 {{ relativeTime(selected.updatedAt, tick) }} · 用过 {{ selected.uses }} 次
@@ -405,7 +405,7 @@ const tick = computed(() => now.value)
               <UiIcon name="copy" :size="13" />
             </button>
             <button class="launcher-btn ghost" :title="selected.pinned ? '取消置顶' : '置顶'" @click="togglePin(selected)">
-              <UiIcon name="pin" :size="13" :class="selected.pinned ? 'text-accent' : ''" />
+              <UiIcon name="pin" :size="13" :class="selected.pinned ? 'text-accentink' : ''" />
             </button>
             <button class="launcher-btn ghost" title="编辑" @click="editing = { snip: selected, preset: null }">
               <UiIcon name="pencil" :size="13" />
@@ -425,23 +425,28 @@ const tick = computed(() => now.value)
             <pre v-else class="whitespace-pre-wrap break-words text-[13px] leading-6 text-fg">{{ selected.content }}</pre>
           </div>
         </template>
-        <div v-else class="flex flex-1 flex-col items-center justify-center gap-2 text-faint">
-          <UiIcon name="clipboard" :size="28" />
-          <p class="text-[12.5px]">{{ loaded ? `还没有快贴，按 ${modLabel}+N 新建一条` : '正在读取…' }}</p>
-          <button v-if="loaded" class="launcher-btn primary" @click="openCreate()">
-            <UiIcon name="plus" :size="13" />
-            新建快贴
-          </button>
+        <div v-else class="flex flex-1 items-center justify-center">
+          <EmptyState
+            icon="clipboard"
+            :title="loaded ? '还没有快贴' : '正在读取…'"
+            :hint="loaded ? `按 ${modLabel}+N 新建一条；在搜索框里敲的内容可以一键存下来` : ''"
+          >
+            <template #actions>
+              <button v-if="loaded" class="launcher-btn primary" @click="openCreate()">
+                <UiIcon name="plus" :size="13" />
+                新建快贴
+              </button>
+            </template>
+          </EmptyState>
         </div>
       </section>
     </div>
-
-    <footer class="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <PageFooter>
       <span><span class="launcher-kbd">Enter</span> 复制并粘贴</span>
       <span><span class="launcher-kbd">{{ modLabel }}N</span> 新建</span>
       <span><span class="launcher-kbd">{{ modLabel }}E</span> 编辑</span>
       <span class="ml-auto">↑↓ 选择 · 双击条目直接粘贴</span>
-    </footer>
+    </PageFooter>
 
     <SnipDialog v-if="editing" :snip="editing.snip" :preset="editing.preset" @close="editing = null" @save="onSave" />
   </AppShell>

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import EmptyState from '@launcher/ui/EmptyState.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useToast } from '@launcher/ui/toast'
 import { isTypingTarget, matchKey, modLabel } from '@launcher/ui/keys'
@@ -433,8 +436,8 @@ function useSeed(): void {
 
 <template>
   <AppShell>
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2">
-      <UiIcon name="file" :size="16" class="text-accent" />
+    <PageHeader>
+      <UiIcon name="file" :size="16" class="text-accentink" />
       <span class="text-[13px] font-semibold">Markdown 笔记</span>
       <span class="launcher-chip">{{ notes.length }} 篇</span>
       <div class="ml-auto flex items-center gap-1.5">
@@ -447,12 +450,12 @@ function useSeed(): void {
           新建
         </button>
       </div>
-    </header>
+    </PageHeader>
 
     <div v-if="seedHint" class="flex items-center gap-2 border-b border-line bg-panel2 px-3 py-1.5 text-[11.5px] text-muted">
-      <UiIcon name="wand" :size="13" class="text-accent" />
+      <UiIcon name="wand" :size="13" class="text-accentink" />
       <span class="truncate">把搜索框里的内容「{{ seedHint }}」存成新笔记？</span>
-      <button class="launcher-btn ghost ml-auto text-accent" @click="useSeed">存成笔记</button>
+      <button class="launcher-btn ghost ml-auto text-accentink" @click="useSeed">存成笔记</button>
     </div>
 
     <div class="flex min-h-0 flex-1">
@@ -469,18 +472,18 @@ function useSeed(): void {
               @click="selectNote(row.note.id)"
             >
               <div class="flex items-center gap-1">
-                <UiIcon v-if="row.note.pinned" name="pin" :size="11" class="shrink-0 text-accent" />
-                <span class="truncate text-[12.5px] font-medium" :class="currentId === row.note.id ? 'text-accent' : ''">
+                <UiIcon v-if="row.note.pinned" name="pin" :size="11" class="shrink-0 text-accentink" />
+                <span class="truncate text-[12.5px] font-medium" :class="currentId === row.note.id ? 'text-accentink' : ''">
                   {{ row.note.title }}
                 </span>
               </div>
-              <span class="truncate text-[10.5px] text-faint">
+              <span class="truncate text-[11px] text-muted">
                 {{ relativeTime(row.note.updatedAt, now) }} · {{ noteSummary(row.note.content, 46) || '空白笔记' }}
               </span>
             </button>
           </div>
         </div>
-        <div v-if="!filtered.length" class="px-3 py-6 text-[11.5px] text-faint">
+        <div v-if="!filtered.length" class="px-3 py-6 text-[11.5px] text-muted">
           {{ loaded ? '没有匹配的笔记' : '正在读取…' }}
         </div>
       </aside>
@@ -498,7 +501,7 @@ function useSeed(): void {
           <div class="flex shrink-0 items-center gap-1">
             <button
               v-if="mode !== 'edit'"
-              class="launcher-btn ghost px-1.5 text-[11px] text-muted"
+              class="launcher-btn ghost px-1.5 text-[12.5px] font-medium text-muted"
               :title="`预览字号 ${fontSize}px（当前）`"
               @click="stepFont(-1)"
             >
@@ -506,7 +509,7 @@ function useSeed(): void {
             </button>
             <button
               v-if="mode !== 'edit'"
-              class="launcher-btn ghost px-1.5 text-[11px] text-muted"
+              class="launcher-btn ghost px-1.5 text-[12.5px] font-medium text-muted"
               :title="`预览字号 ${fontSize}px（当前）`"
               @click="stepFont(1)"
             >
@@ -516,14 +519,14 @@ function useSeed(): void {
               v-for="tab in MODE_TABS"
               :key="tab.value"
               class="launcher-btn ghost"
-              :class="mode === tab.value ? 'bg-active text-accent' : ''"
+              :class="mode === tab.value ? 'bg-active text-accentink' : ''"
               :title="`${tab.label}（${modLabel}+${tab.value === 'edit' ? 1 : tab.value === 'split' ? 2 : 3}）`"
               @click="toggleMode(tab.value)"
             >
               <UiIcon :name="tab.icon" :size="13" />
             </button>
             <button class="launcher-btn ghost" title="置顶" @click="current && togglePin(current)">
-              <UiIcon name="pin" :size="13" :class="current?.pinned ? 'text-accent' : ''" />
+              <UiIcon name="pin" :size="13" :class="current?.pinned ? 'text-accentink' : ''" />
             </button>
             <button class="launcher-btn ghost text-danger" title="删除这篇笔记" @click="current && removeNote(current)">
               <UiIcon name="trash" :size="13" />
@@ -541,9 +544,17 @@ function useSeed(): void {
             placeholder="支持 Markdown：标题 #、**粗体**、`代码`、列表、表格、任务清单…"
             spellcheck="false"
           />
-          <!-- 渲染器已把源码整体转义，这里输出的是自己拼的标签 -->
+          <!-- 空文档在分栏/预览下原来是一片死白，看起来像渲染坏了 -->
           <div
-            v-if="mode !== 'edit'"
+            v-if="mode !== 'edit' && !content.trim()"
+            class="launcher-scroll min-h-0 flex-1 px-4 py-3"
+            :class="mode === 'split' ? 'w-1/2' : 'w-full'"
+          >
+            <EmptyState title="这里显示渲染结果" hint="在左边开始写" />
+          </div>
+          <!-- 渲染器已把源码整体转义，这里输出的是自己拼的标签；保持同一元素才能让 .md-body > :first-child 生效 -->
+          <div
+            v-else-if="mode !== 'edit'"
             class="launcher-scroll md-body min-h-0 flex-1 px-4 py-3"
             :class="mode === 'split' ? 'w-1/2' : 'w-full'"
             :style="{ '--md-font-size': `${fontSize}px` }"
@@ -552,19 +563,19 @@ function useSeed(): void {
           />
         </div>
 
-        <div class="flex items-center gap-3 border-t border-line px-3 py-1 text-[11px] text-faint">
+        <div class="flex items-center gap-3 border-t border-line px-3 py-1 text-[11px] text-muted">
           <span>{{ stats.words }} 字 / {{ stats.lines }} 行</span>
           <span>{{ saving ? '保存中…' : savedAt ? `已保存 ${relativeTime(savedAt, now)}` : '尚未改动' }}</span>
           <span class="ml-auto">{{ modLabel }}B 粗体 · {{ modLabel }}I 斜体 · {{ modLabel }}K 链接 · Tab 缩进</span>
         </div>
       </section>
     </div>
-
-    <footer class="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <PageFooter>
       <span><span class="launcher-kbd">{{ modLabel }}S</span> 保存</span>
       <span><span class="launcher-kbd">{{ modLabel }}1/2/3</span> 编辑 / 分栏 / 预览</span>
       <span><span class="launcher-kbd">{{ modLabel }}N</span> 新建</span>
       <span class="ml-auto">自动保存（停笔 0.5 秒）</span>
-    </footer>
+    </PageFooter>
+
   </AppShell>
 </template>

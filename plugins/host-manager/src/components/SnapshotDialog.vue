@@ -64,7 +64,7 @@ function when(ts: number): string {
           :key="snap.id"
           class="group flex items-center gap-2.5 rounded-lg border border-line bg-panel2 px-2.5 py-2"
         >
-          <span :class="snap.kind === 'auto' ? 'text-faint' : 'text-accent'">
+          <span :class="snap.kind === 'auto' ? 'text-muted' : 'text-accentink'">
             <UiIcon :name="snap.kind === 'auto' ? 'history' : 'save'" :size="13" />
           </span>
           <div class="min-w-0 flex-1">

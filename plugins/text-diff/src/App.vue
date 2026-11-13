@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useToast } from '@launcher/ui/toast'
 import { copyText, downloadBlob, fileFromDataTransfer, pickFile, readClipboardText, textFromDataTransfer } from '@launcher/ui/clipboard'
@@ -277,61 +279,28 @@ watch([ignoreCase, ignoreWhitespace, collapse], () => void syncFooter())
 
 <template>
   <AppShell>
-    <header class="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
-      <UiIcon name="branch" :size="16" class="text-accent" />
+    <PageHeader>
+      <UiIcon name="branch" :size="16" class="text-accentink" />
       <span class="text-[13px] font-semibold">文本比对</span>
       <span v-if="busy" class="launcher-chip">计算中…</span>
       <span v-else-if="result" class="launcher-chip">{{ result.ms }}ms</span>
 
-      <div class="ml-2 flex items-center gap-0.5 rounded-lg border border-line bg-panel2 p-0.5">
-        <button
-          class="rounded-md px-2.5 py-[3px] text-[12px]"
-          :class="view === 'diff' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-          @click="view = 'diff'"
-        >
-          比对结果
-        </button>
-        <button
-          class="rounded-md px-2.5 py-[3px] text-[12px]"
-          :class="view === 'edit' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-          @click="view = 'edit'"
-        >
-          编辑两侧
-        </button>
-      </div>
-
-      <div v-if="view === 'diff'" class="flex items-center gap-0.5 rounded-lg border border-line bg-panel2 p-0.5">
-        <button
-          class="rounded-md px-2.5 py-[3px] text-[12px]"
-          :class="mode === 'split' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-          @click="mode = 'split'"
-        >
-          并排
-        </button>
-        <button
-          class="rounded-md px-2.5 py-[3px] text-[12px]"
-          :class="mode === 'unified' ? 'bg-active text-fg' : 'text-muted hover:bg-hover'"
-          @click="mode = 'unified'"
-        >
-          统一
-        </button>
-      </div>
-
-      <div class="ml-auto flex items-center gap-1.5">
-        <button class="launcher-btn ghost" :class="{ primary: ignoreCase }" title="忽略大小写" @click="ignoreCase = !ignoreCase">
-          Aa
+      <div class="ml-auto flex items-center gap-1">
+        <button class="launcher-btn ghost" :class="{ 'bg-active text-fg': ignoreCase }" title="忽略大小写" @click="ignoreCase = !ignoreCase">
+          <span class="text-[12.5px] font-medium">Aa</span>
         </button>
         <button
           class="launcher-btn ghost"
-          :class="{ primary: ignoreWhitespace }"
+          :class="{ 'bg-active text-fg': ignoreWhitespace }"
           title="忽略空白差异"
           @click="ignoreWhitespace = !ignoreWhitespace"
         >
           <UiIcon name="wrap" :size="13" />
         </button>
-        <button class="launcher-btn ghost" :class="{ primary: collapse }" title="折叠相同行" @click="collapse = !collapse">
+        <button class="launcher-btn ghost" :class="{ 'bg-active text-fg': collapse }" title="折叠相同行" @click="collapse = !collapse">
           <UiIcon name="minus" :size="13" />
         </button>
+        <span class="launcher-vsep" />
         <button class="launcher-btn ghost" title="交换两侧" @click="swap"><UiIcon name="refresh" :size="13" /></button>
         <button class="launcher-btn ghost" title="复制 unified diff" @click="copyUnified">
           <UiIcon name="copy" :size="13" />
@@ -342,7 +311,18 @@ watch([ignoreCase, ignoreWhitespace, collapse], () => void syncFooter())
         <button class="launcher-btn ghost" title="载入示例" @click="loadSample"><UiIcon name="wand" :size="13" /></button>
         <button class="launcher-btn ghost" title="清空" @click="clearAll"><UiIcon name="trash" :size="13" /></button>
       </div>
-    </header>
+    </PageHeader>
+
+    <!-- 视图切换单独一行：顶栏里塞 13 个控件，谁都读不出来 -->
+    <div class="launcher-tabbar">
+      <button class="launcher-tab" :class="{ 'is-active': view === 'diff' }" @click="view = 'diff'">比对结果</button>
+      <button class="launcher-tab" :class="{ 'is-active': view === 'edit' }" @click="view = 'edit'">编辑两侧</button>
+      <template v-if="view === 'diff'">
+        <span class="launcher-vsep" />
+        <button class="launcher-tab" :class="{ 'is-active': mode === 'split' }" @click="mode = 'split'">并排</button>
+        <button class="launcher-tab" :class="{ 'is-active': mode === 'unified' }" @click="mode = 'unified'">统一</button>
+      </template>
+    </div>
 
     <div v-if="seedNotice" class="flex items-center gap-2 border-b border-line px-3 py-1.5 text-[11.5px] text-muted">
       <UiIcon name="info" :size="13" />{{ seedNotice }}
@@ -360,7 +340,7 @@ watch([ignoreCase, ignoreWhitespace, collapse], () => void syncFooter())
       >
         <div class="flex items-center gap-2 border-b border-line px-3 py-1.5 text-[11.5px] text-muted">
           <span>{{ side === 'a' ? '原始文本' : '修改后文本' }}</span>
-          <span class="text-faint">
+          <span class="text-muted">
             {{ (side === 'a' ? textA : textB).length.toLocaleString() }} 字符 ·
             {{ (side === 'a' ? textA : textB).split('\n').length }} 行
           </span>
@@ -406,7 +386,7 @@ watch([ignoreCase, ignoreWhitespace, collapse], () => void syncFooter())
           <p class="text-[13px] text-muted">
             {{ hasBoth ? '没有差异' : '还没有内容可以比对' }}
           </p>
-          <p class="text-[11.5px] text-faint">
+          <p class="text-[11.5px] text-muted">
             在「编辑两侧」里粘贴文本；一段文本里含 <code class="font-mono">---</code> 单独成行时会自动拆成两侧
           </p>
           <button class="launcher-btn mx-auto" @click="view = 'edit'">
@@ -415,8 +395,7 @@ watch([ignoreCase, ignoreWhitespace, collapse], () => void syncFooter())
         </div>
       </div>
     </div>
-
-    <footer class="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <PageFooter>
       <template v-if="stats">
         <span class="text-success">+{{ stats.added }}</span>
         <span class="text-danger">-{{ stats.removed }}</span>
@@ -430,6 +409,7 @@ watch([ignoreCase, ignoreWhitespace, collapse], () => void syncFooter())
         <span><span class="launcher-kbd">{{ modLabel }}</span> <span class="launcher-kbd">E</span> 视图</span>
         <span>Myers 差分 · Worker 内计算</span>
       </span>
-    </footer>
+    </PageFooter>
+
   </AppShell>
 </template>

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import AppShell from '@launcher/ui/AppShell.vue'
+import PageFooter from '@launcher/ui/PageFooter.vue'
+import PageHeader from '@launcher/ui/PageHeader.vue'
 import UiIcon from '@launcher/ui/UiIcon.vue'
 import { useToast } from '@launcher/ui/toast'
 import { copyText, downloadBlob, fileFromDataTransfer, pickFile } from '@launcher/ui/clipboard'
@@ -663,8 +665,8 @@ onUnmounted(() => {
 <template>
   <AppShell>
     <!-- 顶栏：右侧只剩「文件」（打开 / 导出都在它的下拉里） -->
-    <header class="flex items-center gap-2 border-b border-line px-3 py-2">
-      <UiIcon name="braces" :size="16" class="text-accent" />
+    <PageHeader>
+      <UiIcon name="braces" :size="16" class="text-accentink" />
       <span class="text-[13px] font-semibold">JSON 工具箱</span>
       <span v-if="cur.busy" class="launcher-chip">计算中…</span>
       <span v-if="repaired" class="launcher-chip" title="严格 JSON 解析失败，已用宽松模式修好">宽松修复</span>
@@ -672,7 +674,7 @@ onUnmounted(() => {
       <div class="ml-auto flex items-center gap-1.5">
         <ToolMenu label="文件" icon="folder" :items="fileItems" @pick="onFileAction" />
       </div>
-    </header>
+    </PageHeader>
 
     <!-- 标签栏：每页一份独立文档，可并行开多份（标签多了只滚动标签，新建按钮钉在右端） -->
     <div class="jtabbar">
@@ -706,22 +708,39 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- 工具条：全部作用于当前标签页 -->
+    <!-- 工具条：全部作用于当前标签页。
+         「格式化 / 压缩 / 键排序」是命令，蓝底只表示**当前文档处于哪种形态**；
+         用一层浅表面（bg-active）而不是强调色实心块 —— 实心蓝读起来像「该点这个」。 -->
     <div class="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-2">
-      <button class="launcher-btn" :class="{ primary: !cur.minify }" title="格式化并改写文档" @click="reformat('pretty', '已格式化')">
+      <button
+        class="launcher-btn"
+        :class="{ 'bg-active text-fg': !cur.minify }"
+        title="格式化并改写文档"
+        @click="reformat('pretty', '已格式化')"
+      >
         <UiIcon name="braces" :size="13" />格式化
       </button>
-      <button class="launcher-btn" :class="{ primary: cur.minify }" title="压缩成一行并改写文档" @click="reformat('minify', '已压缩')">
+      <button
+        class="launcher-btn"
+        :class="{ 'bg-active text-fg': cur.minify }"
+        title="压缩成一行并改写文档"
+        @click="reformat('minify', '已压缩')"
+      >
         <UiIcon name="minus" :size="13" />压缩
       </button>
-      <button class="launcher-btn" :class="{ primary: cur.sortKeys }" title="对象键排序并改写文档" @click="toggleSort">
+      <button
+        class="launcher-btn"
+        :class="{ 'bg-active text-fg': cur.sortKeys }"
+        title="对象键排序并改写文档"
+        @click="toggleSort"
+      >
         <UiIcon name="sortAsc" :size="13" />键排序
       </button>
 
       <div class="mx-1 h-4 w-px bg-line" />
 
       <ToolMenu label="Unicode" icon="languages" :items="unicodeItems" @pick="onUnicodeAction" />
-      <ToolMenu :label="'\\ 转义'" :items="escapeItems" @pick="onEscapeAction" />
+      <ToolMenu label="转义" icon="terminal" :items="escapeItems" @pick="onEscapeAction" />
 
       <div class="mx-1 h-4 w-px bg-line" />
 
@@ -742,8 +761,8 @@ onUnmounted(() => {
         <div class="flex min-w-0 flex-col" :style="{ width: split + '%' }">
           <div class="flex items-center gap-2 border-b border-line px-3 py-1.5 text-[11.5px] text-muted">
             <span>输入</span>
-            <span v-if="t.result?.stats" class="text-faint">{{ t.result.stats.inChars.toLocaleString() }} 字符</span>
-            <span class="ml-auto text-faint">{{ modLabel }}Z 撤销 · Tab 缩进 · 可直接拖入 .json 文件</span>
+            <span v-if="t.result?.stats" class="text-muted">{{ t.result.stats.inChars.toLocaleString() }} 字符</span>
+            <span class="ml-auto text-muted">{{ modLabel }}Z 撤销 · Tab 缩进 · 可直接拖入 .json 文件</span>
           </div>
           <JsonEditor
             :ref="(el) => bindRef(editorRefs, t.id, el)"
@@ -761,16 +780,14 @@ onUnmounted(() => {
         <div class="w-px cursor-col-resize bg-line hover:bg-accent" @mousedown="startDrag" />
 
         <div class="flex min-w-0 flex-1 flex-col">
-          <!-- 输出栏工具条：树控件（全展开 / 全折叠 / 字号，对齐 bejson） -->
-          <div class="flex items-center gap-1.5 border-b border-line px-3 py-1.5">
-            <span class="flex items-center gap-1 text-[11.5px] text-muted">
-              <UiIcon name="braces" :size="13" />树视图
-            </span>
+          <!-- 右栏只有半扇窗宽（720 窗口下约 388px）：这一行必须能缩。
+               标签不换行、三个动作收成图标，剩下的交给 flex-wrap 兜底 —— 
+               原来写死一行时「树视图」被挤成 29px 宽、竖着折了四行。 -->
+          <div class="flex flex-wrap items-center gap-0.5 border-b border-line px-3 py-1.5">
+            <span class="shrink-0 whitespace-nowrap text-[11.5px] text-muted">树视图</span>
 
-            <div class="mx-0.5 h-4 w-px bg-line" />
-
-            <button class="launcher-btn ghost" @click="treeRefs.get(t.id)?.expandAll()">全展开</button>
-            <button class="launcher-btn ghost" @click="treeRefs.get(t.id)?.collapseAll()">全折叠</button>
+            <button class="launcher-btn ghost px-1.5" @click="treeRefs.get(t.id)?.expandAll()">全展开</button>
+            <button class="launcher-btn ghost px-1.5" @click="treeRefs.get(t.id)?.collapseAll()">全折叠</button>
 
             <!-- 缩进是文档属性（每页各记一份），所以跟着本页走 -->
             <select
@@ -785,15 +802,15 @@ onUnmounted(() => {
               <option v-for="size in fontSizes" :key="size" :value="size">{{ size }}px</option>
             </select>
 
-            <div class="ml-auto flex items-center gap-1">
-              <button class="launcher-btn ghost !px-1.5" title="复制选中节点的值" @click="treeRefs.get(t.id)?.copyValue()">
-                <UiIcon name="copy" :size="12" />值
+            <div class="ml-auto flex shrink-0 items-center gap-1">
+              <button class="launcher-btn ghost !px-1" title="复制选中节点的值" @click="treeRefs.get(t.id)?.copyValue()">
+                <UiIcon name="copy" :size="12" />
               </button>
-              <button class="launcher-btn ghost !px-1.5" title="复制选中节点的路径" @click="treeRefs.get(t.id)?.copyPath()">
-                <UiIcon name="link" :size="12" />路径
+              <button class="launcher-btn ghost !px-1" title="复制选中节点的路径" @click="treeRefs.get(t.id)?.copyPath()">
+                <UiIcon name="link" :size="12" />
               </button>
-              <button class="launcher-btn ghost !px-1.5" title="在编辑器里定位这一行" @click="treeRefs.get(t.id)?.revealSelected()">
-                <UiIcon name="external" :size="12" />定位
+              <button class="launcher-btn ghost !px-1" title="在编辑器里定位这一行" @click="treeRefs.get(t.id)?.revealSelected()">
+                <UiIcon name="external" :size="12" />
               </button>
             </div>
           </div>
@@ -809,7 +826,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-if="t.treeIssue" class="flex items-center gap-2 border-b border-line px-3 py-2 text-[12px] text-muted">
+          <div v-if="t.treeIssue" class="flex items-center gap-2 border-b border-line px-3 py-2 text-[12.5px] text-muted">
             <UiIcon name="info" :size="13" />{{ t.treeIssue }}
           </div>
 
@@ -830,7 +847,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 状态栏 -->
-    <footer class="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line px-3 py-1.5 text-[11.5px] text-faint">
+    <PageFooter>
       <span v-if="issue" class="text-danger">解析失败</span>
       <span v-else-if="output">已格式化</span>
       <span v-else>等待输入</span>
@@ -850,7 +867,7 @@ onUnmounted(() => {
         <span><span class="launcher-kbd">{{ modLabel }}</span> <span class="launcher-kbd">↵</span> 格式化</span>
         <span>无损保留数字精度</span>
       </span>
-    </footer>
+    </PageFooter>
 
     <HistoryDialog
       v-if="historyOpen"

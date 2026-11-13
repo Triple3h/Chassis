@@ -52,11 +52,11 @@ const protectedIds = computed(() => {
       <span class="text-faint"><UiIcon name="lock" :size="13" /></span>
       <span class="min-w-0 flex-1 truncate text-[12.5px] font-semibold">外部条目</span>
       <span class="launcher-chip" title="不属于本插件托管区的内容，插件不会去改它们">非插件添加</span>
-      <span class="text-[11px] text-faint">{{ entries.length }} 条</span>
+      <span class="text-[11px] text-muted">{{ entries.length }} 条</span>
       <UiIcon
         name="chevronDown"
         :size="13"
-        class="shrink-0 text-faint transition-transform"
+        class="shrink-0 text-muted transition-transform"
         :class="{ '-rotate-90': !expanded }"
       />
     </div>
@@ -66,7 +66,7 @@ const protectedIds = computed(() => {
         {{ raw ? `另有 ${raw} 行读不出结构。` : '' }}系统与其它程序维护的行，收进块后才归本插件调度。
       </div>
 
-      <div v-if="!matched.length" class="px-3 py-2 text-[12px] text-muted">
+      <div v-if="!matched.length" class="px-3 py-2 text-[12.5px] text-muted">
         {{ query ? '没有匹配的记录' : '托管区之外没有能识别的记录' }}
       </div>
 
@@ -81,13 +81,13 @@ const protectedIds = computed(() => {
             {{ line.ip }}
           </span>
           <span class="min-w-0 flex-1 truncate text-[12.5px]" :title="line.names.join(' ')">
-            <span class="text-accent">{{ line.names.join('  ') }}</span>
+            <span class="text-accentink">{{ line.names.join('  ') }}</span>
             <span v-if="line.comment" class="ml-2 text-[11px] text-muted"># {{ line.comment }}</span>
           </span>
           <span v-if="conflicts.has(line.id)" class="shrink-0 text-warn" title="这个域名在别处指向了另一个 IP">
             <UiIcon name="alert" :size="12" />
           </span>
-          <span v-if="protectedIds.has(line.id)" class="shrink-0 text-faint" title="系统关键条目，不建议挪走">
+          <span v-if="protectedIds.has(line.id)" class="shrink-0 text-muted" title="系统关键条目，不建议挪走">
             <UiIcon name="lock" :size="12" />
           </span>
           <button
@@ -99,14 +99,14 @@ const protectedIds = computed(() => {
             收进
           </button>
         </div>
-        <div v-if="hiddenCount" class="px-3 py-1 text-[11.5px] text-faint">还有 {{ hiddenCount }} 条没显示</div>
+        <div v-if="hiddenCount" class="px-3 py-1 text-[11.5px] text-muted">还有 {{ hiddenCount }} 条没显示</div>
       </div>
 
       <div class="flex h-9 items-center gap-2 border-t border-line px-2.5">
         <button class="launcher-btn" :disabled="!adoptable.length" @click="emit('adopt-all')">
           <UiIcon name="download" :size="12" /> 全部收进新块
         </button>
-        <span class="min-w-0 flex-1 truncate text-[11px] text-faint">系统回环行留在外面</span>
+        <span class="min-w-0 flex-1 truncate text-[11px] text-muted">系统回环行留在外面</span>
       </div>
     </div>
   </div>

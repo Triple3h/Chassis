@@ -121,7 +121,7 @@ async function copyCommand() {
   >
     <div class="flex flex-col gap-3">
       <!-- 目标信息 -->
-      <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg border border-line bg-panel2 p-3 text-[12px]">
+      <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg border border-line bg-panel2 p-3 text-[12.5px]">
         <div class="flex justify-between"><span class="text-muted">PID</span><span class="launcher-mono">{{ target.pid }}</span></div>
         <div class="flex justify-between"><span class="text-muted">用户</span><span class="launcher-mono">{{ target.user || '—' }}</span></div>
         <div class="flex justify-between">
@@ -162,7 +162,7 @@ async function copyCommand() {
       </div>
 
       <!-- 系统组件：需要显式勾选 -->
-      <label v-if="caution && phase === 'confirm'" class="flex items-center gap-2 text-[12px]">
+      <label v-if="caution && phase === 'confirm'" class="flex items-center gap-2 text-[12.5px]">
         <input v-model="acknowledged" type="checkbox" class="accent-[var(--launcher-warn,orange)]" />
         我了解风险，仍要终止
       </label>
@@ -188,7 +188,7 @@ async function copyCommand() {
       </div>
 
       <!-- 完成 / 失败 -->
-      <div v-if="phase === 'done'" class="flex items-center gap-2 rounded-lg border border-line bg-panel2 p-2.5 text-[12px] text-success">
+      <div v-if="phase === 'done'" class="flex items-center gap-2 rounded-lg border border-line bg-panel2 p-2.5 text-[12.5px] text-success">
         <UiIcon name="check" :size="14" />
         {{ outcome?.notFound ? '进程已不存在（可能刚刚自己退出）' : `已终止「${target.name}」` }}
       </div>
@@ -197,7 +197,7 @@ async function copyCommand() {
         <div class="mt-0.5 break-all">{{ failure }}</div>
       </div>
 
-      <div v-if="phase === 'busy'" class="flex items-center gap-2 text-[12px] text-muted">
+      <div v-if="phase === 'busy'" class="flex items-center gap-2 text-[12.5px] text-muted">
         <UiIcon name="refresh" :size="13" class="animate-spin" />
         {{ busyForce ? '正在强制终止…' : '正在发送终止信号…' }}
       </div>

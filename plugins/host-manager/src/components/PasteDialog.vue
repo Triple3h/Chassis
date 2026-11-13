@@ -75,7 +75,7 @@ async function copyInput() {
         spellcheck="false"
       />
 
-      <div class="flex flex-wrap items-center gap-2 text-[12px]">
+      <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
         <button class="launcher-btn" @click="pullFromClipboard">
           <UiIcon name="clipboard" :size="12" /> 从剪贴板读取
         </button>
@@ -85,7 +85,7 @@ async function copyInput() {
         </span>
       </div>
 
-      <div class="flex items-center gap-2 text-[12px]">
+      <div class="flex items-center gap-2 text-[12.5px]">
         <span class="shrink-0 text-muted">收进</span>
         <UiSelect v-model="target" :options="options" />
         <input
@@ -99,11 +99,11 @@ async function copyInput() {
 
       <div v-if="preview.length" class="launcher-scroll max-h-40 rounded-lg border border-line bg-panel2 p-2">
         <div v-for="(entry, i) in preview" :key="i" class="launcher-mono truncate py-0.5 text-[11.5px]">
-          <span :class="entry.disabled ? 'text-faint' : 'text-fg'">{{ entry.disabled ? '# ' : '' }}{{ entry.ip }}</span>
-          <span class="text-accent"> {{ entry.names.join(' ') }}</span>
+          <span :class="entry.disabled ? 'text-muted' : 'text-fg'">{{ entry.disabled ? '# ' : '' }}{{ entry.ip }}</span>
+          <span class="text-accentink"> {{ entry.names.join(' ') }}</span>
           <span v-if="entry.comment" class="text-muted"> # {{ entry.comment }}</span>
         </div>
-        <div v-if="parsed.entries.length > preview.length" class="pt-1 text-[11.5px] text-faint">
+        <div v-if="parsed.entries.length > preview.length" class="pt-1 text-[11.5px] text-muted">
           …还有 {{ parsed.entries.length - preview.length }} 条
         </div>
       </div>
